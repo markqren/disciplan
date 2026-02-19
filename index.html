@@ -66,7 +66,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span class="dbst" id="dbStatus" style="color:var(--y)">â— connecting...</span>
+    <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
   </div>
   <div class="tabs" id="tabBar"></div>
 </div>
@@ -74,9 +74,9 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="mn" id="content"></div>
 
 <script>
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // CONFIG
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 const SB_URL = "https://mjuannepfodstbsxweuc.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qdWFubmVwZm9kc3Ric3h3ZXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzODcwMzksImV4cCI6MjA4Njk2MzAzOX0.6TqLUAhvWMjDunpird0_9FMnDiT4qRuYaH6XbXmKOnA";
@@ -93,9 +93,9 @@ async function sbRPC(fn,params={}){
   return r.json();
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // CONSTANTS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 const PARENT_CATS=["entertainment","food","home","health","personal","transportation","utilities","financial","other"];
 const SUB_MAP={food:["groceries","restaurant"],home:["rent","furniture"],personal:["clothes","tech"]};
@@ -127,15 +127,15 @@ function h(tag,attrs,children){
 let charts={};
 function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=document.getElementById(id);if(!ctx)return;charts[id]=new Chart(ctx,cfg)}
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // STATE
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 let state={tab:"income",year:2025,txnCount:0,page:0};
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // TABS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["tags","tags"],["ledger","ledger"]];
 
@@ -164,13 +164,13 @@ function statCard(icon,label,value,color){
   return d;
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // ENTRY TAB
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 function renderEntry(el){
   const card=h("div",{class:"cd"});
-  card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">New Transaction</h3><span id="okMsg" class="ok-msg hidden">âœ“ Saved to Supabase</span></div>`;
+  card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">New Transaction</h3><span id="okMsg" class="ok-msg hidden">✓ Saved to Supabase</span></div>`;
 
   const t=today();
   let f={date:t,desc:"",cat:"groceries",amt:"",cur:"USD",pt:"Chase Sapphire",tag:"",fx:"",ss:t,se:getDefEnd("groceries",t),seManual:false};
@@ -240,7 +240,7 @@ function renderEntry(el){
       f.desc="";f.amt="";f.tag="";f.fx="";f.seManual=false;
       previewEl.classList.add("hidden");
       state.txnCount++;
-      document.getElementById("dbStatus").textContent=`â— ${state.txnCount.toLocaleString()} txns`;
+      document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
     }catch(e){alert("Error: "+e.message)}
     submitBtn.textContent="Add Transaction";
   }},"Add Transaction");
@@ -257,13 +257,13 @@ function renderEntry(el){
   el.append(card);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // INCOME STATEMENT
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 async function renderIS(el){
   el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px">
-    <div><h2>Income Statement</h2><p class="sub">Accrual basis Â· USD Â· ${state.year} Â· Live from Supabase</p></div>
+    <div><h2>Income Statement</h2><p class="sub">Accrual basis · USD · ${state.year} · Live from Supabase</p></div>
     <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
 
   const yt=document.getElementById("yearTabs");
@@ -299,10 +299,10 @@ async function renderIS(el){
 
     // Stats
     const stats=h("div",{class:"g4"});
-    stats.append(statCard("ðŸ’µ","income",fmtN(totI),"var(--b)"));
-    stats.append(statCard("ðŸ“Š","expenses",fmtN(totE),"var(--r)"));
-    stats.append(statCard("âœ¨","net savings",fmtN(totI-totE),"var(--g)"));
-    stats.append(statCard("ðŸ“ˆ","savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"â€”","var(--y)"));
+    stats.append(statCard("💵","income",fmtN(totI),"var(--b)"));
+    stats.append(statCard("📊","expenses",fmtN(totE),"var(--r)"));
+    stats.append(statCard("✨","net savings",fmtN(totI-totE),"var(--g)"));
+    stats.append(statCard("📈","savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
     body.append(stats);
 
     // Cash flow chart
@@ -337,9 +337,12 @@ async function renderIS(el){
 
     // Detail table with subcategories
     const tblCard=h("div",{class:"cd"});
-    let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table><thead><tr><th style="min-width:110px">Category</th>`;
+    const activeMonths=mData.filter(m=>m.totE>0||m.inc>0).length||1;
+    let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table style="table-layout:fixed"><colgroup><col style="width:110px">`;
+    for(let i=0;i<12;i++)thtml+=`<col>`;
+    thtml+=`<col style="width:70px"><col style="width:70px"></colgroup><thead><tr><th>Category</th>`;
     ML.forEach(m=>thtml+=`<th class="r">${m}</th>`);
-    thtml+=`<th class="r" style="font-weight:700">Total</th></tr></thead><tbody>`;
+    thtml+=`<th class="r" style="font-weight:700">Total</th><th class="r" style="font-weight:700">Avg</th></tr></thead><tbody>`;
 
     const allRows=[];
     for(const p of PARENT_CATS){
@@ -356,23 +359,28 @@ async function renderIS(el){
     }
 
     for(const r of allRows){
-      thtml+=`<tr><td style="padding-left:${r.par?4:20}px;color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.5)"};font-weight:${r.par?600:400};font-size:${r.par?12:11}px"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}</td>`;
+      const avg=r.t/activeMonths;
+      thtml+=`<tr><td style="padding-left:${r.par?4:20}px;color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.5)"};font-weight:${r.par?600:400};font-size:${r.par?12:11}px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}</td>`;
       r.m.forEach(v=>thtml+=`<td class="r m" style="color:${v<-0.5?"var(--g)":v>0.5?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.15)"}">${Math.abs(v)>0.5?fmtN(Math.round(v)):""}</td>`);
-      thtml+=`<td class="r m" style="font-weight:${r.par?700:500};color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.6)"}">${fmtN(Math.round(r.t))}</td></tr>`;
+      thtml+=`<td class="r m" style="font-weight:${r.par?700:500};color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.6)"}">${fmtN(Math.round(r.t))}</td>`;
+      thtml+=`<td class="r m" style="color:rgba(255,255,255,0.4)">${fmtN(Math.round(avg))}</td></tr>`;
     }
 
     // Totals rows
     thtml+=`<tr style="border-top:2px solid rgba(255,255,255,0.1)"><td style="font-weight:700;color:var(--r)">Total Expenses</td>`;
     mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtN(Math.round(m.totE))}</td>`);
-    thtml+=`<td class="r m" style="color:var(--r);font-weight:700">${fmtN(Math.round(totE))}</td></tr>`;
+    thtml+=`<td class="r m" style="color:var(--r);font-weight:700">${fmtN(Math.round(totE))}</td>`;
+    thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtN(Math.round(totE/activeMonths))}</td></tr>`;
 
     thtml+=`<tr><td style="font-weight:700;color:var(--b)">Income</td>`;
     mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtN(Math.round(m.inc))}</td>`);
-    thtml+=`<td class="r m" style="color:var(--b);font-weight:700">${fmtN(Math.round(totI))}</td></tr>`;
+    thtml+=`<td class="r m" style="color:var(--b);font-weight:700">${fmtN(Math.round(totI))}</td>`;
+    thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtN(Math.round(totI/activeMonths))}</td></tr>`;
 
     thtml+=`<tr style="border-top:1px solid rgba(255,255,255,0.08)"><td style="font-weight:700;color:var(--g)">Net Savings</td>`;
     mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtN(Math.round(m.net))}</td>`);
-    thtml+=`<td class="r m" style="color:var(--g);font-weight:700">${fmtN(Math.round(totI-totE))}</td></tr>`;
+    thtml+=`<td class="r m" style="color:var(--g);font-weight:700">${fmtN(Math.round(totI-totE))}</td>`;
+    thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtN(Math.round((totI-totE)/activeMonths))}</td></tr>`;
 
     thtml+=`</tbody></table></div>`;
     tblCard.innerHTML=thtml;
@@ -380,9 +388,9 @@ async function renderIS(el){
   }catch(e){document.getElementById("isBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error loading: ${e.message}</div>`}
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // BALANCE SHEET
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 async function renderBS(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Balance Sheet</h2><p class="sub">Loading...</p></div><div id="bsBody"></div>`;
@@ -392,7 +400,7 @@ async function renderBS(el){
 
     const dates=[...new Set(snaps.map(s=>s.snapshot_date))].sort().reverse();
     const latest=dates[0];
-    el.querySelector(".sub").textContent=`As of ${fmtD(latest)} Â· ${dates.length} snapshots Â· USD`;
+    el.querySelector(".sub").textContent=`As of ${fmtD(latest)} · ${dates.length} snapshots · USD`;
 
     const byType={checking:[],savings:[],credit:[],investment:[],liability:[],other:[]};
     for(const s of snaps){
@@ -408,9 +416,9 @@ async function renderBS(el){
     const nw=totA-totL;
 
     const stats=h("div",{class:"g4"});
-    stats.append(statCard("ðŸ¦","total assets",fmtN(totA),"var(--b)"));
-    stats.append(statCard("ðŸ’³","total liabilities",fmtN(totL),"var(--r)"));
-    stats.append(statCard("ðŸ’Ž","net worth",fmtN(nw),"var(--g)"));
+    stats.append(statCard("🏦","total assets",fmtN(totA),"var(--b)"));
+    stats.append(statCard("💳","total liabilities",fmtN(totL),"var(--r)"));
+    stats.append(statCard("💎","net worth",fmtN(nw),"var(--g)"));
     body.append(stats);
 
     // NW over time
@@ -450,9 +458,9 @@ async function renderBS(el){
   }catch(e){document.getElementById("bsBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error: ${e.message}</div>`}
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // TAGS
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 async function renderTags(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsBody"></div>`;
@@ -463,14 +471,14 @@ async function renderTags(el){
     for(const t of txns){if(!t.tag)continue;if(!tm[t.tag])tm[t.tag]={total:0,count:0,cats:{}};tm[t.tag].count++;if(t.category_id!=="income"&&t.category_id!=="investment"){tm[t.tag].total+=t.amount_usd;tm[t.tag].cats[t.category_id]=(tm[t.tag].cats[t.category_id]||0)+t.amount_usd}}
 
     const tags=tagRows.map(t=>({...t,...(tm[t.name]||{total:0,count:0,cats:{}})})).sort((a,b)=>b.total-a.total);
-    el.querySelector(".sub").textContent=`Click any tag for breakdown Â· ${tags.length} tags`;
+    el.querySelector(".sub").textContent=`Click any tag for breakdown · ${tags.length} tags`;
     const body=document.getElementById("tagsBody");body.innerHTML="";
     const grid=h("div",{class:"tag-grid"});
 
     tags.forEach((tag,i)=>{
       const card=h("div",{class:"tag-card",style:{borderLeftColor:TCOLS[i%TCOLS.length],cursor:tag.total>0?"pointer":"default"},onClick:()=>tag.total>0&&showTagDetail(tag)});
       let inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:14px;font-weight:600;color:#fff">${tag.name}</div>`;
-      if(tag.start_date)inner+=`<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px">${fmtD(tag.start_date)} â€“ ${fmtD(tag.end_date)}</div>`;
+      if(tag.start_date)inner+=`<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px">${fmtD(tag.start_date)} – ${fmtD(tag.end_date)}</div>`;
       inner+=`</div><span style="font-size:10px;color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">${tag.count||0} txns</span></div>`;
       if(tag.total>0){
         const days=tag.start_date&&tag.end_date?Math.max(1,Math.floor((new Date(tag.end_date)-new Date(tag.start_date))/864e5)+1):0;
@@ -502,10 +510,10 @@ async function showTagDetail(tag){
 
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   let mhtml=`<div style="display:flex;justify-content:space-between;margin-bottom:20px"><div><h2 style="font-size:22px">${tag.name}</h2>`;
-  if(tag.start_date)mhtml+=`<p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${fmtD(tag.start_date)} â€“ ${fmtD(tag.end_date)}</p>`;
-  mhtml+=`</div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">âœ•</button></div>`;
+  if(tag.start_date)mhtml+=`<p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${fmtD(tag.start_date)} – ${fmtD(tag.end_date)}</p>`;
+  mhtml+=`</div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">✕</button></div>`;
   mhtml+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px">`;
-  [["Total",fmtF(total),"var(--r)"],["Days",days,"var(--b)"],["Per Day",days>0?fmtF(total/days):"â€”","var(--g)"]].forEach(([l,v,c])=>mhtml+=`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`);
+  [["Total",fmtF(total),"var(--r)"],["Days",days,"var(--b)"],["Per Day",days>0?fmtF(total/days):"—","var(--g)"]].forEach(([l,v,c])=>mhtml+=`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`);
   mhtml+=`</div>`;
 
   Object.entries(cats).filter(([,v])=>Math.abs(v)>0.5).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).forEach(([cat,val])=>{
@@ -523,9 +531,9 @@ async function showTagDetail(tag){
   document.body.append(bg);
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // LEDGER
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 async function renderLedger(el){
   const PS=50;
@@ -562,9 +570,9 @@ async function renderLedger(el){
   loadPage();
 }
 
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // INIT
-// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 async function init(){
   renderTabs();
@@ -573,10 +581,10 @@ async function init(){
     if(!r.ok)throw new Error(r.status);
     const count=r.headers.get("content-range")?.split("/")[1];
     state.txnCount=count?parseInt(count):0;
-    document.getElementById("dbStatus").textContent=`â— ${state.txnCount.toLocaleString()} txns`;
+    document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
     document.getElementById("dbStatus").style.color="var(--g)";
   }catch(e){
-    document.getElementById("dbStatus").textContent="â— disconnected";
+    document.getElementById("dbStatus").textContent="● disconnected";
     document.getElementById("dbStatus").style.color="var(--r)";
   }
   renderContent();
@@ -584,7 +592,7 @@ async function init(){
 init();
 </script>
 
-<div class="foot">the disciplan Â· accrual-based personal finance Â· connected to supabase</div>
+<div class="foot">the disciplan · accrual-based personal finance · connected to supabase</div>
 
 </body>
 </html>
