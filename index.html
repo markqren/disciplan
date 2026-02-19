@@ -466,7 +466,7 @@ async function renderTags(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsBody"></div>`;
   try{
     const tagRows=await sb("tags?order=start_date.desc");
-    const txns=await sb("transactions?select=tag,amount_usd,category_id&tag=neq.&order=tag");
+    const txns=await sb("transactions?select=tag,amount_usd,category_id&tag=neq.&order=tag&limit=10000");
     const tm={};
     for(const t of txns){if(!t.tag)continue;if(!tm[t.tag])tm[t.tag]={total:0,count:0,cats:{}};tm[t.tag].count++;if(t.category_id!=="income"&&t.category_id!=="investment"){tm[t.tag].total+=t.amount_usd;tm[t.tag].cats[t.category_id]=(tm[t.tag].cats[t.category_id]||0)+t.amount_usd}}
 
