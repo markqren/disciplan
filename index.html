@@ -58,7 +58,7 @@ select.inp{cursor:pointer;appearance:auto}
 .acct-hdr{display:flex;justify-content:space-between;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
 .acct-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
 .foot{margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.04);text-align:center;font-size:11px;color:rgba(255,255,255,0.15)}
-@media(max-width:700px){.g3,.g2{grid-template-columns:1fr}.chrt{height:220px}}
+@media(max-width:700px){.g3,.g2{grid-template-columns:1fr}.chrt{height:220px}.hide-m{display:none!important}table{font-size:11px}th,td{padding:7px 4px}.st-v{font-size:20px}.tabs{gap:3px}.tab{padding:5px 10px;font-size:11px}}
 </style>
 </head>
 <body>
@@ -137,7 +137,7 @@ let state={tab:"income",year:2025,txnCount:0,page:0};
 // TABS
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["tags","tags"],["ledger","ledger"]];
+const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["tags","tags"],["ledger","ledger"],["export","export"]];
 
 function renderTabs(){
   const bar=document.getElementById("tabBar");
@@ -152,10 +152,12 @@ function renderContent(){
   const el=document.getElementById("content");
   el.innerHTML="";
   if(state.tab==="entry")renderEntry(el);
+  else if(state.tab==="income"&&state.year==="all")renderCrossYear(el);
   else if(state.tab==="income")renderIS(el);
   else if(state.tab==="balance")renderBS(el);
   else if(state.tab==="tags")renderTags(el);
   else if(state.tab==="ledger")renderLedger(el);
+  else if(state.tab==="export")renderExport(el);
 }
 
 function statCard(icon,label,value,color){
@@ -267,7 +269,7 @@ async function renderIS(el){
     <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
 
   const yt=document.getElementById("yearTabs");
-  [2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;renderContent()}},String(y));yt.append(b)});
+  ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;renderContent()}},y==="all"?"All":String(y));yt.append(b)});
 
   try{
     const data=await sbRPC("get_income_statement",{p_year:state.year});
@@ -466,7 +468,17 @@ async function renderTags(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsBody"></div>`;
   try{
     const tagRows=await sb("tags?order=start_date.desc");
-    const txns=await sb("transactions?select=tag,amount_usd,category_id&tag=neq.&order=tag&limit=10000");
+    // Paginate to get ALL tagged transactions (Supabase caps at 1000 per request)
+    let allTxns=[];
+    let offset=0;
+    const batchSize=1000;
+    while(true){
+      const batch=await sb(`transactions?select=tag,amount_usd,category_id&tag=not.is.null&tag=neq.&order=id&limit=${batchSize}&offset=${offset}`);
+      allTxns=allTxns.concat(batch);
+      if(batch.length<batchSize)break;
+      offset+=batchSize;
+    }
+    const txns=allTxns;
     const tm={};
     for(const t of txns){if(!t.tag)continue;if(!tm[t.tag])tm[t.tag]={total:0,count:0,cats:{}};tm[t.tag].count++;if(t.category_id!=="income"&&t.category_id!=="investment"){tm[t.tag].total+=t.amount_usd;tm[t.tag].cats[t.category_id]=(tm[t.tag].cats[t.category_id]||0)+t.amount_usd}}
 
@@ -552,15 +564,15 @@ async function renderLedger(el){
     if(txns.length<PS)next.disabled=true;
     nav.append(next);
 
-    let thtml=`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th>Service Period</th><th class="r">Daily Cost</th><th>Tag</th></tr></thead><tbody>`;
+    let thtml=`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead><tbody>`;
     txns.forEach(t=>{
       thtml+=`<tr>
         <td class="m" style="color:rgba(255,255,255,0.55);white-space:nowrap">${fmtD(t.date)}</td>
         <td style="color:rgba(255,255,255,0.8);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>
         <td><span class="badge" style="background:${(CC[t.category_id]||"#666")}22;color:${CC[t.category_id]||"#888"}">${t.category_id}</span></td>
         <td class="r m" style="color:${t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}">${fmtF(t.amount_usd)}${t.currency!=="USD"?`<span style="color:rgba(255,255,255,0.25);margin-left:3px;font-size:10px">${t.currency}</span>`:""}</td>
-        <td class="m" style="color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.service_start)}\u2013${fmtD(t.service_end)}${t.service_days>1?`<span style="margin-left:3px;color:rgba(255,255,255,0.2)">(${t.service_days}d)</span>`:""}</td>
-        <td class="r m" style="color:var(--g)">${fmtF(t.daily_cost)}</td>
+        <td class="m hide-m" style="color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.service_start)}\u2013${fmtD(t.service_end)}${t.service_days>1?`<span style="margin-left:3px;color:rgba(255,255,255,0.2)">(${t.service_days}d)</span>`:""}</td>
+        <td class="r m hide-m" style="color:var(--g)">${fmtF(t.daily_cost)}</td>
         <td style="color:rgba(255,255,255,0.35);font-size:11px">${t.tag?`<span style="background:rgba(255,255,255,0.06);padding:2px 7px;border-radius:4px">${t.tag}</span>`:""}</td>
       </tr>`;
     });
@@ -569,6 +581,113 @@ async function renderLedger(el){
   }
   loadPage();
 }
+
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+// CROSS-YEAR SUMMARY
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+async function renderCrossYear(el){
+  el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px">
+    <div><h2>Income Statement</h2><p class="sub">Cross-year summary · USD · All Years</p></div>
+    <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
+  const yt=document.getElementById("yearTabs");
+  ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;renderContent()}},y==="all"?"All":String(y));yt.append(b)});
+
+  try{
+    const years=[2017,2018,2019,2020,2021,2022,2023,2024,2025,2026];
+    const results=await Promise.all(years.map(y=>sbRPC("get_income_statement",{p_year:y})));
+    const body=document.getElementById("isBody");body.innerHTML="";
+
+    const yearData=years.map((y,i)=>{
+      const data=results[i];
+      let inc=0,exp=0;
+      const cats={};
+      for(const r of data){
+        if(r.category_id==="income"||r.category_id==="investment"){inc+=Math.abs(r.total_amount||0);continue}
+        exp+=(r.total_amount||0);
+        const p=Object.entries(SUB_MAP).find(([,subs])=>subs.includes(r.category_id));
+        const pid=p?p[0]:r.category_id;
+        cats[pid]=(cats[pid]||0)+(r.total_amount||0);
+      }
+      return{year:y,inc,exp,net:inc-exp,rate:inc>0?(inc-exp)/inc:0,cats};
+    }).filter(d=>d.inc>0||d.exp>0);
+
+    const totI=yearData.reduce((s,d)=>s+d.inc,0);
+    const totE=yearData.reduce((s,d)=>s+d.exp,0);
+    const stats=h("div",{class:"g4"});
+    stats.append(statCard("💵","total income",fmtN(totI),"var(--b)"));
+    stats.append(statCard("📊","total expenses",fmtN(totE),"var(--r)"));
+    stats.append(statCard("✨","total saved",fmtN(totI-totE),"var(--g)"));
+    stats.append(statCard("📈","avg savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
+    body.append(stats);
+
+    const chartCard=h("div",{class:"cd"});
+    chartCard.innerHTML=`<h3>Annual Income vs Expenses</h3><div class="chrt"><canvas id="crossYearChart"></canvas></div>`;
+    body.append(chartCard);
+    setTimeout(()=>makeChart("crossYearChart",{type:"bar",data:{labels:yearData.map(d=>d.year),datasets:[
+      {label:"Income",data:yearData.map(d=>d.inc),backgroundColor:"rgba(74,111,165,0.7)",borderRadius:4},
+      {label:"Expenses",data:yearData.map(d=>d.exp),backgroundColor:"rgba(224,122,95,0.7)",borderRadius:4},
+      {label:"Net Savings",data:yearData.map(d=>d.net),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:4}
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.6)",font:{size:11}}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
+
+    const tblCard=h("div",{class:"cd"});
+    let thtml=`<h3>Annual Detail</h3><div style="overflow-x:auto"><table><thead><tr><th>Year</th><th class="r">Income</th><th class="r">Expenses</th><th class="r">Net</th><th class="r">Rate</th>`;
+    PARENT_CATS.forEach(c=>thtml+=`<th class="r hide-m">${c[0].toUpperCase()+c.slice(1,5)}</th>`);
+    thtml+=`</tr></thead><tbody>`;
+    yearData.forEach(d=>{
+      thtml+=`<tr><td style="font-weight:600">${d.year}</td><td class="r m" style="color:var(--b)">${fmtN(Math.round(d.inc))}</td><td class="r m" style="color:var(--r)">${fmtN(Math.round(d.exp))}</td><td class="r m" style="color:var(--g)">${fmtN(Math.round(d.net))}</td><td class="r m" style="color:var(--y)">${(d.rate*100).toFixed(1)}%</td>`;
+      PARENT_CATS.forEach(c=>thtml+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.5)">${d.cats[c]?fmtN(Math.round(d.cats[c])):""}</td>`);
+      thtml+=`</tr>`;
+    });
+    thtml+=`</tbody></table></div>`;
+    tblCard.innerHTML=thtml;
+    body.append(tblCard);
+  }catch(e){document.getElementById("isBody").innerHTML=`<div class="cd" style="color:var(--r)">Error: ${e.message}</div>`}
+}
+
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+// EXPORT
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+async function renderExport(el){
+  el.innerHTML=`<div style="margin-bottom:16px"><h2>Export Data</h2><p class="sub">Back up your data for safekeeping</p></div>`;
+  const card=h("div",{class:"cd"});
+
+  function dlBtn(label,desc,fn){
+    const wrap=h("div",{style:{marginBottom:"16px"}});
+    wrap.innerHTML=`<div style="font-size:14px;font-weight:600;color:#fff;margin-bottom:4px">${label}</div><div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:10px">${desc}</div>`;
+    const btn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)",maxWidth:"280px"},onClick:fn},`Download ${label}`);
+    wrap.append(btn);
+    return wrap;
+  }
+
+  function download(name,content,type){
+    const blob=new Blob([content],{type});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=name;
+    a.click();
+  }
+
+  card.append(dlBtn("All Transactions (TSV)","Complete transaction history — paste into Numbers/Excel",async()=>{
+    let all=[];let off=0;
+    while(true){const b=await sb(`transactions?order=date.desc,id.desc&limit=1000&offset=${off}`);all=all.concat(b);if(b.length<1000)break;off+=1000}
+    const parentOf={};for(const[p,subs]of Object.entries(SUB_MAP))for(const s of subs)parentOf[s]=p;
+    const hdr=["Date","Service Start","Service End","Description","Category","Original Amount","Currency","Amount in CAD","Payment Type","Credit","Tags","Daily Cost"];
+    const rows=all.map(t=>[t.date,t.service_start,t.service_end,t.description,parentOf[t.category_id]||t.category_id,t.original_amount,t.currency,t.amount_cad,t.payment_type,t.credit,t.tag,t.daily_cost].join("\t"));
+    download(`disciplan-transactions-${today()}.tsv`,[hdr.join("\t"),...rows].join("\n"),"text/tab-separated-values");
+  }));
+
+  card.append(dlBtn("JSON Backup","Full database dump (transactions, accounts, tags, snapshots)",async()=>{
+    const [txns,accts,tags,snaps]=await Promise.all([
+      sb("transactions?order=date.desc&limit=50000"),sb("accounts?order=id"),sb("tags?order=start_date.desc"),sb("balance_snapshots?order=snapshot_date.desc&limit=500")
+    ]);
+    download(`disciplan-backup-${today()}.json`,JSON.stringify({exported:today(),transactions:txns,accounts:accts,tags,balance_snapshots:snaps},null,2),"application/json");
+  }));
+
+  el.append(card);
+}
+
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // INIT
