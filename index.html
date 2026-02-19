@@ -104,7 +104,7 @@ const CC={entertainment:"#E07A5F",food:"#F2CC8F",groceries:"#E9C46A",restaurant:
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];
 const CATS_LIST=[{id:"entertainment",l:"Entertainment"},{id:"food",l:"Food (other)"},{id:"groceries",l:"Groceries"},{id:"restaurant",l:"Restaurant"},{id:"home",l:"Home (other)"},{id:"rent",l:"Rent"},{id:"furniture",l:"Furniture"},{id:"health",l:"Health"},{id:"personal",l:"Personal (other)"},{id:"clothes",l:"Clothes"},{id:"tech",l:"Tech"},{id:"transportation",l:"Transportation"},{id:"utilities",l:"Utilities"},{id:"financial",l:"Financial"},{id:"other",l:"Other"},{id:"income",l:"Income"},{id:"investment",l:"Investment"}];
-const PTS=["Chase Chequing","Chase Sapphire","Chase United","AMEX Rose Gold","AMEX US","Bilt","Venmo","Apple","Capital One","Charles Schwab","Vanguard","eTrade","Cash","Transfer","Other"];
+const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,rent:"month",utilities:"month"};
@@ -756,7 +756,8 @@ async function renderCrossYear(el){
       const cats={};
       for(const r of data){
         const amt=parseFloat(r.amount)||0;
-        if(r.category_id==="income"||r.category_id==="investment"){inc+=Math.abs(amt);continue}
+        if(r.category_id==="income"){inc+=Math.abs(amt);continue}
+        if(r.category_id==="investment")continue;
         exp+=amt;
         const p=Object.entries(SUB_MAP).find(([,subs])=>subs.includes(r.category_id));
         const pid=p?p[0]:r.category_id;
@@ -775,13 +776,15 @@ async function renderCrossYear(el){
     body.append(stats);
 
     const chartCard=h("div",{class:"cd"});
-    chartCard.innerHTML=`<h3>Annual Income vs Expenses</h3><div class="chrt"><canvas id="crossYearChart"></canvas></div>`;
+    chartCard.innerHTML=`<h3>Annual Cash Flow</h3><div class="chrt"><canvas id="crossYearChart"></canvas></div>`;
     body.append(chartCard);
+    // Waterfall: income goes up from 0, expenses go down from income, net is the remainder
     setTimeout(()=>makeChart("crossYearChart",{type:"bar",data:{labels:yearData.map(d=>d.year),datasets:[
-      {label:"Income",data:yearData.map(d=>d.inc),backgroundColor:"rgba(74,111,165,0.7)",borderRadius:4},
-      {label:"Expenses",data:yearData.map(d=>d.exp),backgroundColor:"rgba(224,122,95,0.7)",borderRadius:4},
-      {label:"Net Savings",data:yearData.map(d=>d.net),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:4}
-    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.6)",font:{size:11}}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
+      {label:"Income",data:yearData.map(d=>Math.round(d.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderRadius:4,stack:"waterfall"},
+      {label:"Expenses",data:yearData.map(d=>-Math.round(d.exp)),backgroundColor:"rgba(224,122,95,0.75)",borderRadius:4,stack:"waterfall"},
+      {label:"Net Savings",data:yearData.map(d=>Math.round(d.net)),type:"bar",backgroundColor:"rgba(129,178,154,0.6)",borderRadius:4,borderColor:"rgba(129,178,154,0.9)",borderWidth:1},
+      {label:"Savings Rate",data:yearData.map(d=>d.rate*100),type:"line",borderColor:"var(--y)",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"var(--y)",fill:false,yAxisID:"y1"}
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.6)",font:{size:11}}}},scales:{x:{stacked:true,ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",min:0,max:100,ticks:{color:"rgba(242,204,143,0.6)",callback:v=>v+"%",font:{size:10}},grid:{display:false}}}}}),50);
 
     const tblCard=h("div",{class:"cd"});
     let thtml=`<h3>Annual Detail</h3><div style="overflow-x:auto"><table><thead><tr><th>Year</th><th class="r">Income</th><th class="r">Expenses</th><th class="r">Net</th><th class="r">Rate</th>`;
