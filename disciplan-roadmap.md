@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Feb 19, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Feb 20, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
@@ -11,6 +11,8 @@
 | FEA-03 | **Travel / Accommodation Category** | Feature | **High** | Hotels are currently lumped under Entertainment, which is misleading. Options: (a) add "accommodation" as a new subcategory under Entertainment, (b) create a top-level "Travel" category with subcategories (flights, hotels, activities). Either way, retroactively re-tag historical hotel transactions. Needs: update PARENT_CATS, SUB_MAP, CC color map, category dropdown, and batch-update existing transactions in Supabase. |
 | FEA-05 | **Investments Tab** | Feature | **High** | Portfolio view showing all holdings with current values and allocation. Entry point to log buy/sell transactions. Needs its own data model beyond accrual engine. Data exists in InvestmentsInvestments.csv and InvestmentsLatest_Price.csv. |
 | FEA-07 | **Handle "Investments" Category** | Feature | **Medium** | Some transactions are tagged as category "Investments" for unrealized gains. These need special treatment when the Investments tab is built—should not be double-counted as both income and portfolio value. Route into portfolio view instead of income statement. |
+| TD-03 | **Savings Rate % right-align** | To Do | **Low** | Yellow savings rate percentages in the monthly detail table are left-aligned — should be right-aligned like all other number columns. |
+| TD-04 | **Furniture default duration = 2 years** | To Do | **Low** | When entering a furniture transaction, the default service period should auto-fill to 2 years (730 days) from the purchase date. Currently uses the same default as other categories. |
 | DAT-01 | **Reconcile missing transactions** | Data | **Low** | ~73 transactions in original CSV not in SQL import. Most are 1-2 per tag (FX rounding). India missing $1,184 flight. "lacma" tag (3 txns) missing from tags table. |
 
 ---
@@ -21,7 +23,7 @@
 |----|------|------|----------|---------|
 | FEA-09 | **Plaid Integration** | Feature | High | Auto-sync bank account balances via Plaid API. Needs backend endpoint (Supabase Edge Function) for token management. Blocked by auth. |
 | FEA-10 | **Authentication** | Feature | High | Supabase Auth for user login. Currently open/single-user with public API key. Required before Plaid or any multi-user features. |
-| FEA-11 | **AI Analysis Bot** | Feature | Medium | Claude API-powered insights: spending pattern analysis, anomaly detection, natural-language summaries. "Where am I overspending?" / "How does this month compare to last quarter?" |
+| FEA-11 | **AI Daily Insights Agent** | Feature | Low | Claude API-powered agent/chatbot that surfaces insights from transaction data. Runs daily (push notification or email digest) and on-demand when prompted. Examples: spending pattern analysis, anomaly detection ("you spent 3x on restaurants this month"), trend summaries, tag comparisons ("Japan was 20% cheaper than szója boys per day"). Could live as a chat panel in the app or a standalone bot. |
 | FEA-12 | **Budgeting / Targets** | Feature | Medium | Set monthly or per-category budget targets with visual progress bars. Data exists: original spreadsheet has % Desired and % Delta columns. |
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
 | INF-01 | **Git CI/CD** | Infra | Medium | Set up GitHub repo + Netlify auto-deploy from main branch. Xcode ready. |
@@ -32,11 +34,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (22 items)</summary>
+<summary><strong>✅ Completed</strong> (23 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
-| FEA-20 | **Monthly Cash Flow Waterfall** — Applied floating-bar waterfall style to both monthly and cross-year charts. Blue=income (from 0), red=expenses (floating from net to income level), yellow=net savings (from 0). Added savings rate % line on right axis to monthly view. Cross-year net savings bar updated from green to yellow to match. | Feature → Done | Feb 19 |
+| FEA-20 | **Monthly Cash Flow Waterfall** — Applied floating-bar waterfall style to both monthly and cross-year charts. Blue=income, red=expenses (floating from net to income level), green=net savings. Added savings rate % line (yellow) on right axis to monthly view. Added savings rate row to monthly detail table. Fixed legend to use pointStyle so line datasets render correctly. | Feature → Done | Feb 20 |
 | DAT-02 | **szója boys encoding** — Verified encoding is correct: stored as proper Unicode `ó` (\u00f3) in both tags table and transactions (179 txns). Not mojibake. No fix needed. | Data → Resolved | Feb 19 |
 | BUG-07 | **Tag totals: negative daily_cost + szója boys dates** — `daily_cost>0` filter silently dropped credits/reimbursements from tag totals. Changed to `daily_cost!=null` in both `renderTags` and `showTagDetail`. Also fixed szója boys tag dates in Supabase (start was 4/28 instead of 5/23, end year was 2024 instead of 2023). Validated against CSV SOT: Japan=$6,980, Szója=$6,765, Ski=$2,845. | Bug → Done | Feb 19 |
 | BUG-04 | **Cross-Year Summary Fixed** — Two bugs: (1) referenced `r.total_amount` instead of `r.amount` from RPC, (2) included `investment` deposits in income total, inflating numbers (e.g. 2025 showed $344K instead of $260K). Fixed to skip investment category and use correct field name. | Bug → Done | Feb 19 |
