@@ -515,7 +515,7 @@ async function renderTags(el){
       if(t.category_id==="income"||t.category_id==="investment")continue;
       // Accrual: compute overlap of txn service period with tag date window
       const tg=tagDates[t.tag];
-      if(tg&&tg.start&&tg.end&&t.daily_cost>0&&t.service_start&&t.service_end){
+      if(tg&&tg.start&&tg.end&&t.daily_cost!=null&&t.service_start&&t.service_end){
         const oStart=t.service_start>tg.start?t.service_start:tg.start;
         const oEnd=t.service_end<tg.end?t.service_end:tg.end;
         if(oStart<=oEnd){
@@ -566,7 +566,7 @@ async function showTagDetail(tag){
   const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&order=date.desc`);
   const cats={};let total=0;
   for(const t of txns){
-    if(t.daily_cost>0&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end){
+    if(t.daily_cost!=null&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end){
       const oStart=t.service_start>tag.start_date?t.service_start:tag.start_date;
       const oEnd=t.service_end<tag.end_date?t.service_end:tag.end_date;
       if(oStart<=oEnd){
