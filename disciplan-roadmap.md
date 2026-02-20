@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Feb 18, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Feb 19, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
@@ -8,17 +8,12 @@
 
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
-| BUG-04 | **Cross-Year Summary Broken** | Bug | **High** | "All" year tab on Income Statement shows $0 for all stat cards and empty chart (Y-axis labels $0/$1). Data fetch or aggregation logic is failing—likely the cross-year query returns no rows or sums to zero. Was previously marked complete but has regressed. |
 | FEA-03 | **Travel / Accommodation Category** | Feature | **High** | Hotels are currently lumped under Entertainment, which is misleading. Options: (a) add "accommodation" as a new subcategory under Entertainment, (b) create a top-level "Travel" category with subcategories (flights, hotels, activities). Either way, retroactively re-tag historical hotel transactions. Needs: update PARENT_CATS, SUB_MAP, CC color map, category dropdown, and batch-update existing transactions in Supabase. |
-| BUG-05 | **Accrual-based tag totals** | Bug | **High** | Current tag view sums net amount_usd per tagged transaction. Should use daily_cost × overlap_days_with_tag_window to match the original spreadsheet's accrual method. Validated: Japan $6,980 app vs $6,979 expected. Biggest impact on tags with long-duration transactions (ski lease, rent) that span beyond the tag window. |
-| FEA-04 | **Balance Sheet Auto-Snapshots** | Feature | **High** | Balance sheet should automatically take snapshots at a regular frequency (or on major updates) and persist them so the historical chart continues over time. Need to decide on frequency (weekly? monthly? on manual update?) and storage format. Could use a dedicated Supabase table with timestamp + account balances as JSON. Currently chart data is lost between sessions. |
 | FEA-05 | **Investments Tab** | Feature | **High** | Portfolio view showing all holdings with current values and allocation. Entry point to log buy/sell transactions. Needs its own data model beyond accrual engine. Data exists in InvestmentsInvestments.csv and InvestmentsLatest_Price.csv. |
-| BUG-06 | **Audit Accounts & Liabilities** | Bug | **Medium** | Verify all accounts and liabilities are present in the balance sheet. Known missing: Chase United credit card, Venmo account. Do a full reconciliation pass against the Transactions payment types list. |
-| FEA-06 | **Ledger filter & sort** | Feature | **Medium** | Add ability to filter ledger by category, tag, date range, payment type. Add sort toggles on column headers. |
-| TD-01 | **Show Full Digits in Tables** | To Do | **Medium** | Switch number formatting from abbreviated (K/M) to full digits in tables. Aligned digit columns (right-justified, mono font) make it easier to compare values at a glance. Keep K/M abbreviations for charts only. |
-| TD-02 | **Collapse Subcategories by Default** | To Do | **Medium** | Subcategories (e.g., Food→Groceries/Restaurant) should be collapsed by default in the income statement table. Add expand/collapse toggles for a cleaner initial view. |
 | FEA-07 | **Handle "Investments" Category** | Feature | **Medium** | Some transactions are tagged as category "Investments" for unrealized gains. These need special treatment when the Investments tab is built—should not be double-counted as both income and portfolio value. Route into portfolio view instead of income statement. |
-| FEA-08 | **Ledger payment type column** | Feature | **Low** | Show payment type (Chase Sapphire, AMEX, etc.) as a visible column in the ledger table. |
+| FEA-20 | **Monthly Cash Flow Waterfall** | Feature | **Medium** | Apply the same waterfall chart style (income up, expenses down, net remainder) from cross-year view to the single-year monthly cash flow chart. Currently only cross-year uses waterfall. |
+| DAT-01 | **Reconcile missing transactions** | Data | **Low** | ~73 transactions in original CSV not in SQL import. Most are 1-2 per tag (FX rounding). India missing $1,184 flight. "lacma" tag (3 txns) missing from tags table. |
+| DAT-02 | **szója boys encoding** | Data | **Low** | Stored as "szÃ³ja boys" in Supabase. Normalize to "szoja boys" across tags table + transactions. |
 
 ---
 
@@ -32,27 +27,34 @@
 | FEA-12 | **Budgeting / Targets** | Feature | Medium | Set monthly or per-category budget targets with visual progress bars. Data exists: original spreadsheet has % Desired and % Delta columns. |
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
 | INF-01 | **Git CI/CD** | Infra | Medium | Set up GitHub repo + Netlify auto-deploy from main branch. Xcode ready. |
-| DAT-01 | **Reconcile missing transactions** | Data | Low | ~73 transactions in original CSV not in SQL import. Most are 1-2 per tag (FX rounding). India missing $1,184 flight. "lacma" tag (3 txns) missing from tags table. |
-| DAT-02 | **szója boys encoding** | Data | Low | Stored as "szÃ³ja boys" in Supabase. Normalize to "szoja boys" across tags table + transactions. |
 | FEA-14 | **Cashback tracking** | Feature | Low | Data exists in CashbackSummary.csv and CashbackTRANSACTIONS.csv (219 redemptions). Could show net credit card rewards. |
-| FEA-15 | **Balance sheet time series** | Feature | Low | Net worth over time chart using balance_snapshots data. Depends on auto-snapshot mechanism (FEA-04) being built first. |
 | FEA-16 | **Add Splitwise Payment Type** | Feature | Low | Create a Splitwise payment type to explicitly track owed amounts. Investigate Splitwise API for automatic import of balances and settlements. |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
 
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (9 items)</summary>
+<summary><strong>✅ Completed</strong> (20 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-07 | **Tag totals: negative daily_cost + szója boys dates** — `daily_cost>0` filter silently dropped credits/reimbursements from tag totals. Changed to `daily_cost!=null` in both `renderTags` and `showTagDetail`. Also fixed szója boys tag dates in Supabase (start was 4/28 instead of 5/23, end year was 2024 instead of 2023). Validated against CSV SOT: Japan=$6,980, Szója=$6,765, Ski=$2,845. | Bug → Done | Feb 19 |
+| BUG-04 | **Cross-Year Summary Fixed** — Two bugs: (1) referenced `r.total_amount` instead of `r.amount` from RPC, (2) included `investment` deposits in income total, inflating numbers (e.g. 2025 showed $344K instead of $260K). Fixed to skip investment category and use correct field name. | Bug → Done | Feb 19 |
+| BUG-05 | **Accrual-based tag totals** — Tags now compute `daily_cost × overlap_days` (intersection of transaction service period with tag date window) instead of summing raw `amount_usd`. Applied to both tag cards and tag detail modal. Falls back to `amount_usd` when tag dates or service period missing. Second fix: changed `daily_cost>0` to `daily_cost!=null` so negative daily costs (credits/reimbursements) properly reduce tag totals. Also fixed szója boys dates in Supabase (end year was 2024 instead of 2023). Validated: Japan=$6,980, Szója=$6,765, Ski=$2,845 — all within $1 of CSV SOT. | Bug → Done | Feb 19 |
+| BUG-06 | **Audit Accounts & Liabilities** — Full audit complete: all 39 payment types in transactions already exist in `import-accounts.sql` (including Chase United). Issue was PTS dropdown in code only had 15 entries — expanded to all 39. No missing accounts in Supabase. | Bug → Done | Feb 19 |
+| FEA-04 | **Balance Sheet Snapshots** — Added "📸 Take Snapshot" button on balance sheet tab. Warning banner if last snapshot >30 days old. Modal form shows all active accounts grouped by type (checking, savings, credit, investment, liability) with balance inputs. Saves to `balance_snapshots` table via POST. | Feature → Done | Feb 19 |
+| FEA-06 | **Ledger filter & sort** — Filter bar with description search (Enter to apply), category dropdown, payment type dropdown (all 39 types), date range (from/to), and Clear button. All filters map to Supabase PostgREST query params. | Feature → Done | Feb 19 |
+| FEA-08 | **Ledger payment type column** — Added Payment column to ledger table (hidden on mobile via `hide-m` class). | Feature → Done | Feb 19 |
+| TD-01 | **Show Full Digits in Tables** — Added `fmtT()` formatter showing `$12,345` instead of `$12.3K`. Applied to IS detail table, totals, avg column, and cross-year detail table. Charts and stat cards still use abbreviated `fmtN()`. | To Do → Done | Feb 19 |
+| TD-02 | **Collapse Subcategories by Default** — Parent rows with subcategories (Food, Home, Personal) show a `▸` toggle. Click to expand/collapse. Subcategories hidden by default via `.hidden` CSS class. | To Do → Done | Feb 19 |
+| FEA-15 | **Cross-year waterfall chart + savings rate** — Changed cross-year chart to waterfall style (income stacks up, expenses stack down, standalone net bar). Added savings rate line on right-side percentage axis. | Feature → Done | Feb 19 |
 | TD-00 | **UI Theme & Readability Overhaul** — Larger fonts (10→12px), better contrast (0.3→0.5 alpha), wider spacing, alternating row stripes, hover states, table-layout:fixed for even columns | To Do → Done | Feb 18 |
 | BUG-01 | **Fix Soja Boyz Tag Overlap** — Root cause: positive-only filter counted gross transfers ($30K) but ignored offsetting negatives. Fixed to sum net amounts. Also fixed 0-txn bug (Supabase 1000-row default limit) with paginated fetch. | Bug → Done | Feb 18 |
 | FEA-01 | **Mobile Responsiveness** — hide-m class hides Service Period + Daily Cost columns on <700px. Tabs, fonts, stat cards scale down. Entry form stacks vertically. | Idea → Done | Feb 18 |
 | BUG-02 | **Emoji/encoding fix** — Stat card emojis, · separators, ✓ checkmark were triple-encoded mojibake. All replaced with clean UTF-8. | Bug → Done | Feb 18 |
 | FEA-02 | **Average column** — Added Avg column to IS monthly detail table (total ÷ active months). | Feature → Done | Feb 18 |
 | BUG-03 | **Tag date ranges** — 20 tags had wrong start/end dates in Supabase. Parsed correct dates from original CSV filenames and ran SQL fix. | Bug → Done | Feb 18 |
-| FEA-18 | **Cross-year summary** — "All" year tab on Income Statement showing annual income/expenses/savings 2017–2026 with bar chart and detail table. ⚠️ Regressed — see BUG-04. | Feature → Done | Feb 18 |
+| FEA-18 | **Cross-year summary** — "All" year tab on Income Statement showing annual income/expenses/savings 2017–2026 with bar chart and detail table. | Feature → Done | Feb 18 |
 | FEA-19 | **Export tab** — All Transactions TSV, New Only TSV (since import, id > 12010), Full JSON Backup. TSV maps subcategories back to parent names for Numbers compatibility. | Feature → Done | Feb 18 |
 | BUG-00 | **TD TFSA reclassification** — Was showing as credit card; reclassified to investment account type via SQL update. | Bug → Done | Feb 18 |
 
