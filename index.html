@@ -316,8 +316,8 @@ async function renderIS(el){
     setTimeout(()=>makeChart("cfChart",{type:"bar",data:{labels:mData.map(m=>m.month),datasets:[
       {label:"Income",data:mData.map(m=>Math.round(m.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderRadius:4},
       {label:"Expenses",data:mData.map(m=>[Math.round(m.net),Math.round(m.inc)]),backgroundColor:"rgba(224,122,95,0.75)",borderRadius:4},
-      {label:"Net Savings",data:mData.map(m=>Math.round(m.net)),backgroundColor:"rgba(242,204,143,0.7)",borderRadius:4},
-      {label:"Savings Rate",data:mData.map(m=>m.inc>0?Math.round(m.net/m.inc*100):0),type:"line",borderColor:"var(--y)",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"var(--y)",fill:false,yAxisID:"y1"}
+      {label:"Net Savings",data:mData.map(m=>Math.round(m.net)),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:4},
+      {label:"Savings Rate",data:mData.map(m=>m.inc>0?Math.round(m.net/m.inc*100):0),type:"line",borderColor:"#F2CC8F",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
     ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11}}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.6)",callback:v=>v+"%",font:{size:10}},grid:{display:false}}}}}),50);
 
     // Stacked expense chart + pie in 2-col
@@ -783,8 +783,8 @@ async function renderCrossYear(el){
     setTimeout(()=>makeChart("crossYearChart",{type:"bar",data:{labels:yearData.map(d=>d.year),datasets:[
       {label:"Income",data:yearData.map(d=>Math.round(d.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderRadius:4},
       {label:"Expenses",data:yearData.map(d=>[Math.round(d.net),Math.round(d.inc)]),backgroundColor:"rgba(224,122,95,0.75)",borderRadius:4},
-      {label:"Net Savings",data:yearData.map(d=>Math.round(d.net)),backgroundColor:"rgba(242,204,143,0.7)",borderRadius:4,borderColor:"rgba(242,204,143,0.9)",borderWidth:1},
-      {label:"Savings Rate",data:yearData.map(d=>d.rate*100),type:"line",borderColor:"var(--y)",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"var(--y)",fill:false,yAxisID:"y1"}
+      {label:"Net Savings",data:yearData.map(d=>Math.round(d.net)),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:4,borderColor:"rgba(129,178,154,0.9)",borderWidth:1},
+      {label:"Savings Rate",data:yearData.map(d=>d.rate*100),type:"line",borderColor:"#F2CC8F",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
     ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.6)",font:{size:11}}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",min:0,max:100,ticks:{color:"rgba(242,204,143,0.6)",callback:v=>v+"%",font:{size:10}},grid:{display:false}}}}}),50);
 
     const tblCard=h("div",{class:"cd"});
