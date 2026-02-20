@@ -11,9 +11,7 @@
 | FEA-03 | **Travel / Accommodation Category** | Feature | **High** | Hotels are currently lumped under Entertainment, which is misleading. Options: (a) add "accommodation" as a new subcategory under Entertainment, (b) create a top-level "Travel" category with subcategories (flights, hotels, activities). Either way, retroactively re-tag historical hotel transactions. Needs: update PARENT_CATS, SUB_MAP, CC color map, category dropdown, and batch-update existing transactions in Supabase. |
 | FEA-05 | **Investments Tab** | Feature | **High** | Portfolio view showing all holdings with current values and allocation. Entry point to log buy/sell transactions. Needs its own data model beyond accrual engine. Data exists in InvestmentsInvestments.csv and InvestmentsLatest_Price.csv. |
 | FEA-07 | **Handle "Investments" Category** | Feature | **Medium** | Some transactions are tagged as category "Investments" for unrealized gains. These need special treatment when the Investments tab is built—should not be double-counted as both income and portfolio value. Route into portfolio view instead of income statement. |
-| FEA-20 | **Monthly Cash Flow Waterfall** | Feature | **Medium** | Apply the same waterfall chart style (income up, expenses down, net remainder) from cross-year view to the single-year monthly cash flow chart. Currently only cross-year uses waterfall. |
 | DAT-01 | **Reconcile missing transactions** | Data | **Low** | ~73 transactions in original CSV not in SQL import. Most are 1-2 per tag (FX rounding). India missing $1,184 flight. "lacma" tag (3 txns) missing from tags table. |
-| DAT-02 | **szója boys encoding** | Data | **Low** | Stored as "szÃ³ja boys" in Supabase. Normalize to "szoja boys" across tags table + transactions. |
 
 ---
 
@@ -34,10 +32,12 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (20 items)</summary>
+<summary><strong>✅ Completed</strong> (22 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-20 | **Monthly Cash Flow Waterfall** — Applied floating-bar waterfall style to both monthly and cross-year charts. Blue=income (from 0), red=expenses (floating from net to income level), yellow=net savings (from 0). Added savings rate % line on right axis to monthly view. Cross-year net savings bar updated from green to yellow to match. | Feature → Done | Feb 19 |
+| DAT-02 | **szója boys encoding** — Verified encoding is correct: stored as proper Unicode `ó` (\u00f3) in both tags table and transactions (179 txns). Not mojibake. No fix needed. | Data → Resolved | Feb 19 |
 | BUG-07 | **Tag totals: negative daily_cost + szója boys dates** — `daily_cost>0` filter silently dropped credits/reimbursements from tag totals. Changed to `daily_cost!=null` in both `renderTags` and `showTagDetail`. Also fixed szója boys tag dates in Supabase (start was 4/28 instead of 5/23, end year was 2024 instead of 2023). Validated against CSV SOT: Japan=$6,980, Szója=$6,765, Ski=$2,845. | Bug → Done | Feb 19 |
 | BUG-04 | **Cross-Year Summary Fixed** — Two bugs: (1) referenced `r.total_amount` instead of `r.amount` from RPC, (2) included `investment` deposits in income total, inflating numbers (e.g. 2025 showed $344K instead of $260K). Fixed to skip investment category and use correct field name. | Bug → Done | Feb 19 |
 | BUG-05 | **Accrual-based tag totals** — Tags now compute `daily_cost × overlap_days` (intersection of transaction service period with tag date window) instead of summing raw `amount_usd`. Applied to both tag cards and tag detail modal. Falls back to `amount_usd` when tag dates or service period missing. Second fix: changed `daily_cost>0` to `daily_cost!=null` so negative daily costs (credits/reimbursements) properly reduce tag totals. Also fixed szója boys dates in Supabase (end year was 2024 instead of 2023). Validated: Japan=$6,980, Szója=$6,765, Ski=$2,845 — all within $1 of CSV SOT. | Bug → Done | Feb 19 |
