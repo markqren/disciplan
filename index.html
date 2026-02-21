@@ -6,6 +6,7 @@
 <title>The Disciplan</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{--bg:#0a0a14;--card:rgba(255,255,255,0.025);--bdr:rgba(255,255,255,0.07);--tx:#e8e8e4;--dim:rgba(255,255,255,0.5);--g:#81B29A;--r:#E07A5F;--b:#4A6FA5;--y:#F2CC8F;--mono:'JetBrains Mono',monospace;--sans:'Outfit',system-ui,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -59,10 +60,29 @@ select.inp{cursor:pointer;appearance:auto}
 .acct-hdr{display:flex;justify-content:space-between;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--bdr)}
 .acct-row{display:flex;justify-content:space-between;padding:5px 0;font-size:13px}
 .foot{margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.04);text-align:center;font-size:11px;color:rgba(255,255,255,0.15)}
+.login-wrap{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+.login-card{max-width:360px;width:100%}
+.login-card h2{text-align:center;margin-bottom:24px}
+.login-card .inp{margin-bottom:14px}
+.login-err{color:var(--r);font-size:12px;font-weight:600;margin-bottom:12px;display:none}
 @media(max-width:700px){.g3,.g2{grid-template-columns:1fr}.chrt{height:220px}.hide-m{display:none!important}table{font-size:11px}th,td{padding:7px 4px}.st-v{font-size:20px}.tabs{gap:3px}.tab{padding:5px 10px;font-size:11px}}
 </style>
 </head>
 <body>
+
+<div id="loginScreen" class="login-wrap hidden">
+  <div class="cd login-card">
+    <h2>the disciplan</h2>
+    <form id="loginForm" autocomplete="on">
+      <label class="lbl">Email</label>
+      <input class="inp" id="loginEmail" type="email" autocomplete="email" required>
+      <label class="lbl">Password</label>
+      <input class="inp" id="loginPass" type="password" autocomplete="current-password" required>
+      <div class="login-err" id="loginErr"></div>
+      <button class="btn" type="submit" style="background:var(--g);color:#0a0a14;margin-top:4px">Sign In</button>
+    </form>
+  </div>
+</div>
 
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
@@ -81,15 +101,21 @@ select.inp{cursor:pointer;appearance:auto}
 
 const SB_URL = "https://mjuannepfodstbsxweuc.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qdWFubmVwZm9kc3Ric3h3ZXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzODcwMzksImV4cCI6MjA4Njk2MzAzOX0.6TqLUAhvWMjDunpird0_9FMnDiT4qRuYaH6XbXmKOnA";
-const HDRS = {"apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`,"Content-Type":"application/json"};
+const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+let currentSession = null;
+
+function authHeaders(extra = {}) {
+  const token = currentSession?.access_token || SB_KEY;
+  return {"apikey":SB_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json",...extra};
+}
 
 async function sb(path,opts={}){
-  const r=await fetch(`${SB_URL}/rest/v1/${path}`,{headers:{...HDRS,...(opts.headers||{})},...opts});
+  const r=await fetch(`${SB_URL}/rest/v1/${path}`,{headers:{...authHeaders(),...(opts.headers||{})},...opts});
   if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return r.json();
 }
 async function sbRPC(fn,params={}){
-  const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:HDRS,body:JSON.stringify(params)});
+  const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:authHeaders(),body:JSON.stringify(params)});
   if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
   return r.json();
 }
@@ -107,7 +133,7 @@ const CATS_LIST=[{id:"entertainment",l:"Entertainment"},{id:"food",l:"Food (othe
 const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
-const ACCRUAL_D={groceries:7,clothes:365,tech:730,rent:"month",utilities:"month"};
+const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
 
 function fmtN(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);let r;if(a>=1e6)r=`$${(a/1e6).toFixed(1)}M`;else if(a>=1e4)r=`$${(a/1e3).toFixed(0)}K`;else if(a>=1e3)r=`$${(a/1e3).toFixed(1)}K`;else r=`$${a.toLocaleString(undefined,{maximumFractionDigits:0})}`;return n<0?`(${r})`:r}
 function fmtT(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);const r=`$${a.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}`;return n<0?`(${r})`:r}
@@ -148,6 +174,8 @@ function renderTabs(){
     const b=h("button",{class:"tab"+(state.tab===id?" on":""),onClick:()=>{state.tab=id;renderTabs();renderContent()}},label);
     bar.append(b);
   });
+  const so=h("button",{class:"tab",style:{color:"rgba(255,255,255,0.3)",borderColor:"transparent",fontSize:"11px"},onClick:()=>supabaseClient.auth.signOut()},"sign out");
+  bar.append(so);
 }
 
 function renderContent(){
@@ -394,9 +422,9 @@ async function renderIS(el){
     thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round((totI-totE)/activeMonths))}</td></tr>`;
 
     thtml+=`<tr><td style="font-weight:700;color:#F2CC8F">Savings Rate</td>`;
-    mData.forEach(m=>thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
-    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
-    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td></tr>`;
+    mData.forEach(m=>thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
+    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
+    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td></tr>`;
 
     thtml+=`</tbody></table></div>`;
     tblCard.innerHTML=thtml;
@@ -650,7 +678,7 @@ function showSnapshotForm(accounts, lastDate, onSave){
     });
     if(!rows.length){alert("Enter at least one balance.");btn.textContent="Save Snapshot";btn.disabled=false;return}
     try{
-      const resp=await fetch(`${SB_URL}/rest/v1/balance_snapshots`,{method:"POST",headers:{...HDRS,"Content-Type":"application/json",Prefer:"resolution=merge-duplicates,return=representation"},body:JSON.stringify(rows)});
+      const resp=await fetch(`${SB_URL}/rest/v1/balance_snapshots`,{method:"POST",headers:authHeaders({Prefer:"resolution=merge-duplicates,return=representation"}),body:JSON.stringify(rows)});
       if(!resp.ok)throw new Error(await resp.text());
       bg.remove();
       if(onSave)onSave();
@@ -859,7 +887,7 @@ function dlFile(content,filename,type){
 async function init(){
   renderTabs();
   try{
-    const r=await fetch(`${SB_URL}/rest/v1/transactions?select=id&limit=1`,{headers:{...HDRS,Prefer:"count=exact"}});
+    const r=await fetch(`${SB_URL}/rest/v1/transactions?select=id&limit=1`,{headers:authHeaders({Prefer:"count=exact"})});
     if(!r.ok)throw new Error(r.status);
     const count=r.headers.get("content-range")?.split("/")[1];
     state.txnCount=count?parseInt(count):0;
@@ -871,7 +899,69 @@ async function init(){
   }
   renderContent();
 }
-init();
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+// AUTH
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+function showLogin() {
+  document.getElementById('loginScreen').classList.remove('hidden');
+  document.querySelector('.hdr').classList.add('hidden');
+  document.getElementById('content').classList.add('hidden');
+  document.querySelector('.foot').classList.add('hidden');
+}
+
+function showApp() {
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.querySelector('.hdr').classList.remove('hidden');
+  document.getElementById('content').classList.remove('hidden');
+  document.querySelector('.foot').classList.remove('hidden');
+}
+
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById('loginErr');
+  errEl.style.display = 'none';
+  const btn = e.target.querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+  try {
+    const { data, error } = await supabaseClient.auth.signInWithPassword({
+      email: document.getElementById('loginEmail').value,
+      password: document.getElementById('loginPass').value
+    });
+    if (error) throw error;
+    currentSession = data.session;
+    showApp();
+    init();
+  } catch (err) {
+    errEl.textContent = err.message || 'Invalid login credentials';
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+});
+
+async function checkAuthAndInit() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  currentSession = session;
+
+  if (session) {
+    showApp();
+    init();
+  } else {
+    showLogin();
+  }
+
+  supabaseClient.auth.onAuthStateChange((event, session) => {
+    currentSession = session;
+    if (event === 'SIGNED_OUT') {
+      showLogin();
+    }
+  });
+}
+
+checkAuthAndInit();
 </script>
 
 <div class="foot">the disciplan · accrual-based personal finance · connected to supabase</div>
