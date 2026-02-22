@@ -551,45 +551,64 @@ async function renderPortfolio(el){
     const body=document.getElementById("pfBody");body.innerHTML="";
 
     // Build lookup maps
-    const symMap={};for(const s of symbols)symMap[`${s.account_id}|${s.symbol}`]=s;
+    const symInfo={};for(const s of symbols)symInfo[s.symbol]=s;
     const lotMap={};for(const l of lots){const k=`${l.account_id}|${l.symbol}`;if(!lotMap[k])lotMap[k]=[];lotMap[k].push(l)}
 
+    // Compute lot market values (not stored in DB)
+    for(const l of lots){
+      const si=symInfo[l.symbol]||{};
+      const price=parseFloat(si.latest_price||0);
+      l.price_exec=parseFloat(l.price_exec||0);
+      l.shares=parseFloat(l.shares||0);
+      l.cost_basis=parseFloat(l.cost_basis||0);
+      l.ann_return=l.ann_return!=null?parseFloat(l.ann_return):null;
+      l.market_value=l.sell_date?0:(price>0?l.shares*price:l.cost_basis);
+    }
+
     // Price date from first symbol with one
-    const priceDate=symbols.find(s=>s.price_date)?.price_date||null;
+    const priceDate=symbols.find(s=>s.price_as_of)?.price_as_of||null;
     document.getElementById("pfSub").textContent=priceDate?`Prices as of ${fmtD(priceDate)} · USD`:"Live from Supabase · USD";
 
     // Symbol-level ann return: cost-basis-weighted avg of lot ann_returns
     function symAnn(acctId,sym){
       const ls=lotMap[`${acctId}|${sym}`];
       if(!ls?.length)return null;
-      const wl=ls.filter(l=>l.cost_basis>0);if(!wl.length)return null;
+      const wl=ls.filter(l=>l.cost_basis>0&&l.ann_return!=null);if(!wl.length)return null;
       const tc=wl.reduce((s,l)=>s+l.cost_basis,0);
       return tc>0?wl.reduce((s,l)=>s+l.cost_basis*l.ann_return,0)/tc:null;
     }
 
-    // Process accounts
+    // Process accounts — derive holdings from lots, join symbol metadata
     const acctData=[];let portCost=0,portMarket=0;
     const allocBucket={};let totalLots=0;const totalSyms=new Set();
 
     for(const acct of accounts){
-      const acctSyms=symbols.filter(s=>s.account_id===acct.id);
+      const acctSymSet=new Set();
+      for(const l of lots)if(l.account_id===acct.id)acctSymSet.add(l.symbol);
       let ac=0,am=0;const holdings=[];
-      for(const sym of acctSyms){
-        const k=`${acct.id}|${sym.symbol}`;
+      for(const symName of acctSymSet){
+        const k=`${acct.id}|${symName}`;
         const sLots=lotMap[k]||[];
-        const sold=sLots.length>0&&sLots.every(l=>l.sell_date!=null);
-        totalLots+=sLots.length;totalSyms.add(sym.symbol);
-        holdings.push({...sym,sold,lots:sLots,annReturn:symAnn(acct.id,sym.symbol)});
+        const si=symInfo[symName]||{};
+        const activeLots=sLots.filter(l=>!l.sell_date);
+        const sold=sLots.length>0&&activeLots.length===0;
+        const activeCost=activeLots.reduce((s,l)=>s+l.cost_basis,0);
+        const activeMarket=activeLots.reduce((s,l)=>s+l.market_value,0);
+        const activeShares=activeLots.reduce((s,l)=>s+l.shares,0);
+        totalLots+=sLots.length;totalSyms.add(symName);
+        holdings.push({symbol:symName,asset_class:si.asset_class||"unknown",latest_price:parseFloat(si.latest_price||0)||null,
+          shares:activeShares,cost_basis:activeCost,market_value:activeMarket,
+          sold,lots:sLots,annReturn:symAnn(acct.id,symName),name:si.name||symName});
         if(!sold){
-          ac+=sym.cost_basis||0;am+=sym.market_value||0;
-          const cls=sym.asset_class;
-          if(cls){if(!allocBucket[cls])allocBucket[cls]={cost:0,market:0};allocBucket[cls].market+=sym.market_value||0;allocBucket[cls].cost+=sym.cost_basis||0}
+          ac+=activeCost;am+=activeMarket;
+          const cls=si.asset_class;
+          if(cls){if(!allocBucket[cls])allocBucket[cls]={cost:0,market:0};allocBucket[cls].market+=activeMarket;allocBucket[cls].cost+=activeCost}
         }
       }
       const gain=am-ac,pctR=ac>0?(gain/ac)*100:0;
       let annR;
       if(PF_ACCT_ANN_OVERRIDE.hasOwnProperty(acct.id)){annR=PF_ACCT_ANN_OVERRIDE[acct.id]}
-      else{const al=lots.filter(l=>l.account_id===acct.id&&l.cost_basis>0);if(al.length){const tc=al.reduce((s,l)=>s+l.cost_basis,0);annR=tc>0?al.reduce((s,l)=>s+l.cost_basis*l.ann_return,0)/tc:null}else annR=null}
+      else{const al=lots.filter(l=>l.account_id===acct.id&&l.cost_basis>0&&l.ann_return!=null);if(al.length){const tc=al.reduce((s,l)=>s+l.cost_basis,0);annR=tc>0?al.reduce((s,l)=>s+l.cost_basis*l.ann_return,0)/tc:null}else annR=null}
       portCost+=ac;portMarket+=am;
       acctData.push({...acct,holdings,totalCost:ac,totalMarket:am,gain,pctReturn:pctR,annReturn:annR});
     }
@@ -714,7 +733,7 @@ async function renderPortfolio(el){
                 hh+=`<tr style="background:rgba(74,111,165,0.04)">`;
                 hh+=`<td style="padding:5px 0 5px 28px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${fmtD(lot.lot_date)}</td>`;
                 hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${lot.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td>`;
-                hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">$${lot.exec_price.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
+                hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">$${lot.price_exec.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
                 hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${fmtT(Math.round(lot.cost_basis))}</td>`;
                 hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:${lc}">${fmtT(Math.round(lot.market_value))}</td>`;
                 hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${lc}">${fmtT(Math.round(lg))}</td>`;
@@ -730,7 +749,7 @@ async function renderPortfolio(el){
                   hh+=`<tr style="background:rgba(224,122,95,0.03);opacity:0.6">`;
                   hh+=`<td style="padding:5px 0 5px 28px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${fmtD(lot.lot_date)} <span style="color:rgba(255,255,255,0.15)">→ ${fmtD(lot.sell_date)}</span></td>`;
                   hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${lot.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td>`;
-                  hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">$${lot.exec_price.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
+                  hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">$${lot.price_exec.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
                   hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${fmtT(Math.round(lot.cost_basis))}</td>`;
                   hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${fmtT(Math.round(lot.market_value))}</td>`;
                   hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${sc}">${fmtT(Math.round(lg))}</td>`;
