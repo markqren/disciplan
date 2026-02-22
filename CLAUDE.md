@@ -145,7 +145,7 @@ Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, 
 - **Validate accrual math** against known values (e.g., Japan tag = ~$6,979)
 - **Test mobile** — the app must work on phone. Use `hide-m` class for optional columns.
 - **Update `disciplan-roadmap.md`** when completing items — move to Completed section with date
-- **Deploy = git push** — after any code change, commit and push to deploy
+- **Batch deploys** — Do NOT git push after every change. Accumulate changes locally and only commit+push once at the end of a session (or when Mark explicitly asks). Each push triggers a Netlify production deploy that consumes credits, and we're on the free tier with limited credits per month.
 
 ## Task Management
 
