@@ -66,6 +66,17 @@ select.inp{cursor:pointer;appearance:auto}
 .login-card .inp{margin-bottom:14px}
 .login-err{color:var(--r);font-size:12px;font-weight:600;margin-bottom:12px;display:none}
 @media(max-width:700px){.g3,.g2{grid-template-columns:1fr}.chrt{height:220px}.hide-m{display:none!important}table{font-size:11px}th,td{padding:7px 4px}.st-v{font-size:20px}.tabs{gap:3px}.tab{padding:5px 10px;font-size:11px}}
+.pf-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+.pf-acct{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;overflow:hidden;margin-bottom:10px}
+.pf-acct-hdr{display:grid;grid-template-columns:1fr auto auto auto auto auto;gap:16px;padding:14px 20px;cursor:pointer;align-items:center;transition:background 0.15s}.pf-acct-hdr:hover{background:rgba(255,255,255,0.03)}
+.pf-badge{font-size:9px;padding:2px 6px;border-radius:4px;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:0.05em}
+.pf-sold-badge{font-size:8px;padding:1px 5px;border-radius:3px;background:rgba(224,122,95,0.15);color:#E07A5F;margin-left:4px}
+.pf-toggle{transition:transform 0.15s;font-size:10px;color:rgba(255,255,255,0.3);display:inline-block}.pf-toggle.open{transform:rotate(90deg)}
+.pf-alloc-row{display:grid;grid-template-columns:110px 1fr 45px 45px;align-items:center;gap:8px;font-size:11px;margin-bottom:6px}
+.pf-alloc-bar{height:6px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden}
+.pf-perf-row{display:flex;justify-content:space-between;font-size:11px;padding:2px 0}
+.pf-foot{margin-top:24px;padding:12px 0;border-top:1px solid rgba(255,255,255,0.04);font-size:11px;color:rgba(255,255,255,0.2);display:flex;justify-content:space-between}
+@media(max-width:700px){.pf-kpi{grid-template-columns:repeat(2,1fr)}.pf-acct-hdr{grid-template-columns:1fr auto auto}}
 </style>
 </head>
 <body>
@@ -134,6 +145,9 @@ const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazo
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
+const PF_ACM={us_equity:{label:"US Equity",color:"#4A6FA5",target:70},intl_equity:{label:"International",color:"#81B29A",target:10},crypto:{label:"Crypto",color:"#E07A5F",target:5},balanced:{label:"Balanced",color:"#F2CC8F",target:5},money_market:{label:"Money Market",color:"#6B9AC4",target:5},target_date:{label:"Target Date",color:"#9B8EA0",target:5}};
+const PF_ATL={retirement_401k:"401(k)",retirement_ira:"IRA",brokerage:"Brokerage",tax_free:"Tax-Free",hsa:"HSA",rsu:"RSU",crypto:"Crypto"};
+const PF_ACCT_ANN_OVERRIDE={schwab_401k:7.3,vanguard_401k:null};
 
 function fmtN(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);let r;if(a>=1e6)r=`$${(a/1e6).toFixed(1)}M`;else if(a>=1e4)r=`$${(a/1e3).toFixed(0)}K`;else if(a>=1e3)r=`$${(a/1e3).toFixed(1)}K`;else r=`$${a.toLocaleString(undefined,{maximumFractionDigits:0})}`;return n<0?`(${r})`:r}
 function fmtT(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);const r=`$${a.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}`;return n<0?`(${r})`:r}
@@ -165,7 +179,7 @@ let state={tab:"income",year:2025,txnCount:0,page:0};
 // TABS
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["tags","tags"],["ledger","ledger"],["export","export"]];
+const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["portfolio","portfolio"],["tags","tags"],["ledger","ledger"],["export","export"]];
 
 function renderTabs(){
   const bar=document.getElementById("tabBar");
@@ -185,6 +199,7 @@ function renderContent(){
   else if(state.tab==="income"&&state.year==="all")renderCrossYear(el);
   else if(state.tab==="income")renderIS(el);
   else if(state.tab==="balance")renderBS(el);
+  else if(state.tab==="portfolio")renderPortfolio(el);
   else if(state.tab==="tags")renderTags(el);
   else if(state.tab==="ledger")renderLedger(el);
   else if(state.tab==="export")renderExport(el);
@@ -518,6 +533,247 @@ async function renderBS(el){
     body.append(row2);
   }catch(e){document.getElementById("bsBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error: ${e.message}</div>`}
 }
+
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+// PORTFOLIO
+// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+let pfState={expandedAcct:null,expandedSym:null};
+
+async function renderPortfolio(el){
+  el.innerHTML=`<div style="margin-bottom:16px"><h2>Portfolio</h2><p class="sub" id="pfSub">Loading...</p></div><div id="pfBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
+  try{
+    const [accounts,symbols,lots]=await Promise.all([
+      sb("investment_accounts?order=label"),
+      sb("investment_symbols?order=symbol"),
+      sb("investment_lots?order=lot_date")
+    ]);
+    const body=document.getElementById("pfBody");body.innerHTML="";
+
+    // Build lookup maps
+    const symMap={};for(const s of symbols)symMap[`${s.account_id}|${s.symbol}`]=s;
+    const lotMap={};for(const l of lots){const k=`${l.account_id}|${l.symbol}`;if(!lotMap[k])lotMap[k]=[];lotMap[k].push(l)}
+
+    // Price date from first symbol with one
+    const priceDate=symbols.find(s=>s.price_date)?.price_date||null;
+    document.getElementById("pfSub").textContent=priceDate?`Prices as of ${fmtD(priceDate)} · USD`:"Live from Supabase · USD";
+
+    // Symbol-level ann return: cost-basis-weighted avg of lot ann_returns
+    function symAnn(acctId,sym){
+      const ls=lotMap[`${acctId}|${sym}`];
+      if(!ls?.length)return null;
+      const wl=ls.filter(l=>l.cost_basis>0);if(!wl.length)return null;
+      const tc=wl.reduce((s,l)=>s+l.cost_basis,0);
+      return tc>0?wl.reduce((s,l)=>s+l.cost_basis*l.ann_return,0)/tc:null;
+    }
+
+    // Process accounts
+    const acctData=[];let portCost=0,portMarket=0;
+    const allocBucket={};let totalLots=0;const totalSyms=new Set();
+
+    for(const acct of accounts){
+      const acctSyms=symbols.filter(s=>s.account_id===acct.id);
+      let ac=0,am=0;const holdings=[];
+      for(const sym of acctSyms){
+        const k=`${acct.id}|${sym.symbol}`;
+        const sLots=lotMap[k]||[];
+        const sold=sLots.length>0&&sLots.every(l=>l.sell_date!=null);
+        totalLots+=sLots.length;totalSyms.add(sym.symbol);
+        holdings.push({...sym,sold,lots:sLots,annReturn:symAnn(acct.id,sym.symbol)});
+        if(!sold){
+          ac+=sym.cost_basis||0;am+=sym.market_value||0;
+          const cls=sym.asset_class;
+          if(cls){if(!allocBucket[cls])allocBucket[cls]={cost:0,market:0};allocBucket[cls].market+=sym.market_value||0;allocBucket[cls].cost+=sym.cost_basis||0}
+        }
+      }
+      const gain=am-ac,pctR=ac>0?(gain/ac)*100:0;
+      let annR;
+      if(PF_ACCT_ANN_OVERRIDE.hasOwnProperty(acct.id)){annR=PF_ACCT_ANN_OVERRIDE[acct.id]}
+      else{const al=lots.filter(l=>l.account_id===acct.id&&l.cost_basis>0);if(al.length){const tc=al.reduce((s,l)=>s+l.cost_basis,0);annR=tc>0?al.reduce((s,l)=>s+l.cost_basis*l.ann_return,0)/tc:null}else annR=null}
+      portCost+=ac;portMarket+=am;
+      acctData.push({...acct,holdings,totalCost:ac,totalMarket:am,gain,pctReturn:pctR,annReturn:annR});
+    }
+
+    // Portfolio ann return: cost-weighted avg of accounts with data (Vanguard 401K excluded via null)
+    let paNum=0,paDen=0;
+    for(const a of acctData){if(a.annReturn!=null&&a.totalCost>0){paNum+=a.totalCost*a.annReturn;paDen+=a.totalCost}}
+    const portfolioAnn=paDen>0?paNum/paDen:null;
+    const portGain=portMarket-portCost;
+    const portPct=portCost>0?(portGain/portCost)*100:0;
+
+    // Asset allocation
+    const allocation=Object.entries(allocBucket).map(([ac,d])=>({asset_class:ac,...(PF_ACM[ac]||{label:ac,color:"#666",target:0}),value:d.market,pct:portMarket>0?(d.market/portMarket)*100:0})).sort((a,b)=>b.value-a.value);
+    const displayAccts=acctData.filter(a=>a.totalMarket>0).sort((a,b)=>b.totalMarket-a.totalMarket);
+
+    // Helper for formatting percent with sign
+    const fPct=v=>v!=null?`${v>=0?"+":""}${v.toFixed(1)}%`:"—";
+    const pCol=v=>v!=null?(v>=0?"var(--g)":"var(--r)"):"var(--dim)";
+
+    // ── KPI Cards ──
+    const kpi=h("div",{class:"pf-kpi"});
+    [{l:"Market Value",v:fmtT(Math.round(portMarket)),c:"var(--g)"},
+     {l:"Cost Basis",v:fmtT(Math.round(portCost)),c:"var(--b)"},
+     {l:"Unrealized Gain",v:fmtT(Math.round(portGain)),c:portGain>=0?"var(--g)":"var(--r)"},
+     {l:"Total Return",v:fPct(portPct),c:pCol(portPct)},
+     {l:"Ann. Return",v:fPct(portfolioAnn),c:pCol(portfolioAnn),s:portfolioAnn!=null?"Excl. Vanguard 401K":null}
+    ].forEach(k=>{
+      const d=h("div",{class:"cd st"});
+      d.innerHTML=`<div class="st-l">${k.l}</div><div class="st-v" style="color:${k.c}">${k.v}</div>${k.s?`<div style="font-size:9px;color:rgba(255,255,255,0.2);margin-top:2px">${k.s}</div>`:""}`;
+      kpi.append(d);
+    });
+    body.append(kpi);
+
+    // ── Two-panel overview ──
+    const overview=h("div",{class:"g2"});
+
+    // Left: Asset Allocation doughnut + legend
+    const allocCard=h("div",{class:"cd"});
+    allocCard.innerHTML=`<h3>Asset Allocation</h3><p style="font-size:11px;color:rgba(255,255,255,0.3);margin-bottom:12px">Target: 70% US / 10% Intl / 5% each other</p><div class="chrt" style="height:200px"><canvas id="pfAllocChart"></canvas></div><div id="pfAllocLegend" style="margin-top:12px"></div>`;
+    overview.append(allocCard);
+
+    // Right: Account Performance bar + summary
+    const perfCard=h("div",{class:"cd"});
+    perfCard.innerHTML=`<h3>Account Performance</h3><div class="chrt" style="height:240px"><canvas id="pfPerfChart"></canvas></div><div id="pfPerfSummary" style="margin-top:8px"></div>`;
+    overview.append(perfCard);
+    body.append(overview);
+
+    // Render allocation chart + legend
+    setTimeout(()=>{
+      makeChart("pfAllocChart",{type:"doughnut",data:{labels:allocation.map(a=>a.label),datasets:[{data:allocation.map(a=>Math.round(a.value)),backgroundColor:allocation.map(a=>a.color),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:"55%",plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${fmtT(ctx.raw)} (${allocation[ctx.dataIndex].pct.toFixed(1)}%)`}}}}});
+      const leg=document.getElementById("pfAllocLegend");
+      if(leg){let lh="";allocation.forEach(a=>{lh+=`<div class="pf-alloc-row"><span style="display:flex;align-items:center;gap:6px;color:rgba(255,255,255,0.6)"><span style="width:8px;height:8px;border-radius:2px;background:${a.color};flex-shrink:0"></span>${a.label}</span><div class="pf-alloc-bar"><div style="height:100%;width:${Math.min(a.pct,100)}%;background:${a.color};border-radius:3px"></div></div><span style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.5);text-align:right">${a.pct.toFixed(1)}%</span><span style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.25);text-align:right">(${a.target}%)</span></div>`});leg.innerHTML=lh}
+    },50);
+
+    // Render performance chart + summary
+    setTimeout(()=>{
+      const pd=displayAccts.map(a=>({name:a.label,cost:Math.round(a.totalCost),gain:Math.max(0,Math.round(a.gain))}));
+      makeChart("pfPerfChart",{type:"bar",data:{labels:pd.map(d=>d.name),datasets:[
+        {label:"Cost Basis",data:pd.map(d=>d.cost),backgroundColor:"rgba(74,111,165,0.6)"},
+        {label:"Gain",data:pd.map(d=>d.gain),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:{topRight:4,bottomRight:4}}
+      ]},options:{responsive:true,maintainAspectRatio:false,indexAxis:"y",plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:10}}},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${fmtT(ctx.raw)}`}}},scales:{x:{stacked:true,ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.5)",font:{size:10}},grid:{display:false}}}}});
+      const sumEl=document.getElementById("pfPerfSummary");
+      if(sumEl){let sh="";displayAccts.forEach(a=>{sh+=`<div class="pf-perf-row"><span style="color:rgba(255,255,255,0.45)">${a.label}</span><div style="display:flex;gap:12px"><span style="font-family:var(--mono);color:${pCol(a.pctReturn)}">${fPct(a.pctReturn)}</span><span style="font-family:var(--mono);min-width:50px;text-align:right;color:${pCol(a.annReturn)}">${fPct(a.annReturn)}</span></div></div>`});sumEl.innerHTML=sh}
+    },100);
+
+    // ── Holdings Card ──
+    const holdCard=h("div",{class:"cd"});
+    holdCard.innerHTML=`<h3>Holdings</h3><div id="pfHoldings"></div>`;
+    body.append(holdCard);
+
+    function renderHoldings(){
+      const hEl=document.getElementById("pfHoldings");if(!hEl)return;
+      let hh="";
+      for(const acct of acctData){
+        const vis=acct.holdings.filter(s=>s.market_value>0||s.cost_basis>0||s.sold);
+        if(!vis.length)continue;
+        const isEx=pfState.expandedAcct===acct.id;
+        const activeN=acct.holdings.filter(s=>!s.sold&&s.market_value>0).length;
+        const soldN=acct.holdings.filter(s=>s.sold).length;
+
+        hh+=`<div class="pf-acct"><div class="pf-acct-hdr" data-acct="${acct.id}"><div><div style="font-size:14px;font-weight:600;display:flex;align-items:center;gap:8px"><span class="pf-toggle${isEx?" open":""}">▶</span>${acct.label} <span class="pf-badge">${PF_ATL[acct.account_type]||acct.account_type}</span></div><div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px">${acct.institution} · ${activeN} active${soldN?" + "+soldN+" sold":""}</div></div>`;
+        hh+=`<div class="r hide-m"><div style="font-size:10px;color:rgba(255,255,255,0.3)">Cost</div><div class="m" style="font-size:13px;color:rgba(255,255,255,0.5)">${fmtT(Math.round(acct.totalCost))}</div></div>`;
+        hh+=`<div class="r hide-m"><div style="font-size:10px;color:rgba(255,255,255,0.3)">Market</div><div class="m" style="font-size:13px;color:var(--g)">${fmtT(Math.round(acct.totalMarket))}</div></div>`;
+        hh+=`<div class="r hide-m"><div style="font-size:10px;color:rgba(255,255,255,0.3)">Gain</div><div class="m" style="font-size:13px;color:${pCol(acct.gain)}">${fmtT(Math.round(acct.gain))}</div></div>`;
+        hh+=`<div class="r"><div style="font-size:10px;color:rgba(255,255,255,0.3)">Return</div><div class="m" style="font-size:13px;font-weight:600;color:${pCol(acct.pctReturn)}">${fPct(acct.pctReturn)}</div></div>`;
+        hh+=`<div class="r hide-m"><div style="font-size:10px;color:rgba(255,255,255,0.3)">Ann.</div><div class="m" style="font-size:13px;color:${pCol(acct.annReturn)}">${fPct(acct.annReturn)}</div></div>`;
+        hh+=`</div>`;
+
+        if(isEx){
+          hh+=`<div style="border-top:1px solid rgba(255,255,255,0.04);padding:0 20px 14px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em">`;
+          ["Symbol","Shares","Price","Cost","Market","Gain","Return","Ann."].forEach((col,i)=>hh+=`<th class="${i>0?"r":""} ${[1,2,5,7].includes(i)?"hide-m":""}" style="padding:10px 0 6px;font-weight:500;text-align:${i===0?"left":"right"}">${col}</th>`);
+          hh+=`</tr></thead><tbody>`;
+
+          for(const sd of vis){
+            const g=sd.market_value-sd.cost_basis;
+            const r=sd.cost_basis>0?(g/sd.cost_basis)*100:0;
+            const lk=`${acct.id}|${sd.symbol}`;
+            const isSE=pfState.expandedSym===lk;
+            const activeLots=sd.lots.filter(l=>!l.sell_date);
+            const soldLots=sd.lots.filter(l=>l.sell_date);
+
+            hh+=`<tr style="border-top:1px solid rgba(255,255,255,0.03);cursor:${sd.lots.length?"pointer":"default"};opacity:${sd.sold?0.55:1}" data-sym="${lk}">`;
+            hh+=`<td style="padding:8px 0;font-weight:600"><div style="display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:2px;background:${PF_ACM[sd.asset_class]?.color||"#888"}"></span>`;
+            if(sd.lots.length)hh+=`<span style="font-size:8px;color:rgba(255,255,255,0.2);transform:${isSE?"rotate(90deg)":"rotate(0)"};transition:transform 0.15s;display:inline-block">▶</span>`;
+            hh+=`${sd.symbol}`;
+            if(sd.sold)hh+=`<span class="pf-sold-badge">SOLD</span>`;
+            if(sd.lots.length)hh+=` <span style="font-size:9px;color:rgba(255,255,255,0.2);font-family:var(--mono)">${sd.lots.length}</span>`;
+            hh+=`</div></td>`;
+            hh+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.5);padding:8px 0">${sd.shares>0?sd.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4}):"—"}</td>`;
+            hh+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.5);padding:8px 0">${sd.latest_price?`$${sd.latest_price.toLocaleString("en-US",{minimumFractionDigits:2})}`:"—"}</td>`;
+            hh+=`<td class="r m" style="color:rgba(255,255,255,0.5);padding:8px 0">${fmtT(Math.round(sd.cost_basis))}</td>`;
+            hh+=`<td class="r m" style="color:${sd.sold?"rgba(255,255,255,0.5)":"var(--g)"};padding:8px 0">${fmtT(Math.round(sd.market_value))}</td>`;
+            hh+=`<td class="r m hide-m" style="color:${pCol(g)};padding:8px 0">${fmtT(Math.round(g))}</td>`;
+            hh+=`<td class="r m" style="color:${pCol(r)};font-weight:600;padding:8px 0">${fPct(r)}</td>`;
+            hh+=`<td class="r m hide-m" style="color:${pCol(sd.annReturn)};padding:8px 0">${fPct(sd.annReturn)}</td></tr>`;
+
+            if(isSE){
+              // Active lots
+              for(const lot of activeLots){
+                const lg=lot.market_value-lot.cost_basis,lr=lot.cost_basis>0?(lg/lot.cost_basis)*100:0;
+                const lc=lg>=0?"rgba(129,178,154,0.6)":"rgba(224,122,95,0.6)";
+                hh+=`<tr style="background:rgba(74,111,165,0.04)">`;
+                hh+=`<td style="padding:5px 0 5px 28px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${fmtD(lot.lot_date)}</td>`;
+                hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${lot.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td>`;
+                hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">$${lot.exec_price.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
+                hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${fmtT(Math.round(lot.cost_basis))}</td>`;
+                hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:${lc}">${fmtT(Math.round(lot.market_value))}</td>`;
+                hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${lc}">${fmtT(Math.round(lg))}</td>`;
+                hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:${lc}">${fPct(lr)}</td>`;
+                hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${lot.ann_return>=0?"rgba(129,178,154,0.6)":"rgba(224,122,95,0.6)"}">${lot.ann_return!=null?fPct(lot.ann_return):"—"}</td></tr>`;
+              }
+              // Sold lots
+              if(soldLots.length){
+                hh+=`<tr><td colspan="8" style="padding:6px 0 2px 28px;font-size:9px;color:rgba(255,255,255,0.2);text-transform:uppercase;letter-spacing:0.08em">Sold</td></tr>`;
+                for(const lot of soldLots){
+                  const lg=lot.market_value-lot.cost_basis,lr=lot.cost_basis>0?(lg/lot.cost_basis)*100:0;
+                  const sc=lg>=0?"rgba(129,178,154,0.5)":"rgba(224,122,95,0.5)";
+                  hh+=`<tr style="background:rgba(224,122,95,0.03);opacity:0.6">`;
+                  hh+=`<td style="padding:5px 0 5px 28px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${fmtD(lot.lot_date)} <span style="color:rgba(255,255,255,0.15)">→ ${fmtD(lot.sell_date)}</span></td>`;
+                  hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${lot.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td>`;
+                  hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">$${lot.exec_price.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
+                  hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${fmtT(Math.round(lot.cost_basis))}</td>`;
+                  hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.3)">${fmtT(Math.round(lot.market_value))}</td>`;
+                  hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${sc}">${fmtT(Math.round(lg))}</td>`;
+                  hh+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:${sc}">${fPct(lr)}</td>`;
+                  hh+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${sc}">${lot.ann_return!=null?fPct(lot.ann_return):"—"}</td></tr>`;
+                }
+              }
+            }
+          }
+          hh+=`</tbody></table></div>`;
+        }
+        hh+=`</div>`;
+      }
+      hEl.innerHTML=hh;
+
+      // Attach click handlers for expand/collapse
+      hEl.querySelectorAll(".pf-acct-hdr").forEach(el=>{
+        el.addEventListener("click",()=>{
+          const id=el.dataset.acct;
+          pfState.expandedAcct=pfState.expandedAcct===id?null:id;
+          pfState.expandedSym=null;
+          renderHoldings();
+        });
+      });
+      hEl.querySelectorAll("tr[data-sym]").forEach(el=>{
+        el.addEventListener("click",e=>{
+          e.stopPropagation();
+          const k=el.dataset.sym;
+          pfState.expandedSym=pfState.expandedSym===k?null:k;
+          renderHoldings();
+        });
+      });
+    }
+    renderHoldings();
+
+    // ── Footer ──
+    const foot=h("div",{class:"pf-foot"});
+    foot.innerHTML=`<span>${totalLots} lots · ${accounts.length} accounts · ${totalSyms.size} symbols</span>${priceDate?`<span>Prices as of ${fmtD(priceDate)}</span>`:""}`;
+    body.append(foot);
+
+  }catch(e){document.getElementById("pfBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error loading portfolio: ${e.message}</div>`}
+}
+
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // TAGS
