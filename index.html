@@ -631,9 +631,24 @@ function renderReviewTable(container,candidates){
     const approved=candidates.filter(c=>c._status==="approved");
     if(!approved.length)return alert("No approved transactions to save.");
     saveBtn.disabled=true;saveBtn.textContent="Saving...";
-    try{await commitImport(candidates);renderReviewTable(container,candidates)}
-    catch(e){alert("Error saving: "+e.message)}
-    saveBtn.disabled=false;saveBtn.textContent="Save Approved";
+    try{
+      const summary=await commitImport(candidates);
+      renderReviewTable(container,candidates);
+      // Success summary
+      const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
+      const dates=summary.imported.map(c=>c.date).sort();
+      sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
+      const viewBtn=h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
+        state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
+      }},"View in Ledger \u2192");
+      sumEl.append(viewBtn);
+      container.append(sumEl);
+      saveBtn.textContent="Saved";
+    }catch(e){
+      console.error("commitImport error:",e);
+      alert("Error saving: "+e.message);
+      saveBtn.disabled=false;saveBtn.textContent="Save Approved";
+    }
   }},"Save Approved");
   bulkBar.append(saveBtn);
   container.append(bulkBar);
@@ -803,7 +818,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
 
 async function commitImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
-  if(!approved.length)return;
+  if(!approved.length)throw new Error("No approved transactions to save.");
   const rows=approved.map(c=>({
     date:c.date,service_start:c.service_start,service_end:c.service_end,
     description:c.description,category_id:c.category_id,
@@ -816,6 +831,12 @@ async function commitImport(candidates){
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   approved.forEach(c=>c._status="committed");
+  return{
+    count:approved.length,
+    imported:approved,
+    skipped:candidates.filter(c=>c._status==="skipped").length,
+    dupes:candidates.filter(c=>c._isDuplicate).length
+  };
 }
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
