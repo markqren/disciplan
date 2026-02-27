@@ -834,7 +834,7 @@ async function commitImport(candidates){
     payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
     daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||""
   }));
-  await sb("transactions",{method:"POST",body:JSON.stringify(rows)});
+  await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   valid.forEach(c=>c._status="committed");
