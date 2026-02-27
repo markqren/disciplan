@@ -178,7 +178,8 @@ function parseCSV(text){
   const filtered=lines.filter(r=>r.length>1||r[0]!=="");
   if(!filtered.length)return{headers:[],rows:[]};
   const headers=filtered[0].map(v=>v.trim());
-  const rows=filtered.slice(1).map(r=>{const o={};headers.forEach((hd,i)=>o[hd]=r[i]?r[i].trim():"");return o});
+  const rows=filtered.slice(1).map(r=>{const o={};headers.forEach((hd,i)=>o[hd]=r[i]?r[i].trim():"");return o})
+    .filter(r=>{const v=r[headers[0]]||"";return v!==""&&/\d/.test(v)});
   return{headers,rows};
 }
 
@@ -301,9 +302,10 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
   const rawDate=row[cols.date]||"";
   const dp=rawDate.split("/");
   const date=dp.length===3?`${dp[2]}-${dp[0].padStart(2,"0")}-${dp[1].padStart(2,"0")}`:rawDate;
+  const badDate=!date||!/^\d{4}-\d{2}-\d{2}$/.test(date);
   const rawAmt=parseFloat(row[cols.amount])||0;
   const isReturn=(row[cols.type]||"").toLowerCase()==="return";
-  const isSkip=profile.skipTypes.includes(row[cols.type]||"");
+  const isSkip=badDate||profile.skipTypes.includes(row[cols.type]||"");
   let amt=profile.transformAmount(rawAmt);
   if(isReturn)amt=-Math.abs(amt);
   return{
@@ -312,7 +314,7 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
     service_start:date,service_end:date,payment_type:paymentType,tag:bulkTag||"",credit:"",
     _status:isSkip?"skipped":"pending",_isDuplicate:false,
     _rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",
-    _rowIndex:index,_skipReason:isSkip?"CC Payment":null
+    _rowIndex:index,_skipReason:badDate?"Invalid date":isSkip?"CC Payment":null
   };
 }
 
@@ -821,7 +823,10 @@ function openImportEditModal(candidates,idx,reviewContainer){
 async function commitImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
   if(!approved.length)throw new Error("No approved transactions to save.");
-  const rows=approved.map(c=>({
+  const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
+  if(valid.length<approved.length)console.warn(`commitImport: dropped ${approved.length-valid.length} rows with missing dates`);
+  if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  const rows=valid.map(c=>({
     date:c.date,service_start:c.service_start,service_end:c.service_end,
     description:c.description,category_id:c.category_id,
     original_amount:c.original_amount,currency:c.currency,fx_rate:c.fx_rate,
@@ -832,10 +837,10 @@ async function commitImport(candidates){
   await sb("transactions",{method:"POST",body:JSON.stringify(rows)});
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
-  approved.forEach(c=>c._status="committed");
+  valid.forEach(c=>c._status="committed");
   return{
-    count:approved.length,
-    imported:approved,
+    count:valid.length,
+    imported:valid,
     skipped:candidates.filter(c=>c._status==="skipped").length,
     dupes:candidates.filter(c=>c._isDuplicate).length
   };
