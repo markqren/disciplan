@@ -703,26 +703,75 @@ function renderReviewTable(container,candidates){
 
 function openImportEditModal(candidates,idx,reviewContainer){
   const c=candidates[idx];
+  let seManual=false;
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   const modal=h("div",{class:"modal"});
-  modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">Edit Transaction</h3><span style="font-size:10px;color:rgba(255,255,255,0.25)">Raw: ${c._rawDescription}</span></div>`;
+
+  // Header with close button
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+  const hdrLeft=h("div");
+  hdrLeft.append(h("h3",{style:{margin:"0"}},"Edit Transaction"));
+  hdrLeft.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"4px"}},c._rawDescription));
+  const closeBtn=h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715");
+  hdr.append(hdrLeft,closeBtn);
+  modal.append(hdr);
 
   function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===3?"1fr 1fr 1fr":ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
   function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
 
-  const mDate=h("input",{class:"inp",type:"date",value:c.date});
+  const mDate=h("input",{class:"inp",type:"date",value:c.date,onInput:updatePreview});
   const mDesc=h("input",{class:"inp",type:"text",value:c.description||c._rawDescription});
-  const mAmt=h("input",{class:"inp",type:"number",step:"0.01",value:c.amount_usd});
-  const mCat=h("select",{class:"inp"});
+  const rawRef=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.2)",marginTop:"2px"}},"Bank: "+c._rawDescription);
+  const descField=h("div");
+  descField.append(h("label",{class:"lbl"},"Description"));
+  descField.append(mDesc);
+  descField.append(rawRef);
+
+  const mAmt=h("input",{class:"inp",type:"number",step:"0.01",value:c.amount_usd,onInput:updatePreview});
+
+  const mCat=h("select",{class:"inp",onChange:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value;updateHint()}
+    updatePreview();
+  }});
   CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;mCat.append(o)});
-  const mSs=h("input",{class:"inp",type:"date",value:c.service_start});
-  const mSe=h("input",{class:"inp",type:"date",value:c.service_end});
+
+  const mSs=h("input",{class:"inp",type:"date",value:c.service_start,onInput:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value}
+    updatePreview();
+  }});
+  const mSe=h("input",{class:"inp",type:"date",value:c.service_end,onInput:()=>{
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";updatePreview();
+  }});
+  const hintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
+  function updateHint(){const r=ACCRUAL_D[mCat.value];hintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: end of month)":`(Auto: ${r} days)`):""}
+  updateHint();
+  const seLbl=h("label",{class:"lbl"});seLbl.append("Service End ");seLbl.append(hintSpan);
+  const seField=h("div");seField.append(seLbl);seField.append(mSe);
+
   const mPt=h("select",{class:"inp"});
   PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
   const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
 
-  mCat.addEventListener("change",()=>{mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value});
+  // Accrual preview
+  const previewEl=h("div",{class:"preview hidden"});
+  function updatePreview(){
+    const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){previewEl.classList.add("hidden");return}
+    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
+    if(se<ss){previewEl.classList.add("hidden");return}
+    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const daily=a/days;
+    previewEl.classList.remove("hidden");
+    previewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">USD Amount</div><div style="font-size:18px;font-weight:700;color:#fff;font-family:var(--mono)">${fmtF(a)}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Service Days</div><div style="font-size:18px;font-weight:700;color:var(--b);font-family:var(--mono)">${days}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Daily Cost</div><div style="font-size:18px;font-weight:700;color:var(--g);font-family:var(--mono)">${fmtF(daily)}/d</div></div>
+    </div>`;
+  }
+  updatePreview();
 
+  // Action buttons
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
     c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
@@ -736,12 +785,18 @@ function openImportEditModal(candidates,idx,reviewContainer){
     bg.remove();
     renderReviewTable(reviewContainer,candidates);
   }},"Save & Approve");
+  const mSkip=h("button",{class:"btn",style:{background:"rgba(224,122,95,0.15)",color:"var(--r)",width:"auto",padding:"12px 20px"},onClick:()=>{
+    c._status="skipped";bg.remove();renderReviewTable(reviewContainer,candidates);
+  }},"Skip");
+  const mCancel=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel");
+  btnRow.append(mSave,mSkip,mCancel);
 
-  modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
+  modal.append(mRow(mField("Date",mDate),descField));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
-  modal.append(mRow(mField("Service Start",mSs),mField("Service End",mSe)));
+  modal.append(mRow(mField("Service Start",mSs),seField));
   modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
-  modal.append(mSave);
+  modal.append(previewEl);
+  modal.append(btnRow);
   bg.append(modal);
   document.body.append(bg);
 }
