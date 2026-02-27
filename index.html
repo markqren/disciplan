@@ -145,7 +145,7 @@ const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazo
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
-const BANK_PROFILES={chase:{detect:h=>h.includes("Transaction Date")&&h.includes("Post Date")&&h.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:["Payment"],currency:"USD"}};
+const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:["Payment"],currency:"USD"}};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
 const PF_ACM={us_equity:{label:"US Equity",color:"#4A6FA5",target:70},intl_equity:{label:"International",color:"#81B29A",target:10},crypto:{label:"Crypto",color:"#E07A5F",target:5},balanced:{label:"Balanced",color:"#F2CC8F",target:5},money_market:{label:"Money Market",color:"#6B9AC4",target:5},target_date:{label:"Target Date",color:"#9B8EA0",target:5}};
 const PF_ATL={retirement_401k:"401(k)",retirement_ira:"IRA",brokerage:"Brokerage",tax_free:"Tax-Free",hsa:"HSA",rsu:"RSU",crypto:"Crypto"};
@@ -177,8 +177,8 @@ function parseCSV(text){
     {if(lines.length)lines[lines.length-1].push(cur);else lines.push([cur])}
   const filtered=lines.filter(r=>r.length>1||r[0]!=="");
   if(!filtered.length)return{headers:[],rows:[]};
-  const headers=filtered[0].map(h=>h.trim());
-  const rows=filtered.slice(1).map(r=>{const o={};headers.forEach((h,i)=>o[h]=r[i]?r[i].trim():"");return o});
+  const headers=filtered[0].map(v=>v.trim());
+  const rows=filtered.slice(1).map(r=>{const o={};headers.forEach((hd,i)=>o[hd]=r[i]?r[i].trim():"");return o});
   return{headers,rows};
 }
 
@@ -526,7 +526,7 @@ function renderEntry(el){
   impHdr.append(impArrow,h("h3",{style:{margin:"0"}},"Import CSV"));
   impCard.append(impHdr);
 
-  const impBody=h("div",{class:"hidden"});
+  const impBody=h("div",{class:"hidden",style:{marginTop:"16px"}});
   let impCandidates=null;
 
   // Upload bar
@@ -588,7 +588,9 @@ function renderEntry(el){
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
 
-      impStatus.textContent=aiResults?"AI categorization complete.":"Using default categories (no AI key).";
+      const pending=candidates.filter(c=>c._status==="pending").length;
+      if(!pending)impStatus.textContent="All transactions are duplicates or skipped.";
+      else impStatus.textContent=aiResults?"AI categorization complete.":"Using default categories (no AI key).";
       renderReviewTable(impReview,candidates);
     }catch(e){
       impStatus.textContent="Error: "+e.message;
