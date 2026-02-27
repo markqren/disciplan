@@ -631,10 +631,12 @@ function renderReviewTable(container,candidates){
     candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
     renderReviewTable(container,candidates);
   }},"\u2713 Approve All"));
+  let saving=false;
   const saveBtn=h("button",{class:"pg-btn",style:"color:#fff;background:rgba(129,178,154,0.2);border-color:rgba(129,178,154,0.4);font-weight:600",onClick:async()=>{
+    if(saving)return;
     const approved=candidates.filter(c=>c._status==="approved");
     if(!approved.length)return alert("No approved transactions to save.");
-    saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    saving=true;saveBtn.disabled=true;saveBtn.textContent="Saving...";
     try{
       const summary=await commitImport(candidates);
       renderReviewTable(container,candidates);
