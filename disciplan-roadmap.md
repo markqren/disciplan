@@ -29,6 +29,7 @@
 | FEA-14 | **Cashback tracking** | Feature | Low | Data exists in CashbackSummary.csv and CashbackTRANSACTIONS.csv (219 redemptions). Could show net credit card rewards. |
 | FEA-16 | **Add Splitwise Payment Type** | Feature | Low | Create a Splitwise payment type to explicitly track owed amounts. Investigate Splitwise API for automatic import of balances and settlements. |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
+| FEA-23 | **Offline Caching / PWA** | Feature | Medium | Cache a snapshot of summary data (IS charts, balance sheet, tag totals, portfolio KPIs) so the app is viewable without internet. Use a Service Worker to serve cached `index.html` + Chart.js CDN assets. On each online load, refresh the cache with latest Supabase data. Offline mode would be read-only (no Entry/Export). Could evolve into a full PWA with `manifest.json` for Add to Home Screen. Key pieces: (1) Service Worker for asset caching, (2) IndexedDB or Cache API for pre-rendered summary data, (3) offline banner/indicator in UI. |
 
 ---
 
