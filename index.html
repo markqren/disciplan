@@ -145,6 +145,8 @@ const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazo
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
+const BANK_PROFILES={chase:{detect:h=>h.includes("Transaction Date")&&h.includes("Post Date")&&h.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:["Payment"],currency:"USD"}};
+const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
 const PF_ACM={us_equity:{label:"US Equity",color:"#4A6FA5",target:70},intl_equity:{label:"International",color:"#81B29A",target:10},crypto:{label:"Crypto",color:"#E07A5F",target:5},balanced:{label:"Balanced",color:"#F2CC8F",target:5},money_market:{label:"Money Market",color:"#6B9AC4",target:5},target_date:{label:"Target Date",color:"#9B8EA0",target:5}};
 const PF_ATL={retirement_401k:"401(k)",retirement_ira:"IRA",brokerage:"Brokerage",tax_free:"Tax-Free",hsa:"HSA",rsu:"RSU",crypto:"Crypto"};
 const PF_ACCT_ANN_OVERRIDE={schwab_401k:7.3,vanguard_401k:null};
@@ -157,6 +159,219 @@ function today(){return new Date().toISOString().slice(0,10)}
 function endOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth()+1,0).toISOString().slice(0,10)}
 function addDays(d,n){return new Date(new Date(d+"T00:00:00").getTime()+(n-1)*864e5).toISOString().slice(0,10)}
 function getDefEnd(cat,ss){const r=ACCRUAL_D[cat];if(!r||!ss)return ss;if(r==="month")return endOfMonth(ss);return addDays(ss,r)}
+
+function parseCSV(text){
+  const s=text.charCodeAt(0)===0xFEFF?text.slice(1):text;
+  const lines=[];let cur="",inQ=false;
+  for(let i=0;i<s.length;i++){
+    const c=s[i];
+    if(c==='"'){if(inQ&&s[i+1]==='"'){cur+='"';i++}else inQ=!inQ}
+    else if(c===","&&!inQ){lines.length?lines[lines.length-1].push(cur):lines.push([cur]);cur=""}
+    else if((c==="\n"||(c==="\r"&&s[i+1]==="\n"))&&!inQ){
+      if(c==="\r")i++;
+      if(lines.length)lines[lines.length-1].push(cur);else lines.push([cur]);
+      cur="";lines.push([])
+    }else cur+=c;
+  }
+  if(cur||lines.length&&lines[lines.length-1].length)
+    {if(lines.length)lines[lines.length-1].push(cur);else lines.push([cur])}
+  const filtered=lines.filter(r=>r.length>1||r[0]!=="");
+  if(!filtered.length)return{headers:[],rows:[]};
+  const headers=filtered[0].map(h=>h.trim());
+  const rows=filtered.slice(1).map(r=>{const o={};headers.forEach((h,i)=>o[h]=r[i]?r[i].trim():"");return o});
+  return{headers,rows};
+}
+
+function detectBankProfile(headers){
+  for(const[k,p]of Object.entries(BANK_PROFILES))if(p.detect(headers))return{name:k,...p};
+  return null;
+}
+
+function getApiKey(){return localStorage.getItem("anthropic_api_key")}
+function setApiKey(key){localStorage.setItem("anthropic_api_key",key)}
+function clearApiKey(){localStorage.removeItem("anthropic_api_key")}
+
+function normalizeMerchant(desc){
+  return desc.replace(/^(SQ \*|TST\*|CLIP MX\*|TCB\*)/i,"").trim().toLowerCase().split(/\s+/).slice(0,2).join(" ");
+}
+
+async function fetchMerchantPatterns(){
+  let all=[],off=0;
+  while(true){const b=await sb(`transactions?select=description,category_id&limit=1000&offset=${off}`);all=all.concat(b);if(b.length<1000)break;off+=1000}
+  const patterns={};
+  for(const t of all){const k=normalizeMerchant(t.description);if(!patterns[k])patterns[k]={};patterns[k][t.category_id]=(patterns[k][t.category_id]||0)+1}
+  return patterns;
+}
+
+async function fetchSampleDescriptions(){
+  const recent=await sb("transactions?select=description&order=id.desc&limit=200");
+  return[...new Set(recent.map(r=>r.description))].slice(0,50);
+}
+
+async function aiCategorize(candidates,merchantPatterns,sampleDescriptions){
+  const apiKey=getApiKey();
+  if(!apiKey)return null;
+  const items=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
+  const prompt=`You are a personal finance assistant that categorizes AND cleans up transaction descriptions for a detailed expense tracker.
+
+CATEGORY TAXONOMY (use exact IDs):
+- entertainment: Entertainment (concerts, movies, events, activities, hotels/accommodation)
+- food: Food - use only when not clearly groceries or restaurant
+- groceries: Groceries (grocery stores, supermarkets)
+- restaurant: Restaurant (dining out, bars, cafes, food delivery)
+- home: Home - general household
+- rent: Rent
+- furniture: Furniture (furnishings, home goods)
+- health: Health (pharmacy, medical, fitness, wellness)
+- personal: Personal - general personal items
+- clothes: Clothes (apparel, shoes)
+- tech: Tech (electronics, software, subscriptions, apps)
+- transportation: Transportation (flights, trains, rideshare, gas, tolls, parking)
+- utilities: Utilities (phone, internet, laundry)
+- financial: Financial (fees, interest)
+- other: Other (gifts, misc)
+- income: Income (refunds, reimbursements, credits — ONLY if amount is negative/credit)
+
+DESCRIPTION STYLE GUIDE:
+The user writes clean, human-readable descriptions. Study these real examples to learn the style:
+- "Restaurant - La Choza" (not "REST LA CHOZA")
+- "Groceries - Whole Foods" (not "WHOLE FOODS MARKET #123")
+- "Walgreens" (not "WALGREENS #16373")
+- "Waymo" (not "WAYMO")
+- "United Flights - SFO-CZM" (not "UNITED 0162374132542")
+- "Amazon - [item description]" (not "AMAZON MKTPL*UY16L7LN3")
+- "Claude AI Subscription (Feb 2026)" (not "CLAUDE.AI SUBSCRIPTION")
+- "MTA Meter Parking" (not "TCB*MTA METER MTA P")
+- "Groceries - Gus's Community Market" (not "GUS'S COMMUNITY MARKET")
+- "Groceries - Jagalchi" (not "JAGALCHI")
+- "Restaurant - Money Bar" (not "MONEY BAR")
+- "Restaurant - Morella" (not "MORELLA")
+
+Key patterns:
+- Prefix with "Restaurant - " for dining. Prefix with "Groceries - " for grocery stores.
+- Prefix with "Flight - " or "United Flights - " for airline charges, include route if identifiable.
+- Prefix with "Amazon - " for Amazon purchases; add context from description if possible.
+- For subscriptions, include the month/year: "Claude AI Subscription (Feb 2026)"
+- Strip store numbers, transaction codes, prefixes like "SQ *", "TST*", "CLIP MX*", "TCB*"
+- Use Title Case for merchant names
+- Keep it concise but descriptive — the user should be able to remember what this was
+
+HISTORICAL MERCHANT PATTERNS (merchant -> {category: count}):
+${JSON.stringify(merchantPatterns)}
+
+SAMPLE OF USER'S EXISTING DESCRIPTIONS (for style reference):
+${JSON.stringify(sampleDescriptions)}
+
+TRANSACTIONS TO CATEGORIZE AND CLEAN:
+${JSON.stringify(items)}
+
+For each transaction, return a JSON array of objects:
+[{"i": <index>, "cat": "<category_id>", "conf": "high|medium|low", "desc": "<cleaned description>"}]
+
+Rules:
+- "desc" must be a clean, human-readable description matching the style guide above
+- Use historical patterns when available and clear (one dominant category >70%)
+- Use bank category as a secondary signal but don't trust it blindly
+- "Shopping" from Chase is ambiguous — look at the merchant name and amount
+- Subscriptions (CLAUDE.AI, software) -> tech
+- Amazon -> personal unless description suggests otherwise
+- Negative amounts (credits/refunds) that clearly offset an expense -> same category as the expense, NOT income
+- Positive amounts that are clearly income (paycheck, reimbursement) -> income
+- confidence: high = historical match or obvious merchant, medium = reasonable guess from bank category + description, low = ambiguous
+
+Return ONLY the JSON array, no other text.`;
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content:prompt}]})
+    });
+    if(r.status===401){clearApiKey();throw new Error("Invalid API key (401)")}
+    if(!r.ok)throw new Error(`API error ${r.status}: ${await r.text()}`);
+    const data=await r.json();
+    const txt=data.content?.[0]?.text||"";
+    const m=txt.match(/\[[\s\S]*\]/);
+    if(!m)throw new Error("No JSON array in AI response");
+    return JSON.parse(m[0]);
+  }catch(e){console.error("aiCategorize failed:",e);return null}
+}
+
+function transformCSVRow(row,profile,paymentType,bulkTag,index){
+  const cols=profile.columns;
+  const rawDate=row[cols.date]||"";
+  const dp=rawDate.split("/");
+  const date=dp.length===3?`${dp[2]}-${dp[0].padStart(2,"0")}-${dp[1].padStart(2,"0")}`:rawDate;
+  const rawAmt=parseFloat(row[cols.amount])||0;
+  const isReturn=(row[cols.type]||"").toLowerCase()==="return";
+  const isSkip=profile.skipTypes.includes(row[cols.type]||"");
+  let amt=profile.transformAmount(rawAmt);
+  if(isReturn)amt=-Math.abs(amt);
+  return{
+    date,description:row[cols.description]||"",amount_usd:amt,category_id:null,ai_confidence:null,
+    currency:profile.currency||"USD",fx_rate:1,original_amount:amt,
+    service_start:date,service_end:date,payment_type:paymentType,tag:bulkTag||"",credit:"",
+    _status:isSkip?"skipped":"pending",_isDuplicate:false,
+    _rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",
+    _rowIndex:index,_skipReason:isSkip?"CC Payment":null
+  };
+}
+
+async function findDuplicates(candidates,paymentType){
+  const dates=candidates.filter(c=>c._status!=="skipped").map(c=>c.date).sort();
+  if(!dates.length)return;
+  const minD=dates[0],maxD=dates[dates.length-1];
+  const existing=await sb(`transactions?payment_type=eq.${encodeURIComponent(paymentType)}&date=gte.${minD}&date=lte.${maxD}&select=date,amount_usd,description`);
+  for(const c of candidates){
+    if(c._status==="skipped")continue;
+    c._isDuplicate=existing.some(e=>e.date===c.date&&Math.abs(Math.abs(e.amount_usd)-Math.abs(c.amount_usd))<0.02);
+    if(c._isDuplicate){c._status="skipped";c._skipReason="Duplicate"}
+  }
+}
+
+function applyAIResults(candidates,aiResults){
+  if(!aiResults){
+    for(const c of candidates){
+      if(c._status==="skipped")continue;
+      c.category_id=CHASE_CAT_MAP[c._bankCategory]||"other";
+      c.ai_confidence="low";
+      c.service_end=getDefEnd(c.category_id,c.date)||c.date;
+      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    }
+    return;
+  }
+  const byIdx={};for(const r of aiResults)byIdx[r.i]=r;
+  for(let i=0;i<candidates.length;i++){
+    const c=candidates[i];
+    if(c._status==="skipped")continue;
+    const ai=byIdx[i];
+    if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc}
+    else{c.category_id=CHASE_CAT_MAP[c._bankCategory]||"other";c.ai_confidence="low"}
+    c.service_end=getDefEnd(c.category_id,c.date)||c.date;
+    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+  }
+}
+
+function propagateEdits(candidates,editedIndex){
+  const edited=candidates[editedIndex];
+  const key=normalizeMerchant(edited._rawDescription);
+  for(let i=0;i<candidates.length;i++){
+    if(i===editedIndex)continue;
+    const c=candidates[i];
+    if(c._status!=="pending")continue;
+    if(normalizeMerchant(c._rawDescription)===key){
+      c.description=edited.description;
+      c.category_id=edited.category_id;
+      c.service_end=getDefEnd(c.category_id,c.date)||c.date;
+      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    }
+  }
+}
 
 function h(tag,attrs,children){
   const el=document.createElement(tag);
@@ -302,6 +517,250 @@ function renderEntry(el){
   card.append(previewEl);
   card.append(submitBtn);
   el.append(card);
+
+  // ── Import CSV Section ──
+  const impCard=h("div",{class:"cd"});
+  let impOpen=false;
+  const impHdr=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"},onClick:()=>{impOpen=!impOpen;impArrow.textContent=impOpen?"\u25BE":"\u25B8";impBody.classList.toggle("hidden")}});
+  const impArrow=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},"\u25B8");
+  impHdr.append(impArrow,h("h3",{style:{margin:"0"}},"Import CSV"));
+  impCard.append(impHdr);
+
+  const impBody=h("div",{class:"hidden"});
+  let impCandidates=null;
+
+  // Upload bar
+  const fileInp=h("input",{class:"inp",type:"file",accept:".csv"});
+  const impPtSel=h("select",{class:"inp"});
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Chase Sapphire")o.selected=true;impPtSel.append(o)});
+  const impTagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
+  const apiKeyInp=h("input",{class:"inp",type:"password",placeholder:"sk-ant-...",value:getApiKey()||""});
+  const apiKeyHelp=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"2px"}},"Get one at console.anthropic.com \u00b7 Stored locally in your browser");
+  const apiKeyField=h("div");
+  apiKeyField.append(h("label",{class:"lbl"},"Anthropic API Key"));
+  apiKeyField.append(apiKeyInp);
+  apiKeyField.append(apiKeyHelp);
+
+  const impStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
+  const impReview=h("div",{id:"importReview"});
+
+  const impBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
+    const file=fileInp.files[0];
+    if(!file)return alert("Choose a CSV file first.");
+
+    // API key handling
+    const keyVal=apiKeyInp.value.trim();
+    if(keyVal)setApiKey(keyVal);
+    else if(!getApiKey()){
+      if(!confirm("No API key set. Import with basic category mapping (no AI description cleanup)?"))return;
+    }
+
+    impBtn.disabled=true;impBtn.textContent="Processing...";
+    impStatus.classList.remove("hidden");
+    impStatus.style.color="rgba(255,255,255,0.4)";
+    impStatus.textContent="Parsing CSV...";
+    try{
+      const text=await file.text();
+      const csv=parseCSV(text);
+      if(!csv.rows.length)throw new Error("No data rows found in CSV.");
+
+      const profile=detectBankProfile(csv.headers);
+      if(!profile)throw new Error("Unrecognized bank format. Expected headers: Transaction Date, Post Date, Memo");
+
+      // Auto-detect payment type from filename
+      const fn=file.name.toLowerCase();
+      if(fn.includes("chase"))impPtSel.value="Chase Sapphire";
+      else if(fn.includes("amex"))impPtSel.value="AMEX Rose Gold";
+      const pt=impPtSel.value;
+      const tag=impTagInp.value.trim();
+
+      // Transform rows
+      const candidates=csv.rows.map((r,i)=>transformCSVRow(r,profile,pt,tag,i));
+      impCandidates=candidates;
+
+      // AI categorization
+      impStatus.textContent="AI categorizing...";
+      const[patterns,samples]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions()]);
+      const aiResults=await aiCategorize(candidates,patterns,samples);
+      applyAIResults(candidates,aiResults);
+
+      // Duplicate detection
+      impStatus.textContent="Checking for duplicates...";
+      await findDuplicates(candidates,pt);
+
+      impStatus.textContent=aiResults?"AI categorization complete.":"Using default categories (no AI key).";
+      renderReviewTable(impReview,candidates);
+    }catch(e){
+      impStatus.textContent="Error: "+e.message;
+      impStatus.style.color="var(--r)";
+    }
+    impBtn.disabled=false;impBtn.textContent="Import";
+  }},"Import");
+
+  impBody.append(row(field("CSV File",fileInp),field("Payment Account",impPtSel)));
+  impBody.append(row(field("Bulk Tag (optional)",impTagInp),apiKeyField));
+  impBody.append(impBtn);
+  impBody.append(impStatus);
+  impBody.append(impReview);
+  impCard.append(impBody);
+  el.append(impCard);
+}
+
+function renderReviewTable(container,candidates){
+  container.innerHTML="";
+  const skipped=candidates.filter(c=>c._status==="skipped");
+  const dupes=candidates.filter(c=>c._isDuplicate);
+  const hi=candidates.filter(c=>c.ai_confidence==="high"&&c._status!=="skipped");
+  const med=candidates.filter(c=>c.ai_confidence==="medium"&&c._status!=="skipped");
+  const lo=candidates.filter(c=>c.ai_confidence==="low"&&c._status!=="skipped");
+
+  const stats=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"12px"}},
+    `${candidates.length} parsed \u00b7 ${skipped.length} auto-skipped \u00b7 ${dupes.length} duplicates \u00b7 ${hi.length} high \u00b7 ${med.length} medium \u00b7 ${lo.length} low confidence`);
+  container.append(stats);
+
+  const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
+  bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
+    candidates.forEach(c=>{if(c.ai_confidence==="high"&&c._status==="pending")c._status="approved"});
+    renderReviewTable(container,candidates);
+  }},"\u2713 Approve All High-Confidence"));
+  bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3)",onClick:()=>{
+    candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
+    renderReviewTable(container,candidates);
+  }},"\u2713 Approve All"));
+  const saveBtn=h("button",{class:"pg-btn",style:"color:#fff;background:rgba(129,178,154,0.2);border-color:rgba(129,178,154,0.4);font-weight:600",onClick:async()=>{
+    const approved=candidates.filter(c=>c._status==="approved");
+    if(!approved.length)return alert("No approved transactions to save.");
+    saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    try{await commitImport(candidates);renderReviewTable(container,candidates)}
+    catch(e){alert("Error saving: "+e.message)}
+    saveBtn.disabled=false;saveBtn.textContent="Save Approved";
+  }},"Save Approved");
+  bulkBar.append(saveBtn);
+  container.append(bulkBar);
+
+  const wrap=h("div",{style:{overflowX:"auto"}});
+  const tbl=h("table");
+  const thead=h("thead");
+  thead.innerHTML=`<tr><th style="width:36px"></th><th>Date</th><th>Description</th><th class="r">Amount</th><th>Category</th><th class="hide-m">Svc Period</th><th class="hide-m">Tag</th><th class="hide-m">Bank Cat</th></tr>`;
+  tbl.append(thead);
+  const tbody=h("tbody");
+
+  candidates.forEach((c,idx)=>{
+    const tr=h("tr",{style:{borderLeft:c._status==="approved"?"3px solid var(--g)":c._isDuplicate?"3px solid var(--y)":"3px solid transparent",opacity:c._status==="skipped"?"0.4":"1"}});
+
+    const statusIcon=c._status==="approved"?"\u2713":c._status==="skipped"?"\u2715":c._status==="committed"?"\u2713":"\u25CB";
+    const statusColor=c._status==="approved"?"var(--g)":c._status==="skipped"?"var(--r)":c._status==="committed"?"var(--b)":"rgba(255,255,255,0.3)";
+    tr.append(h("td",{style:{cursor:c._status==="committed"?"default":"pointer",textAlign:"center",fontSize:"14px",color:statusColor,userSelect:"none"},onClick:()=>{
+      if(c._status==="committed")return;
+      if(c._isDuplicate&&c._status==="skipped")c._status="pending";
+      else if(c._status==="pending")c._status="approved";
+      else if(c._status==="approved")c._status="skipped";
+      else c._status="pending";
+      renderReviewTable(container,candidates);
+    }},statusIcon));
+
+    tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}},fmtD(c.date)));
+
+    const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}});
+    const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},c.description||c._rawDescription);
+    const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+    descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
+    descTd.append(descMain,descSub);
+    tr.append(descTd);
+
+    tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
+
+    const catTd=h("td");
+    catTd.append(h("span",{style:{display:"inline-block",width:"6px",height:"6px",borderRadius:"50%",marginRight:"4px",background:c.ai_confidence==="high"?"var(--g)":c.ai_confidence==="medium"?"var(--y)":"var(--r)"}}));
+    const catSel2=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"},onChange:e=>{
+      c.category_id=e.target.value;
+      c.service_end=getDefEnd(c.category_id,c.date)||c.date;
+      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+      propagateEdits(candidates,idx);
+      renderReviewTable(container,candidates);
+    }});
+    CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;catSel2.append(o)});
+    catTd.append(catSel2);
+    tr.append(catTd);
+
+    tr.append(h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap",fontSize:"11px"}},
+      c.service_start===c.service_end?fmtD(c.date):`${fmtD(c.service_start)}\u2013${fmtD(c.service_end)}`));
+
+    const tagTd=h("td",{class:"hide-m"});
+    tagTd.append(h("input",{type:"text",value:c.tag||"",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",width:"70px",fontFamily:"var(--sans)",outline:"none"},onInput:e=>{c.tag=e.target.value}}));
+    tr.append(tagTd);
+
+    tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.25)",fontSize:"11px"}},c._bankCategory));
+    tbody.append(tr);
+  });
+
+  tbl.append(tbody);
+  wrap.append(tbl);
+  container.append(wrap);
+}
+
+function openImportEditModal(candidates,idx,reviewContainer){
+  const c=candidates[idx];
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal"});
+  modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">Edit Transaction</h3><span style="font-size:10px;color:rgba(255,255,255,0.25)">Raw: ${c._rawDescription}</span></div>`;
+
+  function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===3?"1fr 1fr 1fr":ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+  function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+
+  const mDate=h("input",{class:"inp",type:"date",value:c.date});
+  const mDesc=h("input",{class:"inp",type:"text",value:c.description||c._rawDescription});
+  const mAmt=h("input",{class:"inp",type:"number",step:"0.01",value:c.amount_usd});
+  const mCat=h("select",{class:"inp"});
+  CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;mCat.append(o)});
+  const mSs=h("input",{class:"inp",type:"date",value:c.service_start});
+  const mSe=h("input",{class:"inp",type:"date",value:c.service_end});
+  const mPt=h("select",{class:"inp"});
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
+  const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
+
+  mCat.addEventListener("change",()=>{mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value});
+
+  const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+    c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
+    c.original_amount=c.amount_usd;c.category_id=mCat.value;
+    c.service_start=mSs.value;c.service_end=mSe.value;
+    c.payment_type=mPt.value;c.tag=mTag.value;
+    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    c._status="approved";
+    propagateEdits(candidates,idx);
+    bg.remove();
+    renderReviewTable(reviewContainer,candidates);
+  }},"Save & Approve");
+
+  modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
+  modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
+  modal.append(mRow(mField("Service Start",mSs),mField("Service End",mSe)));
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  modal.append(mSave);
+  bg.append(modal);
+  document.body.append(bg);
+}
+
+async function commitImport(candidates){
+  const approved=candidates.filter(c=>c._status==="approved");
+  if(!approved.length)return;
+  const rows=approved.map(c=>({
+    date:c.date,service_start:c.service_start,service_end:c.service_end,
+    description:c.description,category_id:c.category_id,
+    original_amount:c.original_amount,currency:c.currency,fx_rate:c.fx_rate,
+    amount_usd:Math.round(c.amount_usd*100)/100,
+    payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
+    daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||""
+  }));
+  await sb("transactions",{method:"POST",body:JSON.stringify(rows)});
+  state.txnCount+=rows.length;
+  document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  approved.forEach(c=>c._status="committed");
 }
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
