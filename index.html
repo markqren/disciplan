@@ -828,13 +828,15 @@ async function commitImport(candidates){
   const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
   if(valid.length<approved.length)console.warn(`commitImport: dropped ${approved.length-valid.length} rows with missing dates`);
   if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  const batchId="import-"+new Date().toISOString().slice(0,16);
   const rows=valid.map(c=>({
     date:c.date,service_start:c.service_start,service_end:c.service_end,
     description:c.description,category_id:c.category_id,
     original_amount:c.original_amount,currency:c.currency,fx_rate:c.fx_rate,
     amount_usd:Math.round(c.amount_usd*100)/100,
     payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
-    daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||""
+    daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||"",
+    import_batch:batchId,bank_description:c._rawDescription||null,bank_category:c._bankCategory||null
   }));
   await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   state.txnCount+=rows.length;
@@ -1508,13 +1510,131 @@ function showSnapshotForm(accounts, lastDate, onSave){
 // LEDGER
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
+function openLedgerEditModal(txn,onSaved){
+  let seManual=false;
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal"});
+
+  // Header
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+  const hdrLeft=h("div");
+  hdrLeft.append(h("h3",{style:{margin:"0"}},"Edit Transaction"));
+  if(txn.bank_description)hdrLeft.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"4px"}},"Bank: "+txn.bank_description));
+  const closeBtn=h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715");
+  hdr.append(hdrLeft,closeBtn);
+  modal.append(hdr);
+
+  function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===3?"1fr 1fr 1fr":ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+  function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+
+  const mDate=h("input",{class:"inp",type:"date",value:txn.date,onInput:updatePreview});
+  const mDesc=h("input",{class:"inp",type:"text",value:txn.description||""});
+  const mAmt=h("input",{class:"inp",type:"number",step:"0.01",value:txn.amount_usd,onInput:updatePreview});
+
+  const mCat=h("select",{class:"inp",onChange:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value;updateHint()}
+    updatePreview();
+  }});
+  CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===txn.category_id)o.selected=true;mCat.append(o)});
+
+  const mSs=h("input",{class:"inp",type:"date",value:txn.service_start,onInput:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value}
+    updatePreview();
+  }});
+  const mSe=h("input",{class:"inp",type:"date",value:txn.service_end,onInput:()=>{
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";updatePreview();
+  }});
+  const hintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
+  function updateHint(){const r=ACCRUAL_D[mCat.value];hintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: end of month)":`(Auto: ${r} days)`):""}
+  updateHint();
+  const seLbl=h("label",{class:"lbl"});seLbl.append("Service End ");seLbl.append(hintSpan);
+  const seField=h("div");seField.append(seLbl);seField.append(mSe);
+
+  const mPt=h("select",{class:"inp"});
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===txn.payment_type)o.selected=true;mPt.append(o)});
+  const mTag=h("input",{class:"inp",type:"text",value:txn.tag||""});
+
+  // Accrual preview
+  const previewEl=h("div",{class:"preview hidden"});
+  function updatePreview(){
+    const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){previewEl.classList.add("hidden");return}
+    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
+    if(se<ss){previewEl.classList.add("hidden");return}
+    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const daily=a/days;
+    previewEl.classList.remove("hidden");
+    previewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">USD Amount</div><div style="font-size:18px;font-weight:700;color:#fff;font-family:var(--mono)">${fmtF(a)}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Service Days</div><div style="font-size:18px;font-weight:700;color:var(--b);font-family:var(--mono)">${days}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Daily Cost</div><div style="font-size:18px;font-weight:700;color:var(--g);font-family:var(--mono)">${fmtF(daily)}/d</div></div>
+    </div>`;
+  }
+  updatePreview();
+
+  // Action buttons
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
+    mSave.textContent="Saving...";mSave.disabled=true;
+    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
+    const sdays=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const amt=Math.round(parseFloat(mAmt.value)*100)/100;
+    const dc=Math.round(amt/sdays*1e6)/1e6;
+    try{
+      await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
+        date:mDate.value,description:mDesc.value,category_id:mCat.value,
+        amount_usd:amt,original_amount:amt,
+        service_start:mSs.value,service_end:mSe.value,
+        service_days:sdays,daily_cost:dc,
+        payment_type:mPt.value,tag:(mTag.value||"").toLowerCase().trim()
+      })});
+      bg.remove();
+      const msg=document.getElementById("ledgerOkMsg");
+      if(msg){msg.textContent="Updated";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      onSaved();
+    }catch(e){alert("Save failed: "+e.message);mSave.textContent="Save";mSave.disabled=false}
+  }},"Save");
+
+  let delTimer=null;
+  const mDel=h("button",{class:"btn",style:{background:"rgba(224,122,95,0.15)",color:"var(--r)",width:"auto",padding:"12px 20px"},onClick:async()=>{
+    if(mDel.dataset.confirm!=="1"){
+      mDel.dataset.confirm="1";mDel.textContent="Confirm Delete";
+      delTimer=setTimeout(()=>{mDel.dataset.confirm="0";mDel.textContent="Delete"},3000);
+      return;
+    }
+    if(delTimer)clearTimeout(delTimer);
+    mDel.textContent="Deleting...";mDel.disabled=true;
+    try{
+      await sb(`transactions?id=eq.${txn.id}`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
+      state.txnCount--;
+      document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      bg.remove();
+      const msg=document.getElementById("ledgerOkMsg");
+      if(msg){msg.textContent="Deleted";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      onSaved();
+    }catch(e){alert("Delete failed: "+e.message);mDel.textContent="Delete";mDel.disabled=false;mDel.dataset.confirm="0"}
+  }},"Delete");
+
+  const mCancel=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel");
+  btnRow.append(mSave,mDel,mCancel);
+
+  modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
+  modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
+  modal.append(mRow(mField("Service Start",mSs),seField));
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  modal.append(previewEl);
+  modal.append(btnRow);
+  bg.append(modal);
+  document.body.append(bg);
+}
+
 async function renderLedger(el){
   const PS=50;
   if(!state.lf)state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};
   const f=state.lf;
   const fS="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 10px;color:#e8e8e4;font-size:11px;font-family:var(--sans);outline:none";
 
-  el.innerHTML=`<div class="cd"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">Transactions</h3><div id="pgNav"></div></div><div id="filterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div><div id="ledgerBody">Loading...</div></div>`;
+  el.innerHTML=`<div class="cd"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">Transactions</h3><span id="ledgerOkMsg" class="ok-msg hidden"></span><div id="pgNav"></div></div><div id="filterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div><div id="ledgerBody">Loading...</div></div>`;
 
   const fb=document.getElementById("filterBar");
 
@@ -1568,21 +1688,24 @@ async function renderLedger(el){
     if(txns.length<PS)next.disabled=true;
     nav.append(next);
 
-    let thtml=`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead><tbody>`;
+    const wrap=h("div",{style:{overflowX:"auto"}});
+    const tbl=h("table");
+    tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
+    const tbody=document.createElement("tbody");
     txns.forEach(t=>{
-      thtml+=`<tr>
-        <td class="m" style="color:rgba(255,255,255,0.55);white-space:nowrap">${fmtD(t.date)}</td>
-        <td style="color:rgba(255,255,255,0.8);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>
-        <td><span class="badge" style="background:${(CC[t.category_id]||"#666")}22;color:${CC[t.category_id]||"#888"}">${t.category_id}</span></td>
-        <td class="r m" style="color:${t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}">${fmtF(t.amount_usd)}${t.currency!=="USD"?`<span style="color:rgba(255,255,255,0.25);margin-left:3px;font-size:10px">${t.currency}</span>`:""}</td>
-        <td class="hide-m" style="color:rgba(255,255,255,0.4);font-size:11px;white-space:nowrap">${t.payment_type||""}</td>
-        <td class="m hide-m" style="color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.service_start)}\u2013${fmtD(t.service_end)}${t.service_days>1?`<span style="margin-left:3px;color:rgba(255,255,255,0.2)">(${t.service_days}d)</span>`:""}</td>
-        <td class="r m hide-m" style="color:var(--g)">${fmtF(t.daily_cost)}</td>
-        <td style="color:rgba(255,255,255,0.35);font-size:11px">${t.tag?`<span style="background:rgba(255,255,255,0.06);padding:2px 7px;border-radius:4px">${t.tag}</span>`:""}</td>
-      </tr>`;
+      const tr=h("tr",{style:{cursor:"pointer"},onClick:()=>openLedgerEditModal(t,loadPage)});
+      tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
+      tr.append(h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},t.description));
+      const catTd=h("td");catTd.append(h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+"22",color:CC[t.category_id]||"#888"}},t.category_id));tr.append(catTd);
+      const amtTd=h("td",{class:"r m",style:{color:t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}});amtTd.append(document.createTextNode(fmtF(t.amount_usd)));if(t.currency!=="USD")amtTd.append(h("span",{style:{color:"rgba(255,255,255,0.25)",marginLeft:"3px",fontSize:"10px"}},t.currency));tr.append(amtTd);
+      tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}},t.payment_type||""));
+      const spTd=h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});spTd.append(document.createTextNode(fmtD(t.service_start)+"\u2013"+fmtD(t.service_end)));if(t.service_days>1)spTd.append(h("span",{style:{marginLeft:"3px",color:"rgba(255,255,255,0.2)"}},`(${t.service_days}d)`));tr.append(spTd);
+      tr.append(h("td",{class:"r m hide-m",style:{color:"var(--g)"}},fmtF(t.daily_cost)));
+      const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});if(t.tag)tagTd.append(h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px"}},t.tag));tr.append(tagTd);
+      tbody.append(tr);
     });
-    thtml+=`</tbody></table></div>`;
-    document.getElementById("ledgerBody").innerHTML=thtml;
+    tbl.append(tbody);wrap.append(tbl);
+    const body=document.getElementById("ledgerBody");body.innerHTML="";body.append(wrap);
   }
   loadPage();
 }
