@@ -35,10 +35,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (33 items)</summary>
+<summary><strong>✅ Completed</strong> (34 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-09 | **Delete/edit transaction 401 fix** — `sb()` helper had a header-overwrite bug: `{headers:{...authHeaders(),...opts.headers},...opts}` — the trailing `...opts` re-set `headers` to just the custom headers, dropping auth. Fixed by destructuring: `const{headers:hd,...rest}=opts; fetch(url,{...rest,headers:{...authHeaders(),...(hd||{})}})`. Affected PATCH, DELETE, and commitImport POST. | Bug → Done | Feb 28 |
 | FEA-21 | **Ledger Edit/Delete** — Click any ledger row to open edit modal (reuses import modal pattern). All fields editable: date, description, category, amount, service period, payment account, tag. Live accrual preview. Save via PATCH, delete via two-click confirmation DELETE. Shows bank_description subtitle when available (FEA-27 data). Success feedback via flash message. | Feature → Done | Feb 27 |
 | FEA-26 | **Import Batch Tracking** — `commitImport` now generates a batch ID (`import-YYYY-MM-DDTHH:MM`) and sets `import_batch` on all inserted rows. Enables rollback (`DELETE WHERE import_batch = X`) and audit trail. | Feature → Done | Feb 27 |
 | FEA-27 | **Store Original Bank Metadata** — `commitImport` now persists `bank_description` (raw bank text) and `bank_category` (bank's category) from CSV import candidates. Preserves mapping chain for auditing and AI improvement. | Feature → Done | Feb 27 |
