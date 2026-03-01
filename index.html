@@ -1065,13 +1065,12 @@ async function renderBS(el){
     }
     Object.values(byType).forEach(a=>a.sort((x,y)=>y.bal-x.bal));
 
-    // Compute totals — assets include checking, savings, investments, and other (cash etc.)
-    // Liabilities are negative balances on credit cards and liability accounts (Venmo, Splitwise, etc.)
+    // Compute totals — straight sums so KPI cards match group subtotals
     const assetAccts=[...byType.checking,...byType.savings,...byType.investment,...byType.other];
     const liabAccts=[...byType.credit,...byType.liability];
-    const totA=assetAccts.reduce((s,a)=>s+Math.max(0,a.bal),0);
-    const totL=liabAccts.reduce((s,a)=>s+Math.abs(Math.min(0,a.bal)),0);
-    const nw=assetAccts.reduce((s,a)=>s+a.bal,0)+liabAccts.reduce((s,a)=>s+a.bal,0);
+    const totA=assetAccts.reduce((s,a)=>s+a.bal,0);
+    const totL=liabAccts.reduce((s,a)=>s+a.bal,0);
+    const nw=totA+totL;
 
     const txnCount=ledgerBals.reduce((s,b)=>s+parseInt(b.txn_count||0),0);
     el.querySelector(".sub").textContent=`Live from ${txnCount.toLocaleString()} ledger transactions · USD`;
