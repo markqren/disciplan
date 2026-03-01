@@ -1042,10 +1042,11 @@ async function renderBS(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Balance Sheet</h2><p class="sub">Loading...</p></div><div id="bsBody"></div>`;
   try{
     // Fetch live ledger balances, accounts metadata, and snapshots in parallel
-    const [ledgerBals,accts,snaps]=await Promise.all([
+    const [ledgerBals,accts,snaps,creditBals]=await Promise.all([
       sbRPC("get_ledger_balances"),
       sb("accounts?order=display_order"),
-      sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc")
+      sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc"),
+      sbRPC("get_credit_balances")
     ]);
     const body=document.getElementById("bsBody");body.innerHTML="";
 
@@ -1056,6 +1057,7 @@ async function renderBS(el){
     const byType={checking:[],savings:[],credit:[],investment:[],liability:[],other:[]};
     for(const lb of ledgerBals){
       const pt=lb.payment_type;
+      if(pt==="Transfer")continue;
       const acct=acctMap[pt];
       const t=acct?.account_type||"other";
       const bal=parseFloat(lb.net_balance)||0;
@@ -1065,11 +1067,17 @@ async function renderBS(el){
     }
     Object.values(byType).forEach(a=>a.sort((x,y)=>y.bal-x.bal));
 
+    // Process credit sub-ledger balances
+    const creditRows=creditBals
+      .map(c=>({name:c.credit_name,bal:parseFloat(c.net_balance)||0,cnt:parseInt(c.txn_count)||0}))
+      .filter(c=>Math.abs(c.bal)>=0.01);
+    const creditTotal=creditRows.reduce((s,c)=>s+c.bal,0);
+
     // Compute totals — straight sums so KPI cards match group subtotals
     const assetAccts=[...byType.checking,...byType.savings,...byType.investment,...byType.other];
     const liabAccts=[...byType.credit,...byType.liability];
     const totA=assetAccts.reduce((s,a)=>s+a.bal,0);
-    const totL=liabAccts.reduce((s,a)=>s+a.bal,0);
+    const totL=liabAccts.reduce((s,a)=>s+a.bal,0)+creditTotal;
     const nw=totA+totL;
 
     const txnCount=ledgerBals.reduce((s,b)=>s+parseInt(b.txn_count||0),0);
@@ -1130,8 +1138,16 @@ async function renderBS(el){
     row2.append(assetsCard);
 
     const liabCard=h("div",{class:"cd"});
-    liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)")+acctGroup("Credit & Transfers",byType.liability,"var(--y)");
-    if(!byType.credit.length&&!byType.liability.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`
+    liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)");
+    if(byType.liability.length)liabCard.innerHTML+=acctGroup("Other Liabilities",byType.liability,"var(--y)");
+    // Expandable Credits & Transfers sub-ledger
+    if(creditRows.length){
+      let credHtml=`<div class="acct-grp"><div class="acct-hdr" style="cursor:pointer" onclick="this.querySelector('.pf-toggle').classList.toggle('open');this.parentElement.querySelectorAll('.credit-sub').forEach(r=>r.classList.toggle('hidden'))"><span style="font-size:12px;font-weight:600;color:var(--y);text-transform:uppercase;letter-spacing:0.05em"><span class="pf-toggle">▸</span> Credits & Transfers</span><span style="font-size:13px;font-weight:700;color:var(--y);font-family:var(--mono)">${fmtF(creditTotal)}</span></div>`;
+      creditRows.forEach(c=>{const clr=c.bal>=0?"var(--g)":"var(--r)";credHtml+=`<div class="acct-row credit-sub hidden"><span style="color:rgba(255,255,255,0.6)" title="${c.cnt} transactions">${c.name}</span><span style="color:${clr};font-family:var(--mono)" title="${c.cnt} txns">${fmtF(c.bal)}</span></div>`});
+      credHtml+="</div>";
+      liabCard.innerHTML+=credHtml;
+    }
+    if(!byType.credit.length&&!byType.liability.length&&!creditRows.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`
     row2.append(liabCard);
     body.append(row2);
   }catch(e){document.getElementById("bsBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error: ${e.message}</div>`}

@@ -25,7 +25,6 @@
 | FEA-11 | **AI Daily Insights Agent** | Feature | Low | Claude API-powered agent/chatbot that surfaces insights from transaction data. Runs daily (push notification or email digest) and on-demand when prompted. Examples: spending pattern analysis, anomaly detection ("you spent 3x on restaurants this month"), trend summaries, tag comparisons ("Japan was 20% cheaper than szója boys per day"). Could live as a chat panel in the app or a standalone bot. |
 | FEA-12 | **Budgeting / Targets** | Feature | Medium | Set monthly or per-category budget targets with visual progress bars. Data exists: original spreadsheet has % Desired and % Delta columns. |
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
-| INF-01 | **Git CI/CD** | Infra | Medium | Set up GitHub repo + Netlify auto-deploy from main branch. Xcode ready. |
 | FEA-14 | **Cashback tracking** | Feature | Low | Data exists in CashbackSummary.csv and CashbackTRANSACTIONS.csv (219 redemptions). Could show net credit card rewards. |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
 | FEA-23 | **Offline Caching / PWA** | Feature | Medium | Cache a snapshot of summary data (IS charts, balance sheet, tag totals, portfolio KPIs) so the app is viewable without internet. Use a Service Worker to serve cached `index.html` + Chart.js CDN assets. On each online load, refresh the cache with latest Supabase data. Offline mode would be read-only (no Entry/Export). Could evolve into a full PWA with `manifest.json` for Add to Home Screen. Key pieces: (1) Service Worker for asset caching, (2) IndexedDB or Cache API for pre-rendered summary data, (3) offline banner/indicator in UI. |
@@ -34,10 +33,12 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (42 items)</summary>
+<summary><strong>✅ Completed</strong> (44 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| INF-01 | **Git CI/CD** — GitHub repo (`markqren/disciplan`) + Netlify auto-deploy from `main` branch. Every `git push` triggers a production build. | Infra → Done | Feb 18 |
+| FEA-35 | **Credits & Transfers Sub-Ledger** — Balance Sheet now breaks out Transfer transactions by `credit` field (Home, HSA, Tony, etc.) into an expandable "Credits & Transfers" section under Liabilities. Uses `get_credit_balances()` RPC for per-credit net balances. Positive = owed to Mark (green), negative = Mark owes (red). Transaction count tooltips on hover. Collapsed by default with ▸/▾ toggle. Credit total included in Total Liabilities and Net Worth KPIs. | Feature → Done | Mar 1 |
 | FEA-33 | **TD Account CAD Tooltips** — In the Balance Sheet `acctGroup` renderer, TD-prefixed account balances show a hover tooltip with the CAD equivalent (`CA$` = `USD / 0.73`). Quick reference for reconciling against actual Canadian bank balances. All totals remain in USD. | Feature → Done | Mar 1 |
 | BUG-10 | **Balance Sheet: Live Ledger Balances** — Balance Sheet was only showing manual snapshot balances, not live totals from ledger transactions. Added `get_ledger_balances()` RPC function that computes net balance per payment_type from all transactions (credits − debits). `renderBS` now calls this RPC and groups results by account_type (checking, savings, investment, credit, liability, other). Subtitle shows live transaction count. Snapshot-based NW Over Time chart preserved for historical tracking. Validated: Chase Chequing = $137,611.08 (off by $0.01 from spreadsheet SOT). | Bug → Done | Mar 1 |
 | DAT-01 | **Reconcile missing transactions** — Full CSV-vs-SQL reconciliation of 12,064 transactions. Original estimate of ~73 missing was incorrect — caused by character encoding differences (curly apostrophes vs mojibake), not actual missing data. India $1,184 flight confirmed present. Added `lacma` tag (3 $0 refund txns) to tags table and tagged transactions. All non-zero transactions accounted for. ~634 $0 early 2017-2018 CAD-only entries intentionally excluded (no USD impact). | Data → Done | Mar 1 |
