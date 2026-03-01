@@ -1122,7 +1122,7 @@ async function renderBS(el){
       if(!accts.length)return"";
       const total=accts.reduce((s,a)=>s+a.bal,0);
       let html=`<div class="acct-grp"><div class="acct-hdr"><span style="font-size:12px;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.05em">${title}</span><span style="font-size:13px;font-weight:700;color:${color};font-family:var(--mono)">${fmtF(total)}</span></div>`;
-      accts.forEach(a=>html+=`<div class="acct-row"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${fmtF(a.bal)}</span></div>`);
+      accts.forEach(a=>{const cad=a.name.startsWith("TD")?` title="CA$${(a.bal/0.73).toFixed(2)}"`:"";html+=`<div class="acct-row"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${cad} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${fmtF(a.bal)}</span></div>`});
       return html+"</div>";
     }
     const assetsCard=h("div",{class:"cd"});
