@@ -591,7 +591,8 @@ function renderEntry(el){
 
   // Upload bar
   const fileInp=h("input",{class:"inp",type:"file",accept:".csv"});
-  const impPtSel=h("select",{class:"inp"});
+  let impPtManual=false;
+  const impPtSel=h("select",{class:"inp",onChange:()=>{impPtManual=true}});
   PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Chase Sapphire")o.selected=true;impPtSel.append(o)});
   const impTagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
   const apiKeyInp=h("input",{class:"inp",type:"password",placeholder:"sk-ant-...",value:getApiKey()||""});
@@ -627,10 +628,12 @@ function renderEntry(el){
       const profile=detectBankProfile(csv.headers);
       if(!profile)throw new Error("Unrecognized bank format. Expected headers: Transaction Date, Post Date, Memo");
 
-      // Auto-detect payment type from filename
-      const fn=file.name.toLowerCase();
-      if(fn.includes("chase"))impPtSel.value="Chase Sapphire";
-      else if(fn.includes("amex"))impPtSel.value="AMEX Rose Gold";
+      // Auto-detect payment type from filename (only if user hasn't manually changed it)
+      if(!impPtManual){
+        const fn=file.name.toLowerCase();
+        if(fn.includes("chase"))impPtSel.value="Chase Sapphire";
+        else if(fn.includes("amex"))impPtSel.value="AMEX Rose Gold";
+      }
       const pt=impPtSel.value;
       const tag=impTagInp.value.trim();
 
