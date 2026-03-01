@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Feb 27, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Feb 28, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
@@ -35,10 +35,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (34 items)</summary>
+<summary><strong>✅ Completed</strong> (37 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-32 | **Lightweight Offline Cache** — `sb()` and `sbRPC()` cache every successful GET response in `sessionStorage` (keyed by query path). On fetch failure (network down, server error), returns cached data instead of hanging on "Loading...". Yellow banner shows "Showing cached data · Xm ago" with dismiss button. Banner auto-clears on next successful fresh load. Only caches reads, not writes. `sessionStorage` scoped to browser tab lifetime — no stale data across sessions. | Feature → Done | Feb 28 |
+| FEA-30 | **Persist Tab State on Refresh** — URL hash routing (`#ledger`, `#income-all`, etc.) syncs `state.tab` and `state.year` to `location.hash` via `history.replaceState`. On page load, `init()` reads hash and restores state before first render. Browser refresh stays on current tab. | Feature → Done | Feb 28 |
+| FEA-31 | **In-App Refresh Button** — `↻` button in header re-renders current tab by calling `renderContent()` without full page reload. CSS spin animation on click for visual feedback. | Feature → Done | Feb 28 |
 | BUG-09 | **Delete/edit transaction 401 fix** — `sb()` helper had a header-overwrite bug: `{headers:{...authHeaders(),...opts.headers},...opts}` — the trailing `...opts` re-set `headers` to just the custom headers, dropping auth. Fixed by destructuring: `const{headers:hd,...rest}=opts; fetch(url,{...rest,headers:{...authHeaders(),...(hd||{})}})`. Affected PATCH, DELETE, and commitImport POST. | Bug → Done | Feb 28 |
 | FEA-21 | **Ledger Edit/Delete** — Click any ledger row to open edit modal (reuses import modal pattern). All fields editable: date, description, category, amount, service period, payment account, tag. Live accrual preview. Save via PATCH, delete via two-click confirmation DELETE. Shows bank_description subtitle when available (FEA-27 data). Success feedback via flash message. | Feature → Done | Feb 27 |
 | FEA-26 | **Import Batch Tracking** — `commitImport` now generates a batch ID (`import-YYYY-MM-DDTHH:MM`) and sets `import_batch` on all inserted rows. Enables rollback (`DELETE WHERE import_batch = X`) and audit trail. | Feature → Done | Feb 27 |

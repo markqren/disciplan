@@ -81,6 +81,8 @@ select.inp{cursor:pointer;appearance:auto}
 .ref-btn:hover{color:rgba(255,255,255,0.7)}
 @keyframes spin{to{transform:rotate(360deg)}}
 .ref-btn.spinning{animation:spin 0.6s linear}
+.offline-banner{background:rgba(224,122,95,0.15);color:var(--y);text-align:center;padding:6px 12px;font-size:11px;border-bottom:1px solid rgba(224,122,95,0.2)}
+.offline-banner.hidden{display:none}
 </style>
 </head>
 <body>
@@ -98,6 +100,8 @@ select.inp{cursor:pointer;appearance:auto}
     </form>
   </div>
 </div>
+
+<div id="offlineBanner" class="offline-banner hidden">Showing cached data · <span id="offlineTs"></span> <button onclick="this.parentElement.classList.add('hidden')" style="background:0;border:0;color:inherit;cursor:pointer;margin-left:8px">✕</button></div>
 
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
@@ -125,16 +129,46 @@ function authHeaders(extra = {}) {
   return {"apikey":SB_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json",...extra};
 }
 
+// Cache helpers for offline fallback (FEA-32)
+const CACHE_PREFIX="dc_";
+function cacheSet(key,data){try{sessionStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch(e){}}
+function cacheGet(key){try{const raw=sessionStorage.getItem(CACHE_PREFIX+key);return raw?JSON.parse(raw):null}catch(e){return null}}
+function showOfflineBanner(ts){
+  const el=document.getElementById("offlineBanner");
+  if(el){
+    const ago=Math.round((Date.now()-ts)/60000);
+    document.getElementById("offlineTs").textContent=ago<1?"just now":ago<60?`${ago}m ago`:`${Math.round(ago/60)}h ago`;
+    el.classList.remove("hidden");
+  }
+}
+
 async function sb(path,opts={}){
   const{headers:hd,...rest}=opts;
-  const r=await fetch(`${SB_URL}/rest/v1/${path}`,{...rest,headers:{...authHeaders(),...(hd||{})}});
-  if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-  return r.json();
+  const method=(rest.method||"GET").toUpperCase();
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/${path}`,{...rest,headers:{...authHeaders(),...(hd||{})}});
+    if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    const data=await r.json();
+    if(method==="GET") cacheSet(path,data);
+    return data;
+  }catch(e){
+    if(method==="GET"){const cached=cacheGet(path);if(cached){showOfflineBanner(cached.ts);return cached.data;}}
+    throw e;
+  }
 }
 async function sbRPC(fn,params={}){
-  const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:authHeaders(),body:JSON.stringify(params)});
-  if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-  return r.json();
+  const cacheKey=`rpc_${fn}_${JSON.stringify(params)}`;
+  try{
+    const r=await fetch(`${SB_URL}/rest/v1/rpc/${fn}`,{method:"POST",headers:authHeaders(),body:JSON.stringify(params)});
+    if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
+    const data=await r.json();
+    cacheSet(cacheKey,data);
+    return data;
+  }catch(e){
+    const cached=cacheGet(cacheKey);
+    if(cached){showOfflineBanner(cached.ts);return cached.data;}
+    throw e;
+  }
 }
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
@@ -416,6 +450,7 @@ function renderTabs(){
 }
 
 function renderContent(){
+  const ob=document.getElementById("offlineBanner");if(ob)ob.classList.add("hidden");
   const el=document.getElementById("content");
   el.innerHTML="";
   if(state.tab==="entry")renderEntry(el);
