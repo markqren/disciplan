@@ -33,11 +33,12 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (44 items)</summary>
+<summary><strong>✅ Completed</strong> (45 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
 | INF-01 | **Git CI/CD** — GitHub repo (`markqren/disciplan`) + Netlify auto-deploy from `main` branch. Every `git push` triggers a production build. | Infra → Done | Feb 18 |
+| FEA-36 | **CC Payment Auto-Ledger Pairs** — Chase CSV imports now process "Payment" rows instead of skipping them. Each CC payment generates a double-entry pair: Side A (negative on the credit card, e.g. "Bill Paid: Chase Sapphire") and Side B (positive on Chase Chequing, e.g. "Chase Sapphire Bill Payment"). Pre-approved with 💳 badge in review table. Side B duplicate detection prevents double-posting legacy entries. Net ledger impact = zero. | Feature → Done | Mar 1 |
 | FEA-35 | **Credits & Transfers Sub-Ledger** — Balance Sheet now breaks out Transfer transactions by `credit` field (Home, HSA, Tony, etc.) into an expandable "Credits & Transfers" section under Liabilities. Uses `get_credit_balances()` RPC for per-credit net balances. Positive = owed to Mark (green), negative = Mark owes (red). Transaction count tooltips on hover. Collapsed by default with ▸/▾ toggle. Credit total included in Total Liabilities and Net Worth KPIs. | Feature → Done | Mar 1 |
 | FEA-33 | **TD Account CAD Tooltips** — In the Balance Sheet `acctGroup` renderer, TD-prefixed account balances show a hover tooltip with the CAD equivalent (`CA$` = `USD / 0.73`). Quick reference for reconciling against actual Canadian bank balances. All totals remain in USD. | Feature → Done | Mar 1 |
 | BUG-10 | **Balance Sheet: Live Ledger Balances** — Balance Sheet was only showing manual snapshot balances, not live totals from ledger transactions. Added `get_ledger_balances()` RPC function that computes net balance per payment_type from all transactions (credits − debits). `renderBS` now calls this RPC and groups results by account_type (checking, savings, investment, credit, liability, other). Subtitle shows live transaction count. Snapshot-based NW Over Time chart preserved for historical tracking. Validated: Chase Chequing = $137,611.08 (off by $0.01 from spreadsheet SOT). | Bug → Done | Mar 1 |
