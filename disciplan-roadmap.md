@@ -33,11 +33,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (45 items)</summary>
+<summary><strong>✅ Completed</strong> (47 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
 | INF-01 | **Git CI/CD** — GitHub repo (`markqren/disciplan`) + Netlify auto-deploy from `main` branch. Every `git push` triggers a production build. | Infra → Done | Feb 18 |
+| FEA-37 | **"Since Last Export" Button** — New export option that tracks the highest transaction `id` at export time in `localStorage`. Subsequent clicks only export transactions added after that point. Button label shows last export date. Only the "Since Last Export" button advances the marker — "All" and "New Only" do not. Shows alert if no new transactions exist. | Feature → Done | Mar 1 |
+| BUG-11 | **Import Auto-Detect Overrides Manual Payment Type** — Chase CSV filename auto-detection was overwriting the payment type dropdown to "Chase Sapphire" on every Import click, even after manual selection of a different card. Fixed by tracking `impPtManual` flag — auto-detect only runs if the user hasn't changed the dropdown. | Bug → Done | Mar 1 |
 | FEA-36 | **CC Payment Auto-Ledger Pairs** — Chase CSV imports now process "Payment" rows instead of skipping them. Each CC payment generates a double-entry pair: Side A (negative on the credit card, e.g. "Bill Paid: Chase Sapphire") and Side B (positive on Chase Chequing, e.g. "Chase Sapphire Bill Payment"). Pre-approved with 💳 badge in review table. Side B duplicate detection prevents double-posting legacy entries. Net ledger impact = zero. | Feature → Done | Mar 1 |
 | FEA-35 | **Credits & Transfers Sub-Ledger** — Balance Sheet now breaks out Transfer transactions by `credit` field (Home, HSA, Tony, etc.) into an expandable "Credits & Transfers" section under Liabilities. Uses `get_credit_balances()` RPC for per-credit net balances. Positive = owed to Mark (green), negative = Mark owes (red). Transaction count tooltips on hover. Collapsed by default with ▸/▾ toggle. Credit total included in Total Liabilities and Net Worth KPIs. | Feature → Done | Mar 1 |
 | FEA-33 | **TD Account CAD Tooltips** — In the Balance Sheet `acctGroup` renderer, TD-prefixed account balances show a hover tooltip with the CAD equivalent (`CA$` = `USD / 0.73`). Quick reference for reconciling against actual Canadian bank balances. All totals remain in USD. | Feature → Done | Mar 1 |

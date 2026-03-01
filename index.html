@@ -1929,8 +1929,8 @@ async function exportTSV(mode){
     }
     const label=mode==="new"?"new_":mode==="since"?"since_":"";
     dlFile(lines.join("\n"),"disciplan_"+label+"export_"+new Date().toISOString().slice(0,10)+".tsv","text/tab-separated-values");
-    // Track last export high-water mark
-    if(all.length){
+    // Track last export high-water mark (only for "since" mode)
+    if(mode==="since"&&all.length){
       const maxId=Math.max(...all.map(t=>t.id));
       const prev=parseInt(localStorage.getItem("disciplan_last_export_id")||"0");
       if(maxId>prev){localStorage.setItem("disciplan_last_export_id",String(maxId));localStorage.setItem("disciplan_last_export_date",today())}
