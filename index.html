@@ -1440,7 +1440,7 @@ async function renderTags(el){
       if(!t.tag)continue;
       if(!tm[t.tag])tm[t.tag]={total:0,count:0,cats:{}};
       tm[t.tag].count++;
-      if(t.category_id==="income"||t.category_id==="investment")continue;
+      if(t.category_id==="income"||t.category_id==="investment"||t.category_id==="adjustment")continue;
       // Accrual: compute overlap of txn service period with tag date window
       const tg=tagDates[t.tag];
       if(tg&&tg.start&&tg.end&&t.daily_cost!=null&&t.service_start&&t.service_end){
@@ -1491,7 +1491,7 @@ async function renderTags(el){
 
 async function showTagDetail(tag){
   const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
-  const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&order=date.desc`);
+  const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&category_id=neq.adjustment&order=date.desc`);
   const cats={};let total=0;
   for(const t of txns){
     if(t.daily_cost!=null&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end){
@@ -1806,7 +1806,7 @@ async function renderCrossYear(el){
       for(const r of data){
         const amt=parseFloat(r.amount)||0;
         if(r.category_id==="income"){inc+=Math.abs(amt);continue}
-        if(r.category_id==="investment")continue;
+        if(r.category_id==="investment"||r.category_id==="adjustment")continue;
         exp+=amt;
         const p=Object.entries(SUB_MAP).find(([,subs])=>subs.includes(r.category_id));
         const pid=p?p[0]:r.category_id;
