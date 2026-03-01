@@ -1041,25 +1041,41 @@ async function renderIS(el){
 async function renderBS(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Balance Sheet</h2><p class="sub">Loading...</p></div><div id="bsBody"></div>`;
   try{
-    const snaps=await sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc");
+    // Fetch live ledger balances, accounts metadata, and snapshots in parallel
+    const [ledgerBals,accts,snaps]=await Promise.all([
+      sbRPC("get_ledger_balances"),
+      sb("accounts?order=display_order"),
+      sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc")
+    ]);
     const body=document.getElementById("bsBody");body.innerHTML="";
 
-    const dates=[...new Set(snaps.map(s=>s.snapshot_date))].sort().reverse();
-    const latest=dates[0];
-    el.querySelector(".sub").textContent=`As of ${fmtD(latest)} · ${dates.length} snapshots · USD`;
+    // Build account type lookup from accounts table
+    const acctMap={};for(const a of accts)acctMap[a.label]=a;
 
+    // Map ledger balances to account types
     const byType={checking:[],savings:[],credit:[],investment:[],liability:[],other:[]};
-    for(const s of snaps){
-      if(s.snapshot_date!==latest)continue;
-      const t=s.accounts?.account_type||"other";
-      const bal=parseFloat(s.balance_usd||s.balance)||0;
-      (byType[t]||byType.other).push({name:s.accounts?.label||s.account_id,bal});
+    for(const lb of ledgerBals){
+      const pt=lb.payment_type;
+      const acct=acctMap[pt];
+      const t=acct?.account_type||"other";
+      const bal=parseFloat(lb.net_balance)||0;
+      // Skip zero-balance retired/inactive accounts
+      if(Math.abs(bal)<0.01)continue;
+      (byType[t]||byType.other).push({name:pt,bal});
     }
     Object.values(byType).forEach(a=>a.sort((x,y)=>y.bal-x.bal));
 
-    const totA=[...byType.checking,...byType.savings,...byType.investment].reduce((s,a)=>s+a.bal,0);
-    const totL=[...byType.credit,...byType.liability].reduce((s,a)=>s+Math.abs(a.bal),0);
-    const nw=totA-totL;
+    // Compute totals — for credit cards, a positive ledger balance means you've been credited more
+    // than debited (overpaid), negative means you owe. Liabilities similarly.
+    const assetAccts=[...byType.checking,...byType.savings,...byType.investment];
+    const liabAccts=[...byType.credit,...byType.liability];
+    const totA=assetAccts.reduce((s,a)=>s+Math.max(0,a.bal),0);
+    const totL=liabAccts.reduce((s,a)=>s+Math.abs(Math.min(0,a.bal)),0);
+    const otherNet=byType.other.reduce((s,a)=>s+a.bal,0);
+    const nw=assetAccts.reduce((s,a)=>s+a.bal,0)+liabAccts.reduce((s,a)=>s+a.bal,0)+otherNet;
+
+    const txnCount=ledgerBals.reduce((s,b)=>s+parseInt(b.txn_count||0),0);
+    el.querySelector(".sub").textContent=`Live from ${txnCount.toLocaleString()} ledger transactions · USD`;
 
     const stats=h("div",{class:"g4"});
     stats.append(statCard("🏦","total assets",fmtN(totA),"var(--b)"));
@@ -1067,26 +1083,28 @@ async function renderBS(el){
     stats.append(statCard("💎","net worth",fmtN(nw),"var(--g)"));
     body.append(stats);
 
-    // Snapshot age & reminder
-    const daysSinceSnap=Math.floor((new Date()-new Date(latest))/864e5);
+    // Snapshot bar (for NW over time chart + manual snapshots)
+    const snapDates=[...new Set(snaps.map(s=>s.snapshot_date))].sort().reverse();
+    const latestSnap=snapDates[0];
+    const daysSinceSnap=latestSnap?Math.floor((new Date()-new Date(latestSnap))/864e5):999;
     if(daysSinceSnap>30){
       const banner=h("div",{class:"cd",style:{borderColor:"rgba(242,204,143,0.3)",marginBottom:"16px",padding:"14px 18px"}});
       banner.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><span style="font-size:14px">⚠️</span><span style="font-size:12px;color:var(--y)">Last snapshot was ${daysSinceSnap} days ago. Consider taking a new one to keep your net worth chart current.</span></div>`;
       body.append(banner);
     }
     const snapBar=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px",padding:"10px 16px",background:"rgba(255,255,255,0.02)",borderRadius:"10px",border:"1px solid var(--bdr)"}});
-    snapBar.innerHTML=`<div><span style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.6)">Snapshots</span><span style="font-size:11px;color:rgba(255,255,255,0.3);margin-left:8px">${dates.length} saved · Last: ${fmtD(latest)} (${daysSinceSnap}d ago)</span></div>`;
+    snapBar.innerHTML=`<div><span style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.6)">Snapshots</span><span style="font-size:11px;color:rgba(255,255,255,0.3);margin-left:8px">${snapDates.length} saved${latestSnap?` · Last: ${fmtD(latestSnap)} (${daysSinceSnap}d ago)`:""}</span></div>`;
     const snapBtn=h("button",{class:"pg-btn",style:{background:"rgba(129,178,154,0.12)",borderColor:"rgba(129,178,154,0.3)",color:"var(--g)",padding:"6px 14px"},onClick:async()=>{
       snapBtn.textContent="Loading...";snapBtn.disabled=true;
-      try{const accounts=await sb("accounts?is_active=eq.true&order=display_order");showSnapshotForm(accounts,latest,()=>renderContent())}
+      try{const accounts=await sb("accounts?is_active=eq.true&order=display_order");showSnapshotForm(accounts,latestSnap,()=>renderContent())}
       catch(e){alert("Error: "+e.message);snapBtn.textContent="📸 Take Snapshot";snapBtn.disabled=false}
     }},"📸 Take Snapshot");
     snapBar.append(snapBtn);
     body.append(snapBar);
 
-    // NW over time
-    if(dates.length>2){
-      const nwData=dates.sort().map(d=>{
+    // NW over time (from snapshots — historical data)
+    if(snapDates.length>2){
+      const nwData=snapDates.sort().map(d=>{
         let a=0,l=0;
         for(const s of snaps){if(s.snapshot_date!==d)continue;const t=s.accounts?.account_type||"other";const b=parseFloat(s.balance_usd||s.balance)||0;if(["checking","savings","investment"].includes(t))a+=b;else if(["credit","liability"].includes(t))l+=Math.abs(b)}
         return{d,a,nw:a-l};
@@ -1100,7 +1118,7 @@ async function renderBS(el){
       ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11}}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)",font:{size:9},maxTicksLimit:12},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
     }
 
-    // Account groups
+    // Live ledger account groups
     const row2=h("div",{class:"g2"});
     function acctGroup(title,accts,color){
       if(!accts.length)return"";
@@ -1117,6 +1135,13 @@ async function renderBS(el){
     liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)")+acctGroup("Owed to Others",byType.liability,"var(--y)");
     if(!byType.credit.length&&!byType.liability.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`;
     row2.append(liabCard);
+
+    // Other accounts (Cash, Transfer, etc.)
+    if(byType.other.length){
+      const otherCard=h("div",{class:"cd",style:{marginTop:"16px"}});
+      otherCard.innerHTML=`<h3 style="color:rgba(255,255,255,0.5)">Other Accounts</h3>`+acctGroup("Cash & Transfers",byType.other,"rgba(255,255,255,0.5)");
+      row2.append(otherCard);
+    }
     body.append(row2);
   }catch(e){document.getElementById("bsBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error: ${e.message}</div>`}
 }
