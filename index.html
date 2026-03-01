@@ -77,6 +77,10 @@ select.inp{cursor:pointer;appearance:auto}
 .pf-perf-row{display:flex;justify-content:space-between;font-size:11px;padding:2px 0}
 .pf-foot{margin-top:24px;padding:12px 0;border-top:1px solid rgba(255,255,255,0.04);font-size:11px;color:rgba(255,255,255,0.2);display:flex;justify-content:space-between}
 @media(max-width:700px){.pf-kpi{grid-template-columns:repeat(2,1fr)}.pf-acct-hdr{grid-template-columns:1fr auto auto}}
+.ref-btn{background:0;border:0;color:rgba(255,255,255,0.3);font-size:14px;cursor:pointer;padding:2px 4px;margin-left:6px;transition:color 0.15s}
+.ref-btn:hover{color:rgba(255,255,255,0.7)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ref-btn.spinning{animation:spin 0.6s linear}
 </style>
 </head>
 <body>
@@ -99,6 +103,7 @@ select.inp{cursor:pointer;appearance:auto}
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
+    <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
   </div>
   <div class="tabs" id="tabBar"></div>
 </div>
@@ -403,7 +408,7 @@ function renderTabs(){
   const bar=document.getElementById("tabBar");
   bar.innerHTML="";
   TABS.forEach(([id,label])=>{
-    const b=h("button",{class:"tab"+(state.tab===id?" on":""),onClick:()=>{state.tab=id;renderTabs();renderContent()}},label);
+    const b=h("button",{class:"tab"+(state.tab===id?" on":""),onClick:()=>{state.tab=id;history.replaceState(null,null,"#"+id);renderTabs();renderContent()}},label);
     bar.append(b);
   });
   const so=h("button",{class:"tab",style:{color:"rgba(255,255,255,0.3)",borderColor:"transparent",fontSize:"11px"},onClick:()=>supabaseClient.auth.signOut()},"sign out");
@@ -861,7 +866,7 @@ async function renderIS(el){
     <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
 
   const yt=document.getElementById("yearTabs");
-  ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;renderContent()}},y==="all"?"All":String(y));yt.append(b)});
+  ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;history.replaceState(null,null,y==="all"?"#income-all":"#income");renderContent()}},y==="all"?"All":String(y));yt.append(b)});
 
   try{
     const data=await sbRPC("get_income_statement",{p_year:state.year});
@@ -1720,7 +1725,7 @@ async function renderCrossYear(el){
     <div><h2>Income Statement</h2><p class="sub">Cross-year summary · USD · All Years</p></div>
     <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
   const yt=document.getElementById("yearTabs");
-  ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;renderContent()}},y==="all"?"All":String(y));yt.append(b)});
+  ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;history.replaceState(null,null,y==="all"?"#income-all":"#income");renderContent()}},y==="all"?"All":String(y));yt.append(b)});
 
   try{
     const years=[2017,2018,2019,2020,2021,2022,2023,2024,2025,2026];
@@ -1828,6 +1833,13 @@ function dlFile(content,filename,type){
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
 async function init(){
+  // Restore tab from URL hash
+  const validTabs=TABS.map(t=>t[0]);
+  const hash=location.hash.slice(1);
+  if(hash==="income-all"){state.tab="income";state.year="all"}
+  else if(validTabs.includes(hash)){state.tab=hash}
+  if(!location.hash)history.replaceState(null,null,"#"+state.tab);
+
   renderTabs();
   try{
     const r=await fetch(`${SB_URL}/rest/v1/transactions?select=id&limit=1`,{headers:authHeaders({Prefer:"count=exact"})});
@@ -1840,6 +1852,12 @@ async function init(){
     document.getElementById("dbStatus").textContent="● disconnected";
     document.getElementById("dbStatus").style.color="var(--r)";
   }
+  // Refresh button handler
+  document.getElementById("refreshBtn").addEventListener("click",function(){
+    this.classList.add("spinning");
+    this.addEventListener("animationend",()=>this.classList.remove("spinning"),{once:true});
+    renderContent();
+  });
   renderContent();
 }
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
