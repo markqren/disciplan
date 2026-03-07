@@ -96,6 +96,7 @@ All amounts stored and displayed in USD. Legacy CAD transactions converted at 0.
 - **Service days**: `service_days = service_end - service_start + 1` (inclusive).
 - **Number formatting**: Tables show full digits (right-justified, mono font). Charts use K/M abbreviations.
 - **Subcategories**: Collapsed by default with toggle arrows.
+- **Unicode in comment separators**: The `index.html` section headers use `●` (U+25CF, multi-byte UTF-8) in comment lines like `// ●●●●...`. The Edit tool's string matching can fail on these characters. **Workaround**: Use Python file manipulation or `sed` with line numbers to insert/edit near these separator lines. Never try to match separator lines directly with the Edit tool. Use `grep -n` to find exact line numbers first, then insert relative to ASCII-only anchor lines (e.g., `// INCOME STATEMENT`).
 
 ## Current Payment Types (39 total)
 Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, eTrade IRA, Kraken, HSA Invest, Apple, AMEX US, AMEX Rose Gold, Bilt, Uber, Capital One, Chase Sapphire, Chase Freedom, Chase Aeroplan, Chase United, Venmo Credit, TD Visa, Cash - USD, Cash - CAD, Poker Stars, Venmo, Tony, Kevin, Google, Delta, Bonus, Laundry, Wageworks, Poker, Rent, Basketball, HSA, FSA, Ski Lease, Credits, Transfer, Home Trust, Clipper, Presto, AMEX

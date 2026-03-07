@@ -447,7 +447,7 @@ function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=documen
 // STATE
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-let state={tab:"income",year:2025,txnCount:0,page:0};
+let state={tab:"income",year:2025,txnCount:0,page:0,pendingEmails:0};
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // TABS
@@ -669,6 +669,61 @@ function renderEntry(el){
   impBody.append(impReview);
   impCard.append(impBody);
   el.append(impCard);
+
+  // ── Email Import Section ──
+  const emailCard=h("div",{class:"cd",id:"emailImportSection"});
+  let emailOpen=state.pendingEmails>0;
+  const emailHdr=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"},onClick:()=>{
+    emailOpen=!emailOpen;emailArrow.textContent=emailOpen?"\u25BE":"\u25B8";emailBody.classList.toggle("hidden");
+    if(emailOpen&&!emailBody._loaded){emailBody._loaded=true;loadEmailImports()}
+  }});
+  const emailArrow=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},emailOpen?"\u25BE":"\u25B8");
+  emailHdr.append(emailArrow,h("h3",{style:{margin:"0"}},"\uD83D\uDCE7 Email Imports"));
+  emailCard.append(emailHdr);
+
+  const emailBody=h("div",{class:emailOpen?"":"hidden",style:{marginTop:"16px"}});
+  let inboundAddr="5ec68b0a35fa4f3784a22d2cdc5579cf@inbound.postmarkapp.com";
+  const setupBar=h("div",{style:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"8px",padding:"12px 14px",marginBottom:"14px"}});
+  const addrSpan=h("span",{style:{fontFamily:"var(--mono)",fontSize:"11px",background:"rgba(255,255,255,0.06)",padding:"2px 8px",borderRadius:"4px",userSelect:"all"}},inboundAddr);
+  const copyBtn=h("button",{class:"pg-btn",style:{marginLeft:"8px",fontSize:"10px"},onClick:()=>{navigator.clipboard.writeText(inboundAddr);copyBtn.textContent="Copied!";setTimeout(()=>copyBtn.textContent="Copy",1500)}},"Copy");
+  const setupLine1=h("div",{style:{marginBottom:"4px",fontSize:"12px"}});
+  setupLine1.append("Forward transaction emails to: ",addrSpan,copyBtn);
+  setupBar.append(setupLine1,h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)"}},"Venmo, subscriptions, bank alerts \u2014 or any financial email"));
+  emailBody.append(setupBar);
+  // Fetch address from preferences (overwrite hardcoded fallback)
+  sb("preferences?key=eq.inbound_email_address&select=value&limit=1").then(r=>{if(r?.[0]?.value){inboundAddr=r[0].value;addrSpan.textContent=inboundAddr}}).catch(()=>{});
+
+  const emailReview=h("div");
+  emailBody.append(emailReview);
+  let emailCandidates=null;
+
+  async function loadEmailImports(){
+    emailReview.innerHTML="<div style='text-align:center;padding:20px;color:rgba(255,255,255,0.3)'>Loading...</div>";
+    try{
+      const rows=await sb("pending_imports?status=eq.pending&order=email_received_at.desc");
+      if(!rows.length){emailReview.innerHTML="<div style='padding:16px;color:rgba(255,255,255,0.3);font-size:12px'>No pending imports</div>";return}
+      emailCandidates=rows.map(r=>({
+        _id:r.id,_status:"pending",_isDuplicate:false,_source:r.source,
+        _emailSubject:r.email_subject,_emailBodyText:r.email_body_text,
+        _parsedData:r.parsed_data||{},
+        date:r.date,description:r.description||r.ai_description||r.email_subject,
+        amount_usd:parseFloat(r.amount_usd)||0,category_id:r.category_id||r.ai_category||"other",
+        ai_confidence:r.ai_confidence||"low",
+        currency:r.currency||"USD",fx_rate:1,original_amount:parseFloat(r.amount_usd)||0,
+        service_start:r.service_start||r.date,service_end:r.service_end||r.date,
+        service_days:r.service_days||1,daily_cost:parseFloat(r.daily_cost)||parseFloat(r.amount_usd)||0,
+        payment_type:r.payment_type||"Venmo",tag:r.tag||"",credit:r.credit||""
+      }));
+      const ptGroups={};
+      for(const c of emailCandidates){const pt=c.payment_type;if(!ptGroups[pt])ptGroups[pt]=[];ptGroups[pt].push(c)}
+      for(const[pt,group]of Object.entries(ptGroups)){await findDuplicates(group,pt)}
+      renderEmailReviewTable(emailReview,emailCandidates);
+    }catch(e){emailReview.innerHTML=`<div style="padding:16px;color:var(--r);font-size:12px">Error: ${e.message}</div>`}
+  }
+
+  emailCard.append(emailBody);
+  el.append(emailCard);
+  if(emailOpen){emailBody._loaded=true;loadEmailImports()}
 }
 
 function renderReviewTable(container,candidates){
@@ -932,6 +987,256 @@ async function commitImport(candidates){
     dupes:candidates.filter(c=>c._isDuplicate).length
   };
 }
+
+
+// ---- EMAIL IMPORT REVIEW ----
+
+function renderEmailReviewTable(container,candidates){
+  container.innerHTML="";
+  const pending=candidates.filter(c=>c._status==="pending").length;
+  const approved=candidates.filter(c=>c._status==="approved").length;
+  const venmo=candidates.filter(c=>c._source==="venmo").length;
+  const unknown=candidates.filter(c=>c._source==="unknown").length;
+  const dupes=candidates.filter(c=>c._isDuplicate).length;
+
+  container.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"12px"}},
+    `${candidates.length} total \u00b7 ${pending} pending \u00b7 ${approved} approved${venmo?" \u00b7 "+venmo+" venmo":""}${unknown?" \u00b7 "+unknown+" unknown":""}${dupes?" \u00b7 "+dupes+" duplicates":""}`));
+
+  const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
+  bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
+    candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
+    renderEmailReviewTable(container,candidates);
+  }},"\u2713 Approve All"));
+
+  let saving=false;
+  const saveBtn=h("button",{class:"pg-btn",style:"color:#fff;background:rgba(129,178,154,0.2);border-color:rgba(129,178,154,0.4);font-weight:600",onClick:async()=>{
+    if(saving)return;
+    const appr=candidates.filter(c=>c._status==="approved");
+    if(!appr.length)return alert("No approved transactions to save.");
+    saving=true;saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    try{
+      const summary=await commitEmailImports(candidates);
+      renderEmailReviewTable(container,candidates);
+      const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
+      const dates=summary.imported.map(c=>c.date).sort();
+      sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Committed ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
+      sumEl.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
+        state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
+      }},"View in Ledger \u2192"));
+      container.append(sumEl);
+      saveBtn.textContent="Saved";
+    }catch(e){
+      console.error("commitEmailImports error:",e);
+      alert("Error saving: "+e.message);
+      saveBtn.disabled=false;saveBtn.textContent="Save Approved";
+    }
+  }},"Save Approved");
+  bulkBar.append(saveBtn);
+  container.append(bulkBar);
+
+  const wrap=h("div",{style:{overflowX:"auto"}});
+  const tbl=h("table");
+  const thead=h("thead");
+  thead.innerHTML=`<tr><th style="width:36px"></th><th>Date</th><th class="hide-m">Source</th><th>Description</th><th class="r">Amount</th><th>Category</th><th class="hide-m">Payment</th><th class="hide-m">Tag</th></tr>`;
+  tbl.append(thead);
+  const tbody=h("tbody");
+
+  const srcColors={venmo:"rgba(74,111,165,0.3)",rakuten:"rgba(129,178,154,0.3)",chase:"rgba(242,204,143,0.3)",unknown:"rgba(255,255,255,0.1)"};
+
+  candidates.forEach((c,idx)=>{
+    const tr=h("tr",{style:{borderLeft:c._status==="approved"?"3px solid var(--g)":c._isDuplicate?"3px solid var(--y)":"3px solid transparent",opacity:c._status==="skipped"?"0.4":"1"}});
+
+    const statusIcon=c._status==="approved"?"\u2713":c._status==="skipped"?"\u2715":c._status==="committed"?"\u2713":"\u25CB";
+    const statusColor=c._status==="approved"?"var(--g)":c._status==="skipped"?"var(--r)":c._status==="committed"?"var(--b)":"rgba(255,255,255,0.3)";
+    tr.append(h("td",{style:{cursor:c._status==="committed"?"default":"pointer",textAlign:"center",fontSize:"14px",color:statusColor,userSelect:"none"},onClick:()=>{
+      if(c._status==="committed")return;
+      if(c._isDuplicate&&c._status==="skipped")c._status="pending";
+      else if(c._status==="pending")c._status="approved";
+      else if(c._status==="approved")c._status="skipped";
+      else c._status="pending";
+      renderEmailReviewTable(container,candidates);
+    }},statusIcon));
+
+    tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openEmailEditModal(candidates,idx,container)}},fmtD(c.date)));
+
+    tr.append(h("td",{class:"hide-m"},[h("span",{style:{padding:"2px 6px",borderRadius:"4px",fontSize:"10px",fontWeight:"600",background:srcColors[c._source]||srcColors.unknown}},c._source||"unknown")]));
+
+    const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openEmailEditModal(candidates,idx,container)}});
+    const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+    descMain.textContent=c.description;
+    const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+    descSub.textContent=c._skipReason||c._emailSubject||"";
+    descTd.append(descMain,descSub);
+    tr.append(descTd);
+
+    tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
+
+    const catTd=h("td");
+    catTd.append(h("span",{style:{display:"inline-block",width:"6px",height:"6px",borderRadius:"50%",marginRight:"4px",background:c.ai_confidence==="high"?"var(--g)":c.ai_confidence==="medium"?"var(--y)":"var(--r)"}}));
+    const catSel=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"},onChange:e=>{
+      c.category_id=e.target.value;
+      c.service_end=getDefEnd(c.category_id,c.date)||c.date;
+      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+      renderEmailReviewTable(container,candidates);
+    }});
+    CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;catSel.append(o)});
+    catTd.append(catSel);
+    tr.append(catTd);
+
+    tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px"}},c.payment_type));
+
+    const tagTd=h("td",{class:"hide-m"});
+    tagTd.append(h("input",{type:"text",value:c.tag||"",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",width:"70px",fontFamily:"var(--sans)",outline:"none"},onInput:e=>{c.tag=e.target.value}}));
+    tr.append(tagTd);
+    tbody.append(tr);
+  });
+
+  tbl.append(tbody);
+  wrap.append(tbl);
+  container.append(wrap);
+}
+
+function openEmailEditModal(candidates,idx,reviewContainer){
+  const c=candidates[idx];
+  let seManual=false;
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal"});
+
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+  const hdrLeft=h("div");
+  hdrLeft.append(h("h3",{style:{margin:"0"}},"Edit Email Import"));
+  hdrLeft.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"4px"}},c._emailSubject||""));
+  const closeBtn2=h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715");
+  hdr.append(hdrLeft,closeBtn2);
+  modal.append(hdr);
+
+  function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===3?"1fr 1fr 1fr":ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+  function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+
+  const mDate=h("input",{class:"inp",type:"date",value:c.date,onInput:emUpdatePreview});
+  const mDesc=h("input",{class:"inp",type:"text",value:c.description});
+
+  const mAmt=h("input",{class:"inp",type:"number",step:"0.01",value:c.amount_usd,onInput:emUpdatePreview});
+
+  const mCat=h("select",{class:"inp",onChange:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value;emUpdateHint()}
+    emUpdatePreview();
+  }});
+  CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;mCat.append(o)});
+
+  const mSs=h("input",{class:"inp",type:"date",value:c.service_start,onInput:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value}
+    emUpdatePreview();
+  }});
+  const mSe=h("input",{class:"inp",type:"date",value:c.service_end,onInput:()=>{
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";emUpdatePreview();
+  }});
+  const emHintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
+  function emUpdateHint(){const r=ACCRUAL_D[mCat.value];emHintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: end of month)":`(Auto: ${r} days)`):""}
+  emUpdateHint();
+  const emSeLbl=h("label",{class:"lbl"});emSeLbl.append("Service End ");emSeLbl.append(emHintSpan);
+  const emSeField=h("div");emSeField.append(emSeLbl);emSeField.append(mSe);
+
+  const mPt=h("select",{class:"inp"});
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
+  const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
+
+  const emPreviewEl=h("div",{class:"preview hidden"});
+  function emUpdatePreview(){
+    const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){emPreviewEl.classList.add("hidden");return}
+    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
+    if(se<ss){emPreviewEl.classList.add("hidden");return}
+    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const daily=a/days;
+    emPreviewEl.classList.remove("hidden");
+    emPreviewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">USD Amount</div><div style="font-size:18px;font-weight:700;color:#fff;font-family:var(--mono)">${fmtF(a)}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Service Days</div><div style="font-size:18px;font-weight:700;color:var(--b);font-family:var(--mono)">${days}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Daily Cost</div><div style="font-size:18px;font-weight:700;color:var(--g);font-family:var(--mono)">${fmtF(daily)}/d</div></div>
+    </div>`;
+  }
+  emUpdatePreview();
+
+  // Email reference section
+  const refSection=h("div",{style:{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"8px",padding:"10px 14px",marginBottom:"14px",fontSize:"11px",color:"rgba(255,255,255,0.35)"}});
+  const refLines=[];
+  if(c._emailSubject)refLines.push("Email: "+c._emailSubject);
+  refLines.push("Source: "+(c._source||"unknown"));
+  if(c._source==="venmo"&&c._parsedData){
+    if(c._parsedData.counterparty)refLines.push("Counterparty: "+c._parsedData.counterparty);
+    if(c._parsedData.note)refLines.push("Note: "+c._parsedData.note);
+  }else if(c._source==="unknown"&&c._emailBodyText){
+    refLines.push("Body: "+c._emailBodyText.slice(0,200));
+  }
+  refSection.innerHTML=refLines.map(l=>`<div style="margin-bottom:2px">${l.replace(/</g,"&lt;")}</div>`).join("");
+
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  btnRow.append(h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+    c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
+    c.original_amount=c.amount_usd;c.category_id=mCat.value;
+    c.service_start=mSs.value;c.service_end=mSe.value;
+    c.payment_type=mPt.value;c.tag=mTag.value;
+    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    c._status="approved";
+    bg.remove();
+    renderEmailReviewTable(reviewContainer,candidates);
+  }},"Save & Approve"));
+  btnRow.append(h("button",{class:"btn",style:{background:"rgba(224,122,95,0.15)",color:"var(--r)",width:"auto",padding:"12px 20px"},onClick:()=>{
+    c._status="skipped";bg.remove();renderEmailReviewTable(reviewContainer,candidates);
+  }},"Skip"));
+  btnRow.append(h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel"));
+
+  modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
+  modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
+  modal.append(mRow(mField("Service Start",mSs),emSeField));
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  modal.append(emPreviewEl);
+  modal.append(refSection);
+  modal.append(btnRow);
+  bg.append(modal);
+  document.body.append(bg);
+}
+
+async function commitEmailImports(candidates){
+  const approved=candidates.filter(c=>c._status==="approved");
+  if(!approved.length)throw new Error("No approved transactions to save.");
+  const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
+  if(valid.length<approved.length)console.warn(`commitEmailImports: dropped ${approved.length-valid.length} rows with missing dates`);
+  if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  const batchId="email-"+new Date().toISOString().slice(0,16);
+  const rows=valid.map(c=>({
+    date:c.date,service_start:c.service_start,service_end:c.service_end,
+    description:c.description,category_id:c.category_id,
+    original_amount:c.original_amount||c.amount_usd,currency:c.currency||"USD",fx_rate:c.fx_rate||1,
+    amount_usd:Math.round(c.amount_usd*100)/100,
+    payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
+    daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||"",
+    import_batch:batchId
+  }));
+  await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
+  const now=new Date().toISOString();
+  for(const c of valid){
+    await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"committed",committed_at:now})});
+  }
+  state.txnCount+=rows.length;
+  document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  valid.forEach(c=>c._status="committed");
+  const banner=document.getElementById("emailImportBanner");
+  if(banner)banner.remove();
+  state.pendingEmails=0;
+  return{
+    count:valid.length,
+    imported:valid,
+    skipped:candidates.filter(c=>c._status==="skipped").length,
+    dupes:candidates.filter(c=>c._isDuplicate).length
+  };
+}
+
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // INCOME STATEMENT
@@ -1977,6 +2282,24 @@ async function init(){
     document.getElementById("dbStatus").textContent="● disconnected";
     document.getElementById("dbStatus").style.color="var(--r)";
   }
+  // Check for pending email imports
+  try{
+    const pr=await fetch(`${SB_URL}/rest/v1/pending_imports?status=eq.pending&select=id&limit=1`,{headers:authHeaders({Prefer:"count=exact"})});
+    if(pr.ok){
+      const pc=pr.headers.get("content-range")?.split("/")[1];
+      state.pendingEmails=pc?parseInt(pc):0;
+      if(state.pendingEmails>0){
+        const old=document.getElementById("emailImportBanner");
+        if(old)old.remove();
+        const banner=document.createElement("div");
+        banner.id="emailImportBanner";
+        banner.style.cssText="background:rgba(74,111,165,0.15);color:var(--b);text-align:center;padding:6px 12px;font-size:11px;border-bottom:1px solid rgba(74,111,165,0.2);cursor:pointer";
+        banner.innerHTML=`\u{1F4E7} ${state.pendingEmails} pending email import${state.pendingEmails>1?"s":""} — <b>Review</b>`;
+        banner.onclick=()=>{state.tab="entry";renderTabs();renderContent();setTimeout(()=>document.getElementById("emailImportSection")?.scrollIntoView({behavior:"smooth"}),100)};
+        document.querySelector(".hdr").after(banner);
+      }
+    }
+  }catch(e){/* silent — non-critical */}
   // Refresh button handler
   document.getElementById("refreshBtn").addEventListener("click",function(){
     this.classList.add("spinning");
