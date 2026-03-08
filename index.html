@@ -1171,6 +1171,9 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   }else if(c._source==="unknown"&&c._emailBodyText){
     refLines.push("Body: "+c._emailBodyText.slice(0,200));
   }
+  if(c._parsedData.forwarding_note){
+    refLines.push("Forwarding note: "+c._parsedData.forwarding_note);
+  }
   refSection.innerHTML=refLines.map(l=>`<div style="margin-bottom:2px">${l.replace(/</g,"&lt;")}</div>`).join("");
 
   const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});

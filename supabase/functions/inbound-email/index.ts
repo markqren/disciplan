@@ -15,6 +15,102 @@ const MAX_TEXT_BODY = 10_000;
 const MAX_HTML_BODY = 50_000;
 
 // ═══════════════════════════════════════════════════════
+// Forwarding Note Extraction
+// ═══════════════════════════════════════════════════════
+
+// ── Category keyword map ──
+const CATEGORY_KEYWORDS: Record<string, string> = {
+  "entertainment": "entertainment", "ent": "entertainment",
+  "food": "food",
+  "groceries": "groceries", "grocery": "groceries",
+  "restaurant": "restaurant", "rest": "restaurant", "dining": "restaurant",
+  "dinner": "restaurant", "lunch": "restaurant", "brunch": "restaurant",
+  "home": "home",
+  "rent": "rent",
+  "furniture": "furniture",
+  "health": "health", "medical": "health", "pharmacy": "health", "gym": "health",
+  "personal": "personal",
+  "clothes": "clothes", "clothing": "clothes", "apparel": "clothes",
+  "tech": "tech", "software": "tech", "subscription": "tech",
+  "transportation": "transportation", "transport": "transportation",
+  "flight": "transportation", "uber": "transportation", "lyft": "transportation",
+  "gas": "transportation", "parking": "transportation",
+  "utilities": "utilities", "utility": "utilities",
+  "financial": "financial",
+  "other": "other",
+  "income": "income", "refund": "income",
+};
+
+interface ForwardingNote {
+  raw: string;
+  category: string | null;
+  categoryConfidence: string | null;
+  descriptionHint: string | null;
+  tag: string | null;
+  paymentType: string | null;
+}
+
+function extractForwardingNote(textBody: string | null): ForwardingNote | null {
+  if (!textBody) return null;
+
+  // Gmail forwarding divider patterns
+  const dividers = [
+    /^-{5,}\s*Forwarded message\s*-{5,}/m,
+    /^From:.*\nSent:.*\nTo:.*\nSubject:/m,
+    /^Begin forwarded message:/m,
+  ];
+
+  let noteText: string | null = null;
+  for (const div of dividers) {
+    const match = textBody.search(div);
+    if (match > 0) {
+      noteText = textBody.slice(0, match).trim();
+      break;
+    }
+  }
+
+  if (!noteText || noteText.length === 0) return null;
+
+  const result: ForwardingNote = {
+    raw: noteText,
+    category: null,
+    categoryConfidence: null,
+    descriptionHint: null,
+    tag: null,
+    paymentType: null,
+  };
+
+  // Extract tag: #japan or tag:japan
+  const tagMatch = noteText.match(/#(\w+)|tag:(\w+)/i);
+  if (tagMatch) {
+    result.tag = (tagMatch[1] || tagMatch[2]).toLowerCase();
+    noteText = noteText.replace(tagMatch[0], "").trim();
+  }
+
+  // Extract payment type: pt:chase sapphire or card:bilt
+  const ptMatch = noteText.match(/(?:pt|card|pay):(.+?)(?:\s+#|\s*$)/i);
+  if (ptMatch) {
+    result.paymentType = ptMatch[1].trim();
+    noteText = noteText.replace(ptMatch[0], "").trim();
+  }
+
+  // Check remaining text for category keyword (first word)
+  const words = noteText.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length > 0 && CATEGORY_KEYWORDS[words[0]]) {
+    result.category = CATEGORY_KEYWORDS[words[0]];
+    result.categoryConfidence = "high";
+    if (words.length > 1) {
+      result.descriptionHint = words.slice(1).join(" ");
+    }
+  } else if (noteText.length > 0) {
+    // No recognized category — whole thing is a description hint for AI
+    result.descriptionHint = noteText;
+  }
+
+  return result;
+}
+
+// ═══════════════════════════════════════════════════════
 // Parser Registry
 // ═══════════════════════════════════════════════════════
 
@@ -35,7 +131,7 @@ interface ParsedEmail {
 
 interface EmailParser {
   detect: (from: string, subject: string) => boolean;
-  parse: (email: { from: string; subject: string; text: string; html: string }) => ParsedEmail;
+  parse: (email: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }) => ParsedEmail;
 }
 
 const EMAIL_PARSERS: Record<string, EmailParser> = {
@@ -52,7 +148,7 @@ const EMAIL_PARSERS: Record<string, EmailParser> = {
 // Venmo Parser
 // ═══════════════════════════════════════════════════════
 
-function parseVenmoEmail({ subject, text }: { from: string; subject: string; text: string; html: string }): ParsedEmail {
+function parseVenmoEmail({ subject, text, forwardingNote }: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }): ParsedEmail {
   const isPaid = subject.includes("You paid");
   const isReceived = subject.includes("You received") || subject.includes("paid you");
 
@@ -97,16 +193,41 @@ function parseVenmoEmail({ subject, text }: { from: string; subject: string; tex
   const direction = isPaid ? "paid" : "received";
   const amountUsd = isPaid ? amount : -amount; // positive = expense, negative = income
 
-  const description = isPaid
-    ? `Venmo - ${counterparty}${note ? ` (${note})` : ""}`
-    : `Venmo from ${counterparty}${note ? ` (${note})` : ""}`;
+  // Build description — forwarding note category overrides the format
+  let description: string;
+  const fwdCat = forwardingNote?.category;
+  const fwdHint = forwardingNote?.descriptionHint;
+
+  if (fwdCat && isPaid) {
+    // Category-aware description: "Restaurant - Buoy" instead of "Venmo - Aud Li (Buoy)"
+    const catLabel = fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1);
+    const mainNote = note || counterparty;
+    description = `${catLabel} - ${mainNote}`;
+    if (fwdHint) description += ` (${fwdHint})`;
+  } else if (isPaid) {
+    description = `Venmo - ${counterparty}${note ? ` (${note})` : ""}`;
+  } else {
+    description = `Venmo from ${counterparty}${note ? ` (${note})` : ""}`;
+  }
+
+  // Apply forwarding note overrides
+  let categoryId: string | null = isPaid ? null : "income";
+  let tag: string | undefined;
+  let paymentType = "Venmo";
+
+  if (forwardingNote) {
+    if (forwardingNote.category) categoryId = forwardingNote.category;
+    if (forwardingNote.tag) tag = forwardingNote.tag;
+    if (forwardingNote.paymentType) paymentType = forwardingNote.paymentType;
+  }
 
   return {
     date: txnDate,
     description,
     amount_usd: amountUsd,
-    category_id: isPaid ? null : "income",
-    payment_type: "Venmo",
+    category_id: categoryId,
+    payment_type: paymentType,
+    tag,
     service_start: txnDate,
     service_end: txnDate,
     service_days: 1,
@@ -118,6 +239,7 @@ function parseVenmoEmail({ subject, text }: { from: string; subject: string; tex
       txn_id: txnId,
       payment_method: "Venmo balance",
       raw_amount: amount,
+      forwarding_note: forwardingNote?.raw || null,
     },
   };
 }
@@ -150,12 +272,18 @@ async function aiCategorize(
   parsed: ParsedEmail | null,
   subject: string,
   textBody: string,
+  forwardingNote: ForwardingNote | null,
 ): Promise<AIResult | null> {
   if (!ANTHROPIC_KEY) return null;
 
+  // If forwarding note already provides a high-confidence category, skip AI
+  if (forwardingNote?.category && forwardingNote.categoryConfidence === "high") {
+    return { cat: forwardingNote.category, conf: "high", desc: null } as unknown as AIResult;
+  }
+
   const prompt = source === "unknown"
-    ? buildUnknownEmailPrompt(subject, textBody)
-    : buildEnrichmentPrompt(source, parsed!);
+    ? buildUnknownEmailPrompt(subject, textBody, forwardingNote)
+    : buildEnrichmentPrompt(source, parsed!, forwardingNote);
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -191,8 +319,8 @@ async function aiCategorize(
   }
 }
 
-function buildEnrichmentPrompt(source: string, parsed: ParsedEmail): string {
-  return `You are a personal finance assistant. Given this ${source} transaction, assign a category.
+function buildEnrichmentPrompt(source: string, parsed: ParsedEmail, forwardingNote: ForwardingNote | null): string {
+  let prompt = `You are a personal finance assistant. Given this ${source} transaction, assign a category.
 
 CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
 
@@ -201,7 +329,13 @@ Transaction:
 - Amount: $${Math.abs(parsed.amount_usd || 0)}
 - Direction: ${parsed.parsed_data.direction}
 - Note: "${parsed.parsed_data.note || ""}"
-- Counterparty: ${parsed.parsed_data.counterparty}
+- Counterparty: ${parsed.parsed_data.counterparty}`;
+
+  if (forwardingNote?.descriptionHint || forwardingNote?.raw) {
+    prompt += `\n- User's forwarding note (STRONG hint): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
+  }
+
+  prompt += `
 
 Return ONLY a JSON object: {"cat": "<category_id>", "conf": "high|medium|low", "desc": "<optionally improved description>"}
 
@@ -210,15 +344,23 @@ Rules:
 - If the counterparty is a known business type, use medium confidence
 - If ambiguous, use "other" with low confidence
 - For "received" direction, always use "income" with high confidence`;
+
+  return prompt;
 }
 
-function buildUnknownEmailPrompt(subject: string, textBody: string): string {
-  return `You are a personal finance assistant. Extract a financial transaction from this email.
+function buildUnknownEmailPrompt(subject: string, textBody: string, forwardingNote: ForwardingNote | null): string {
+  let prompt = `You are a personal finance assistant. Extract a financial transaction from this email.
 
 CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
 
 Email subject: ${subject}
-Email body (first 2000 chars): ${(textBody || "").slice(0, 2000)}
+Email body (first 2000 chars): ${(textBody || "").slice(0, 2000)}`;
+
+  if (forwardingNote?.descriptionHint || forwardingNote?.raw) {
+    prompt += `\nUser's forwarding note (STRONG hint): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
+  }
+
+  prompt += `
 
 If this email contains a financial transaction (purchase, payment, refund, cashback, subscription charge), extract it.
 If not a financial email, return {"is_transaction": false}.
@@ -234,6 +376,8 @@ Return ONLY a JSON object:
   "payment_type": "<best guess payment account or 'unknown'>",
   "source_hint": "<what service sent this email>"
 }`;
+
+  return prompt;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -255,6 +399,7 @@ function buildCandidate(
   parsed: ParsedEmail | null,
   aiResult: AIResult | null,
   emailMeta: EmailMeta,
+  forwardingNote: ForwardingNote | null,
 ): Record<string, unknown> {
   // Start with parsed fields (if parser succeeded)
   const base: Record<string, unknown> = parsed ? { ...parsed } : {};
@@ -277,6 +422,16 @@ function buildCandidate(
   const ai_confidence = aiResult?.conf || aiResult?.confidence || (base.category_id ? "medium" : "low");
   const ai_description = aiResult?.desc || (base.description as string) || null;
 
+  // Forwarding note overrides (highest priority)
+  let finalPaymentType = base.payment_type || null;
+  let finalTag = (base.tag as string) || "";
+  if (forwardingNote?.paymentType) finalPaymentType = forwardingNote.paymentType;
+  if (forwardingNote?.tag) finalTag = forwardingNote.tag;
+
+  // Merge forwarding_note into parsed_data
+  const parsedData = (base.parsed_data as Record<string, unknown>) || {};
+  if (forwardingNote?.raw) parsedData.forwarding_note = forwardingNote.raw;
+
   return {
     source,
     status: (source === "unknown" && !aiResult?.is_transaction) ? "skipped" : "pending",
@@ -285,9 +440,9 @@ function buildCandidate(
     category_id: ai_category || "other",
     amount_usd: base.amount_usd ?? null,
     currency: "USD",
-    payment_type: base.payment_type || null,
+    payment_type: finalPaymentType,
     credit: (base.credit as string) || "",
-    tag: (base.tag as string) || "",
+    tag: finalTag,
     service_start: base.service_start || base.date || null,
     service_end: base.service_end || base.date || null,
     service_days: (base.service_days as number) || 1,
@@ -295,7 +450,7 @@ function buildCandidate(
     ai_category,
     ai_confidence,
     ai_description,
-    parsed_data: (base.parsed_data as Record<string, unknown>) || {},
+    parsed_data: parsedData,
     parse_errors: emailMeta.parse_errors.length ? emailMeta.parse_errors : null,
     email_subject: emailMeta.email_subject,
     email_from: emailMeta.email_from,
@@ -303,6 +458,10 @@ function buildCandidate(
     email_body_html: emailMeta.email_body_html?.slice(0, MAX_HTML_BODY) || null,
     email_message_id: emailMeta.email_message_id,
     email_received_at: emailMeta.email_received_at,
+    // Forwarding note columns
+    forwarding_note: forwardingNote?.raw || null,
+    forwarding_category: forwardingNote?.category || null,
+    forwarding_hint: forwardingNote?.descriptionHint || null,
   };
 }
 
@@ -350,6 +509,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
+  // 4.5. Extract forwarding note from text above Gmail's forwarded message divider
+  const forwardingNote = extractForwardingNote(textBody);
+
   // 5. Detect source and parse
   let source = "unknown";
   let parsed: ParsedEmail | null = null;
@@ -364,6 +526,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           subject: subject || "",
           text: textBody || "",
           html: htmlBody || "",
+          forwardingNote,
         });
       } catch (e) {
         parseErrors.push(`${name} parser error: ${(e as Error).message}`);
@@ -375,7 +538,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // 6. AI categorization (enrichment for known sources, full extraction for unknown)
   let aiResult: AIResult | null = null;
   try {
-    aiResult = await aiCategorize(source, parsed, subject || "", textBody || "");
+    aiResult = await aiCategorize(source, parsed, subject || "", textBody || "", forwardingNote);
   } catch (e) {
     console.error("AI categorization error:", e);
     // Continue without AI — will default to ai_confidence="low"
@@ -390,7 +553,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     email_message_id: messageId || "",
     email_received_at: emailDate || new Date().toISOString(),
     parse_errors: parseErrors,
-  });
+  }, forwardingNote);
 
   // 8. Insert into pending_imports
   const { error } = await supabase.from("pending_imports").insert(candidate);
@@ -403,7 +566,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // 9. Success — return 200 so Postmark doesn't retry
-  return new Response(JSON.stringify({ status: "ok", source }), {
+  return new Response(JSON.stringify({ status: "ok", source, forwarding_note: forwardingNote?.raw || null }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
