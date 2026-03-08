@@ -137,8 +137,11 @@ interface EmailParser {
 const EMAIL_PARSERS: Record<string, EmailParser> = {
   venmo: {
     detect: (from, subject) =>
-      from.toLowerCase().includes("venmo.com") &&
-      (subject.includes("You paid") || subject.includes("You received") || subject.includes("paid you")),
+      from.toLowerCase().includes("venmo.com") ||
+      /You paid .+\$[\d,.]+/.test(subject) ||
+      /paid your \$[\d,.]+/.test(subject) ||
+      /You received .+\$[\d,.]+/.test(subject) ||
+      /.+ paid you \$[\d,.]+/.test(subject),
     parse: parseVenmoEmail,
   },
   // Future parsers: rakuten, chase_alert, subscription, etc.
@@ -148,7 +151,9 @@ const EMAIL_PARSERS: Record<string, EmailParser> = {
 // Venmo Parser
 // ═══════════════════════════════════════════════════════
 
-function parseVenmoEmail({ subject, text, forwardingNote }: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }): ParsedEmail {
+function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }): ParsedEmail {
+  // Strip "Fwd: " prefix from forwarded emails
+  const subject = rawSubject.replace(/^Fwd:\s*/i, "").trim();
   const isPaid = subject.includes("You paid");
   const isReceived = subject.includes("You received") || subject.includes("paid you");
 
