@@ -5,7 +5,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // ── Environment ──
-const WEBHOOK_SECRET = Deno.env.get("INBOUND_EMAIL_SECRET")!;
+const WEBHOOK_SECRET = Deno.env.get("INBOUND_EMAIL_SECRET");
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -475,8 +475,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  // 1. Validate webhook secret
-  if (req.headers.get("X-Webhook-Secret") !== WEBHOOK_SECRET) {
+  // 1. Validate webhook secret (optional — Postmark inbound can't send custom headers)
+  const reqSecret = req.headers.get("X-Webhook-Secret");
+  if (WEBHOOK_SECRET && reqSecret && reqSecret !== WEBHOOK_SECRET) {
     return new Response("Unauthorized", { status: 401 });
   }
 
