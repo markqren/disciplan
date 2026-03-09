@@ -195,12 +195,15 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   }
 
   // Parse note from Venmo body
-  // Format: "...paid you\n$\n72\n50\nGao viet\nSee transaction..."
-  // Or: "...$110.00\n\nBuoy\n..."
+  // The note sits between two blank lines, right before "See transaction":
+  //   "$\n72\n.\n50\n\nGao viet\n\nSee transaction"
+  //   "$110.00\n\nBuoy\n\nSee transaction"
   let note = "";
   if (venmoBody) {
-    const noteMatch1 = venmoBody.match(/\d+\n(\d{2})\n(.+?)\n(?:See transaction|Transaction details)/s);
-    if (noteMatch1) note = noteMatch1[2].trim();
+    // Primary: text on its own line between blank lines, before "See transaction"
+    const noteMatch1 = venmoBody.match(/\n\n([^\n]+)\n\nSee transaction/);
+    if (noteMatch1) note = noteMatch1[1].trim();
+    // Fallback: "$amount\n\nnote\n"
     if (!note) {
       const noteMatch2 = venmoBody.match(/\$[\d,.]+\s*\n\s*\n\s*(.+?)\s*\n/);
       if (noteMatch2) note = noteMatch2[1].trim();
