@@ -177,47 +177,74 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
     else if (m2) { counterparty = m2[1]; amount = parseFloat(m2[2].replace(/,/g, "")); }
   }
 
-  // Parse note from text body (between amount and next section)
-  let note = "";
+  // Strip everything before the forwarding divider to get just the Venmo email body
+  let venmoBody = text || "";
   if (text) {
-    const noteMatch = text.match(/\$[\d,.]+\s*\n\s*\n\s*(.+?)\s*\n/);
-    if (noteMatch) note = noteMatch[1].trim();
+    const fwdDividers = [
+      /^-{5,}\s*Forwarded message\s*-{5,}/m,
+      /^Begin forwarded message:/m,
+      /^From:.*\nSent:.*\nTo:.*\nSubject:/m,
+    ];
+    for (const pat of fwdDividers) {
+      const match = text.search(pat);
+      if (match >= 0) {
+        venmoBody = text.slice(match);
+        break;
+      }
+    }
   }
 
-  // Parse date from text body: "Date\nMar 06, 2026"
+  // Parse note from Venmo body
+  // Format: "...paid you\n$\n72\n50\nGao viet\nSee transaction..."
+  // Or: "...$110.00\n\nBuoy\n..."
+  let note = "";
+  if (venmoBody) {
+    const noteMatch1 = venmoBody.match(/\d+\n(\d{2})\n(.+?)\n(?:See transaction|Transaction details)/s);
+    if (noteMatch1) note = noteMatch1[2].trim();
+    if (!note) {
+      const noteMatch2 = venmoBody.match(/\$[\d,.]+\s*\n\s*\n\s*(.+?)\s*\n/);
+      if (noteMatch2) note = noteMatch2[1].trim();
+    }
+  }
+
+  // Parse date from Venmo body: "Date\nMar 06, 2026"
   let txnDate: string | null = null;
-  if (text) {
-    const dateMatch = text.match(/Date\s*\n\s*(\w+ \d{1,2}, \d{4})/);
+  if (venmoBody) {
+    const dateMatch = venmoBody.match(/Date\s*\n\s*(\w+ \d{1,2}, \d{4})/);
     if (dateMatch) {
       txnDate = new Date(dateMatch[1]).toISOString().slice(0, 10);
     }
   }
 
-  // Parse Transaction ID
+  // Parse Transaction ID from Venmo body
   let txnId: string | null = null;
-  if (text) {
-    const idMatch = text.match(/Transaction ID\s*\n\s*(\d+)/);
+  if (venmoBody) {
+    const idMatch = venmoBody.match(/Transaction ID\s*\n\s*(\d+)/);
     if (idMatch) txnId = idMatch[1];
   }
 
   const direction = isPaid ? "paid" : "received";
   const amountUsd = isPaid ? amount : -amount; // positive = expense, negative = income
 
+  // Title-case helper: "gao viet" → "Gao Viet"
+  const titleCase = (s: string) => s.replace(/\b\w/g, c => c.toUpperCase());
+
   // Build description — forwarding note category overrides the format
   let description: string;
   const fwdCat = forwardingNote?.category;
   const fwdHint = forwardingNote?.descriptionHint;
+  const displayNote = note ? titleCase(note) : "";
 
   if (isPaid) {
     // OUTGOING: "You paid"
     if (fwdCat) {
       const catLabel = fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1);
-      description = note
-        ? `${catLabel} - ${note} - ${counterparty}`
+      description = displayNote
+        ? `${catLabel} - ${displayNote} - ${counterparty}`
         : `${catLabel} - ${counterparty}`;
       if (fwdHint) description += ` (${fwdHint})`;
     } else {
-      description = `Venmo - ${counterparty}${note ? ` (${note})` : ""}`;
+      description = `Venmo - ${counterparty}${displayNote ? ` (${displayNote})` : ""}`;
     }
   } else {
     // INCOMING: "You received" / "paid you" / "paid your request"
@@ -225,10 +252,10 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
       ? fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1)
       : null;
     const firstName = counterparty.split(" ")[0];
-    if (note) {
+    if (displayNote) {
       description = catLabel
-        ? `Reimbursed - ${note} (${catLabel}) - ${firstName}`
-        : `Reimbursed - ${note} - ${firstName}`;
+        ? `Reimbursed - ${displayNote} (${catLabel}) - ${firstName}`
+        : `Reimbursed - ${displayNote} - ${firstName}`;
     } else {
       description = `Reimbursed - ${counterparty}`;
     }
