@@ -2006,6 +2006,12 @@ async function renderTags(el){
       grid.append(card);
     });
     body.append(grid);
+    // Auto-open tag detail if navigated from Ledger tab
+    if(state.tagDetail){
+      const t=tags.find(tg=>tg.name===state.tagDetail);
+      state.tagDetail=null;
+      if(t)showTagDetail(t);
+    }
   }catch(e){document.getElementById("tagsBody").innerHTML=`<div class="cd" style="color:var(--r)">Error: ${e.message}</div>`}
 }
 
@@ -2013,17 +2019,21 @@ async function showTagDetail(tag){
   const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
   const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&category_id=neq.adjustment&order=date.desc`);
   const cats={};let total=0;
+  const txnAccruals=[];
   for(const t of txns){
+    let accrual=0,oDays=0;
     if(t.daily_cost!=null&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end){
       const oStart=t.service_start>tag.start_date?t.service_start:tag.start_date;
       const oEnd=t.service_end<tag.end_date?t.service_end:tag.end_date;
       if(oStart<=oEnd){
-        const oDays=Math.floor((new Date(oEnd)-new Date(oStart))/864e5)+1;
-        const amt=t.daily_cost*oDays;
-        cats[t.category_id]=(cats[t.category_id]||0)+amt;total+=amt;
+        oDays=Math.floor((new Date(oEnd)-new Date(oStart))/864e5)+1;
+        accrual=t.daily_cost*oDays;
+        cats[t.category_id]=(cats[t.category_id]||0)+accrual;total+=accrual;
       }
-    }else if(t.amount_usd>0){cats[t.category_id]=(cats[t.category_id]||0)+t.amount_usd;total+=t.amount_usd}
+    }else if(t.amount_usd>0){accrual=t.amount_usd;cats[t.category_id]=(cats[t.category_id]||0)+t.amount_usd;total+=t.amount_usd}
+    if(Math.abs(accrual)>=0.01)txnAccruals.push({...t,_accrual:accrual,_oDays:oDays});
   }
+  txnAccruals.sort((a,b)=>Math.abs(b._accrual)-Math.abs(a._accrual));
   const days=tag.start_date&&tag.end_date?Math.max(1,Math.floor((new Date(tag.end_date)-new Date(tag.start_date))/864e5)+1):0;
   const mx=Math.max(...Object.values(cats).map(v=>Math.abs(v)),1);
 
@@ -2044,8 +2054,29 @@ async function showTagDetail(tag){
       <div style="font-family:var(--mono);font-size:10px;color:rgba(255,255,255,0.3);text-align:right">${total>0?((Math.abs(val)/total)*100).toFixed(0)+"%":""}</div></div>`;
   });
 
-  const modal=h("div",{class:"modal"});
+  // Transaction list
+  if(txnAccruals.length){
+    mhtml+=`<div style="margin-top:20px;border-top:1px solid rgba(255,255,255,0.06);padding-top:14px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">${txnAccruals.length} Transactions</div>`;
+    mhtml+=`<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:4px 6px">Date</th><th style="text-align:left;padding:4px 6px">Description</th><th style="text-align:left;padding:4px 6px" class="hide-m">Category</th><th style="text-align:right;padding:4px 6px">Amount</th><th style="text-align:right;padding:4px 6px" class="hide-m">Accrual</th><th style="text-align:right;padding:4px 6px" class="hide-m">Days</th></tr></thead><tbody>`;
+    txnAccruals.forEach(t=>{
+      const isNeg=t._accrual<0;
+      mhtml+=`<tr class="tag-txn-row" data-tid="${t.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03)"><td style="padding:5px 6px;color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.date)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.7);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td><td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[t.category_id]||"#666")}22;color:${CC[t.category_id]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${t.category_id}</span></td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.5)">${fmtF(t.amount_usd)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${isNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(t._accrual)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.3)" class="hide-m">${t._oDays||""}</td></tr>`;
+    });
+    mhtml+=`</tbody></table></div></div>`;
+  }
+
+  const modal=h("div",{class:"modal",style:{maxWidth:"700px"}});
   modal.innerHTML=mhtml;
+  // Attach click handlers for transaction rows
+  modal.querySelectorAll(".tag-txn-row").forEach(row=>{
+    row.addEventListener("click",()=>{
+      const tid=parseInt(row.dataset.tid);
+      const txn=txnAccruals.find(t=>t.id===tid);
+      if(txn){bg.remove();openLedgerEditModal(txn,()=>showTagDetail(tag))}
+    });
+    row.addEventListener("mouseenter",()=>row.style.background="rgba(255,255,255,0.04)");
+    row.addEventListener("mouseleave",()=>row.style.background="transparent");
+  });
   bg.append(modal);
   document.body.append(bg);
 }
@@ -2455,6 +2486,8 @@ async function renderLedger(el){
   if(!state.lf)state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};
   const f=state.lf;
   const fS="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 10px;color:#e8e8e4;font-size:11px;font-family:var(--sans);outline:none";
+  // Cache tags for cross-tab navigation
+  const tagMap={};sb("tags?order=start_date.desc").then(rows=>{for(const r of rows)tagMap[r.name]=r});
 
   el.innerHTML=`<div class="cd"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">Transactions</h3><span id="ledgerOkMsg" class="ok-msg hidden"></span><div id="pgNav"></div></div><div id="filterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div><div id="ledgerBody">Loading...</div></div>`;
 
@@ -2540,7 +2573,7 @@ async function renderLedger(el){
       tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}},t.payment_type||""));
       const spTd=h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});spTd.append(document.createTextNode(fmtD(t.service_start)+"\u2013"+fmtD(t.service_end)));if(t.service_days>1)spTd.append(h("span",{style:{marginLeft:"3px",color:"rgba(255,255,255,0.2)"}},`(${t.service_days}d)`));tr.append(spTd);
       tr.append(h("td",{class:"r m hide-m",style:{color:"var(--g)"}},fmtF(t.daily_cost)));
-      const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});if(t.tag)tagTd.append(h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px"}},t.tag));tr.append(tagTd);
+      const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});if(t.tag){const tagSpan=h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px",cursor:"pointer"},onClick:e=>{e.stopPropagation();state.tagDetail=t.tag;state.tab="tags";history.replaceState(null,null,"#tags");renderTabs();renderContent()}},t.tag);tagSpan.addEventListener("mouseenter",()=>tagSpan.style.background="rgba(74,111,165,0.2)");tagSpan.addEventListener("mouseleave",()=>tagSpan.style.background="rgba(255,255,255,0.06)");tagTd.append(tagSpan)}tr.append(tagTd);
       tbody.append(tr);
     });
     tbl.append(tbody);wrap.append(tbl);
