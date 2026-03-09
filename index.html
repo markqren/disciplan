@@ -1256,7 +1256,7 @@ async function scanForReimbursementLinks(){
     const expenses=await sb(
       `transactions?amount_usd=gt.0&related_transaction_id=is.null`+
       `&date=gte.${expandedCutoff}`+
-      `&select=id,date,description,amount_usd,category_id,payment_type,tag`
+      `&select=id,date,description,amount_usd,category_id,payment_type,tag,service_start,service_end`
     );
     const links=[];
     for(const reimb of reimbursements){
@@ -1296,8 +1296,13 @@ async function scanForReimbursementLinks(){
       }
     }
     for(const link of links){
+      const expDate=link.expense.date,expSS=link.expense.service_start||expDate,expSE=link.expense.service_end||expDate;
+      const reimbSD=Math.round((new Date(expSE)-new Date(expSS))/864e5)+1;
+      const reimbDC=link.reimbursement.amount_usd/reimbSD;
       await sb(`transactions?id=eq.${link.reimbursement.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
         related_transaction_id:link.expense.id,
+        date:expDate,service_start:expSS,service_end:expSE,
+        service_days:reimbSD,daily_cost:reimbDC,
         ...(link.reimbursement.category_id==="other"?{category_id:link.expense.category_id}:{})
       })});
       await sb(`transactions?id=eq.${link.expense.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:link.reimbursement.id})});

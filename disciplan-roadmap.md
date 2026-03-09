@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 2, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 8, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
@@ -8,7 +8,6 @@
 
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
-| FEA-40 | **Email-to-Ledger Import Pipeline** | Feature | **High** | Forward transaction emails (Venmo, etc.) to a Postmark inbound address. Supabase Edge Function receives webhook, parses email with source-specific templates (Venmo parser extracts counterparty, amount, note, date from subject + body), falls back to Claude AI extraction for unknown email sources. Writes to `pending_imports` staging table. On app load, banner shows pending count; Entry tab gains a collapsible "Email Imports" section reusing the CSV import review UI (approve/edit/skip + batch commit). **Architecture:** Postmark free tier (100 inbound/month) → Edge Function (`/inbound-email`) → `pending_imports` table → frontend review. **Venmo mapping:** "You paid Aud Li $110.00" + note "Buoy" → `{description: "Venmo - Aud Li (Buoy)", amount: 110, payment_type: "Venmo", category: AI-assigned}`. Dedup via `email_message_id` + standard date/amount check. **Status:** Steps 1-7 complete (DB, Edge Function, banner, review UI, polish). Ready to deploy. |
 | FEA-03 | **Travel / Accommodation Category** | Feature | **High** | Hotels are currently lumped under Entertainment, which is misleading. Options: (a) add "accommodation" as a new subcategory under Entertainment, (b) create a top-level "Travel" category with subcategories (flights, hotels, activities). Either way, retroactively re-tag historical hotel transactions. Needs: update PARENT_CATS, SUB_MAP, CC color map, category dropdown, and batch-update existing transactions in Supabase. |
 | FEA-07 | **Handle "Investments" Category** | Feature | **Medium** | Some transactions are tagged as category "Investments" for unrealized gains. These need special treatment when the Investments tab is built—should not be double-counted as both income and portfolio value. Route into portfolio view instead of income statement. |
 | FEA-22 | **Ledger Search Improvements** | Feature | **Medium** | Search currently requires Enter key to trigger. Improve UX: auto-search on typing (debounced), search across more fields (tag, payment type, amount), highlight matched text in results. |
@@ -36,10 +35,12 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (47 items)</summary>
+<summary><strong>✅ Completed</strong> (49 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-41 | **Reimbursement Auto-Linking + Ledger Grouping** — Automatic detection and linking of Venmo reimbursements to their original expenses. Scoring algorithm (amount match + date proximity + description fuzzy match + category/tag match, threshold ≥ 60) runs on app init and post-email-import. Linked transactions get `related_transaction_id` set bidirectionally. Reimbursement inherits expense's date, service_start, service_end (with recalculated daily_cost/service_days) so accruals align. Ledger shows linked pairs with blue left border + 🔗 icon, grouped adjacent even when dates differ. Edit modal shows linked partner details with unlink button. Category inheritance when reimbursement is "other". | Feature → Done | Mar 8 |
+| FEA-40 | **Email-to-Ledger Import Pipeline** — Forward transaction emails (Venmo, etc.) to Postmark inbound address → Supabase Edge Function parses with source-specific templates → `pending_imports` staging table → frontend review UI. Venmo parser handles outgoing payments ("You paid"), incoming payments ("paid your request", "sent you"), and forwarded emails (strips Fwd: prefix, extracts note/date from body after forwarding divider). Forwarding note metadata supports category, tag, payment type hints. Dedup via `email_message_id`. Banner shows pending count on app load. Entry tab has collapsible "Email Imports" section with approve/edit/skip + batch commit. | Feature → Done | Mar 8 |
 | INF-01 | **Git CI/CD** — GitHub repo (`markqren/disciplan`) + Netlify auto-deploy from `main` branch. Every `git push` triggers a production build. | Infra → Done | Feb 18 |
 | FEA-39 | **"Since Last Export" Button** — New export option that tracks the highest transaction `id` at export time in `localStorage`. Subsequent clicks only export transactions added after that point. Button label shows last export date. Only the "Since Last Export" button advances the marker — "All" and "New Only" do not. Shows alert if no new transactions exist. | Feature → Done | Mar 1 |
 | BUG-11 | **Import Auto-Detect Overrides Manual Payment Type** — Chase CSV filename auto-detection was overwriting the payment type dropdown to "Chase Sapphire" on every Import click, even after manual selection of a different card. Fixed by tracking `impPtManual` flag — auto-detect only runs if the user hasn't changed the dropdown. | Bug → Done | Mar 1 |
