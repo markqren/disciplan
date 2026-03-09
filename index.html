@@ -2192,6 +2192,19 @@ async function renderLedger(el){
     if(f.dto)q+=`&date=lte.${f.dto}`;
     if(f.q)q+=`&description=ilike.*${encodeURIComponent(f.q)}*`;
     const txns=await sb(q);
+    // Group linked pairs adjacent
+    const idSet=new Set(txns.map(t=>t.id));
+    const seen=new Set();
+    for(let i=0;i<txns.length;i++){
+      const t=txns[i];
+      if(seen.has(t.id)||!t.related_transaction_id)continue;
+      if(!idSet.has(t.related_transaction_id))continue;
+      seen.add(t.id);seen.add(t.related_transaction_id);
+      const pi=txns.findIndex(x=>x.id===t.related_transaction_id);
+      if(pi===i+1)continue;
+      const[partner]=txns.splice(pi,1);
+      txns.splice(i+1,0,partner);
+    }
     const nav=document.getElementById("pgNav");
     nav.innerHTML="";
     const prev=h("button",{class:"pg-btn",onClick:()=>{if(state.page>0){state.page--;loadPage()}}},"\u2190 Prev");
