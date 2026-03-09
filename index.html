@@ -1520,7 +1520,7 @@ async function renderBS(el){
     const acctMap={};for(const a of accts)acctMap[a.label]=a;
 
     // Map ledger balances to account types
-    const byType={checking:[],savings:[],credit:[],investment:[],liability:[],other:[]};
+    const byType={checking:[],savings:[],credit:[],investment:[],liability:[],working_capital:[],other:[]};
     for(const lb of ledgerBals){
       const pt=lb.payment_type;
       if(pt==="Transfer")continue;
@@ -1541,7 +1541,7 @@ async function renderBS(el){
 
     // Compute totals — straight sums so KPI cards match group subtotals
     const assetAccts=[...byType.checking,...byType.savings,...byType.investment,...byType.other];
-    const liabAccts=[...byType.credit,...byType.liability];
+    const liabAccts=[...byType.credit,...byType.working_capital,...byType.liability];
     const totA=assetAccts.reduce((s,a)=>s+a.bal,0);
     const totL=liabAccts.reduce((s,a)=>s+a.bal,0)+creditTotal;
     const nw=totA+totL;
@@ -1553,6 +1553,7 @@ async function renderBS(el){
     stats.append(statCard("🏦","total assets",fmtN(totA),"var(--b)"));
     stats.append(statCard("💳","total liabilities",fmtN(totL),"var(--r)"));
     stats.append(statCard("💎","net worth",fmtN(nw),"var(--g)"));
+    if(Math.abs(creditTotal)>=1)stats.append(statCard("🤝","credits & transfers",fmtN(creditTotal),"#F2CC8F"));
     body.append(stats);
 
     // Snapshot bar (for NW over time chart + manual snapshots)
@@ -1578,7 +1579,7 @@ async function renderBS(el){
     if(snapDates.length>2){
       const nwData=snapDates.sort().map(d=>{
         let a=0,l=0;
-        for(const s of snaps){if(s.snapshot_date!==d)continue;const t=s.accounts?.account_type||"other";const b=parseFloat(s.balance_usd||s.balance)||0;if(["checking","savings","investment"].includes(t))a+=b;else if(["credit","liability"].includes(t))l+=Math.abs(b)}
+        for(const s of snaps){if(s.snapshot_date!==d)continue;const t=s.accounts?.account_type||"other";const b=parseFloat(s.balance_usd||s.balance)||0;if(["checking","savings","investment"].includes(t))a+=b;else if(["credit","liability","working_capital"].includes(t))l+=Math.abs(b)}
         return{d,a,nw:a-l};
       });
       const nwCard=h("div",{class:"cd"});
@@ -1605,17 +1606,21 @@ async function renderBS(el){
 
     const liabCard=h("div",{class:"cd"});
     liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)");
-    if(byType.liability.length)liabCard.innerHTML+=acctGroup("Other Liabilities",byType.liability,"var(--y)");
-    // Expandable Credits & Transfers sub-ledger
-    if(creditRows.length){
-      let credHtml=`<div class="acct-grp"><div class="acct-hdr" style="cursor:pointer" onclick="this.querySelector('.pf-toggle').classList.toggle('open');this.parentElement.querySelectorAll('.credit-sub').forEach(r=>r.classList.toggle('hidden'))"><span style="font-size:12px;font-weight:600;color:var(--y);text-transform:uppercase;letter-spacing:0.05em"><span class="pf-toggle">▸</span> Credits & Transfers</span><span style="font-size:13px;font-weight:700;color:var(--y);font-family:var(--mono)">${fmtF(creditTotal)}</span></div>`;
-      creditRows.forEach(c=>{const clr=c.bal>=0?"var(--g)":"var(--r)";credHtml+=`<div class="acct-row credit-sub hidden"><span style="color:rgba(255,255,255,0.6)" title="${c.cnt} transactions">${c.name}</span><span style="color:${clr};font-family:var(--mono)" title="${c.cnt} txns">${fmtF(c.bal)}</span></div>`});
-      credHtml+="</div>";
-      liabCard.innerHTML+=credHtml;
-    }
-    if(!byType.credit.length&&!byType.liability.length&&!creditRows.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`
+    const workCap=[...byType.working_capital,...byType.liability];
+    if(workCap.length)liabCard.innerHTML+=acctGroup("Working Capital",workCap,"var(--y)");
+    if(!byType.credit.length&&!workCap.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`
     row2.append(liabCard);
     body.append(row2);
+
+    // Credits & Transfers — standalone expandable card
+    if(creditRows.length){
+      const ctCard=h("div",{class:"cd",style:{marginTop:"16px"}});
+      let credHtml=`<div class="acct-grp"><div class="acct-hdr" style="cursor:pointer" onclick="this.querySelector('.pf-toggle').classList.toggle('open');this.parentElement.querySelectorAll('.credit-sub').forEach(r=>r.classList.toggle('hidden'))"><span style="font-size:12px;font-weight:600;color:#F2CC8F;text-transform:uppercase;letter-spacing:0.05em"><span class="pf-toggle">▸</span> Credits & Transfers</span><span style="font-size:13px;font-weight:700;color:#F2CC8F;font-family:var(--mono)">${fmtF(creditTotal)}</span></div>`;
+      creditRows.forEach(c=>{const clr=c.bal>=0?"var(--g)":"var(--r)";credHtml+=`<div class="acct-row credit-sub hidden"><span style="color:rgba(255,255,255,0.6)" title="${c.cnt} transactions">${c.name}</span><span style="color:${clr};font-family:var(--mono)" title="${c.cnt} txns">${fmtF(c.bal)}</span></div>`});
+      credHtml+="</div>";
+      ctCard.innerHTML=`<h3 style="color:#F2CC8F">Credits & Transfers</h3>`+credHtml;
+      body.append(ctCard);
+    }
   }catch(e){document.getElementById("bsBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error: ${e.message}</div>`}
 }
 
