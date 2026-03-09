@@ -453,7 +453,7 @@ let state={tab:"income",year:2025,txnCount:0,page:0,pendingEmails:0};
 
 // Ensure a tag exists in the tags table; prompt user to create if new
 async function ensureTagExists(tagName){
-  if(\!tagName)return;
+  if(!tagName)return;
   const existing=await sb("tags?select=name");
   if(existing.some(t=>t.name.toLowerCase()===tagName.toLowerCase()))return;
   return new Promise(resolve=>{
@@ -475,7 +475,7 @@ async function ensureTagExists(tagName){
     modal.append(errEl);
     const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px"}});
     const createBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
-      if(\!tStart.value||\!tEnd.value){errEl.textContent="Start and end dates are required.";return}
+      if(!tStart.value||!tEnd.value){errEl.textContent="Start and end dates are required.";return}
       if(tEnd.value<tStart.value){errEl.textContent="End date must be after start date.";return}
       createBtn.textContent="Creating...";createBtn.disabled=true;
       try{
