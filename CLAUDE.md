@@ -8,7 +8,7 @@ Accrual-based personal finance tracker. Single-page web app tracking 12,000+ tra
 - **Repo**: https://github.com/markqren/disciplan
 - **Backend**: Supabase (project: `mjuannepfodstbsxweuc`)
 - **Stack**: Single `index.html` (vanilla JS + Chart.js CDN) → Supabase REST API
-- **Deploy**: `git push` to `main` → Netlify auto-deploys
+- **Deploy**: Manual only — `npx netlify-cli deploy --prod` (auto-deploy disabled via `netlify.toml`)
 
 ## Architecture
 
@@ -146,7 +146,7 @@ Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, 
 - **Validate accrual math** against known values (e.g., Japan tag = ~$6,979)
 - **Test mobile** — the app must work on phone. Use `hide-m` class for optional columns.
 - **Update `disciplan-roadmap.md`** when completing items — move to Completed section with date
-- **Batch deploys** — Do NOT git push after every change. Accumulate changes locally and only commit+push once at the end of a session (or when Mark explicitly asks). Each push triggers a Netlify production deploy that consumes credits, and we're on the free tier with limited credits per month.
+- **Deployment** — Netlify auto-deploys are disabled via `ignore = "exit 0"` in `netlify.toml`. Each push to `main` does NOT trigger a deploy. To deploy manually, run: `npx netlify-cli deploy --prod`. This conserves Netlify free tier credits — only deploy when Mark explicitly says "deploy" or "ship it". Continue to batch changes locally and only commit+push at session end.
 
 ## Task Management
 
