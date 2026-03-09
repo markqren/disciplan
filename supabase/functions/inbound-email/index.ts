@@ -155,7 +155,8 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   // Strip "Fwd: " prefix from forwarded emails
   const subject = rawSubject.replace(/^Fwd:\s*/i, "").trim();
   const isPaid = subject.includes("You paid");
-  const isReceived = subject.includes("You received") || subject.includes("paid you");
+  const isPaidRequest = subject.includes("paid your");
+  const isReceived = subject.includes("You received") || subject.includes("paid you") || isPaidRequest;
 
   let counterparty = "";
   let amount = 0;
@@ -163,6 +164,10 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   if (isPaid) {
     // "You paid Aud Li $110.00"
     const m = subject.match(/You paid (.+?) \$([0-9,.]+)/);
+    if (m) { counterparty = m[1]; amount = parseFloat(m[2].replace(/,/g, "")); }
+  } else if (isPaidRequest) {
+    // "Joanna Zhang paid your $72.50 request"
+    const m = subject.match(/(.+?) paid your \$([0-9,.]+)/);
     if (m) { counterparty = m[1]; amount = parseFloat(m[2].replace(/,/g, "")); }
   } else if (isReceived) {
     // "You received $50.00 from Kevin Chen" or "Kevin Chen paid you $50.00"
@@ -560,6 +565,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     email_received_at: emailDate || new Date().toISOString(),
     parse_errors: parseErrors,
   }, forwardingNote);
+
+  // 7.5. Fallback date from email received date if parser couldn't extract one
+  if (!candidate.date && emailDate) {
+    const fallbackDate = new Date(emailDate).toISOString().slice(0, 10);
+    candidate.date = fallbackDate;
+    candidate.service_start = fallbackDate;
+    candidate.service_end = fallbackDate;
+  }
 
   // 8. Insert into pending_imports
   const { error } = await supabase.from("pending_imports").insert(candidate);
