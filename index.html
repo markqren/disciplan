@@ -181,7 +181,7 @@ const CC={entertainment:"#E07A5F",food:"#F2CC8F",groceries:"#E9C46A",restaurant:
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];
 const CATS_LIST=[{id:"entertainment",l:"Entertainment"},{id:"food",l:"Food (other)"},{id:"groceries",l:"Groceries"},{id:"restaurant",l:"Restaurant"},{id:"home",l:"Home (other)"},{id:"rent",l:"Rent"},{id:"furniture",l:"Furniture"},{id:"health",l:"Health"},{id:"personal",l:"Personal (other)"},{id:"clothes",l:"Clothes"},{id:"tech",l:"Tech"},{id:"transportation",l:"Transportation"},{id:"utilities",l:"Utilities"},{id:"financial",l:"Financial"},{id:"other",l:"Other"},{id:"income",l:"Income"},{id:"investment",l:"Investment"}];
-const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","Splitwise","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
+const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","Rakuten","Splitwise","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
@@ -933,6 +933,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
   const seField=h("div");seField.append(seLbl);seField.append(mSe);
 
   const mPt=h("select",{class:"inp"});
+  if(c.payment_type&&!PTS.includes(c.payment_type))mPt.append(h("option",{value:c.payment_type,selected:true},c.payment_type));
   PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
   const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
 
@@ -1186,6 +1187,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   const emSeField=h("div");emSeField.append(emSeLbl);emSeField.append(mSe);
 
   const mPt=h("select",{class:"inp"});
+  if(c.payment_type&&!PTS.includes(c.payment_type))mPt.append(h("option",{value:c.payment_type,selected:true},c.payment_type));
   PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
   const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
 
@@ -2142,6 +2144,7 @@ function openLedgerEditModal(txn,onSaved){
   const seField=h("div");seField.append(seLbl);seField.append(mSe);
 
   const mPt=h("select",{class:"inp"});
+  if(txn.payment_type&&!PTS.includes(txn.payment_type))mPt.append(h("option",{value:txn.payment_type,selected:true},txn.payment_type));
   PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===txn.payment_type)o.selected=true;mPt.append(o)});
   const mTag=h("input",{class:"inp",type:"text",value:txn.tag||""});
 
@@ -2374,6 +2377,72 @@ function openLedgerEditModal(txn,onSaved){
       if(rows.length){const p=rows[0];linkInfo.innerHTML=`<div style="margin-bottom:2px"><b>${p.description}</b></div><div>${fmtD(p.date)} &middot; ${fmtF(p.amount_usd)} &middot; ${p.category_id}</div>`}
       else{linkInfo.textContent="Linked transaction not found"}
     }).catch(()=>{linkInfo.textContent="Could not load linked transaction"});
+  }else{
+    // Link to Transaction — search UI
+    const linkSection=h("div",{style:{background:"rgba(74,111,165,0.08)",border:"1px solid rgba(74,111,165,0.2)",borderRadius:"8px",padding:"10px 14px",marginBottom:"14px",fontSize:"11px"}});
+    const linkToggle=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)"},onClick:()=>{linkToggle.style.display="none";linkSearch.style.display="block"}},"🔗 Link to Transaction");
+    linkSection.append(linkToggle);
+    const linkSearch=h("div",{style:{display:"none"}});
+    linkSearch.append(h("div",{style:{color:"rgba(255,255,255,0.4)",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}},"🔗 Link to Transaction"));
+    const lsRow=h("div",{style:{display:"flex",gap:"6px",marginBottom:"8px"}});
+    const lsInput=h("input",{class:"inp",type:"text",placeholder:"Search description...",style:{flex:"1",fontSize:"11px",padding:"5px 8px"}});
+    const lsBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"5px 10px"}},"Search");
+    lsRow.append(lsInput,lsBtn);
+    linkSearch.append(lsRow);
+    const lsResults=h("div",{style:{maxHeight:"200px",overflowY:"auto"}});
+    linkSearch.append(lsResults);
+    let selectedLink=null;
+    const lsConfirmRow=h("div",{style:{display:"none",marginTop:"8px"}});
+    const lsConfirmBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",fontSize:"11px",padding:"6px 12px"}},"Confirm Link");
+    lsConfirmRow.append(lsConfirmBtn);
+    linkSearch.append(lsConfirmRow);
+    async function doLinkSearch(){
+      const q=lsInput.value.trim();if(!q){lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>Type a description to search</div>";return}
+      lsBtn.textContent="...";lsBtn.disabled=true;selectedLink=null;lsConfirmRow.style.display="none";
+      try{
+        const rows=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&id=neq.${txn.id}&order=date.desc&limit=20&select=id,date,description,amount_usd,category_id,payment_type,related_transaction_id`);
+        lsResults.innerHTML="";
+        if(!rows.length){lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>No transactions found</div>";return}
+        rows.forEach(r=>{
+          const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
+            lsResults.querySelectorAll("div[data-rid]").forEach(d=>d.style.background="transparent");
+            row.style.background="rgba(74,111,165,0.15)";selectedLink=r;lsConfirmRow.style.display="block";
+          }});
+          row.setAttribute("data-rid",r.id);
+          const alreadyLinked=!!r.related_transaction_id;
+          row.innerHTML=`<div><div style="color:rgba(255,255,255,0.7)">${r.description}${alreadyLinked?" <span style='font-size:9px;color:rgba(255,255,255,0.3)'>(linked)</span>":""}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(r.date)} · ${r.category_id} · ${r.payment_type||""}</div></div><div style="font-family:var(--mono);color:rgba(255,255,255,0.6);white-space:nowrap;margin-left:8px">${fmtF(r.amount_usd)}</div>`;
+          lsResults.append(row);
+        });
+      }catch(e){lsResults.innerHTML=`<div style='color:var(--r);padding:8px'>Error: ${e.message}</div>`}
+      finally{lsBtn.textContent="Search";lsBtn.disabled=false}
+    }
+    lsBtn.addEventListener("click",doLinkSearch);
+    lsInput.addEventListener("keydown",e=>{if(e.key==="Enter")doLinkSearch()});
+    lsConfirmBtn.addEventListener("click",async()=>{
+      if(!selectedLink)return;
+      lsConfirmBtn.textContent="Linking...";lsConfirmBtn.disabled=true;
+      try{
+        await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:selectedLink.id})});
+        await sb(`transactions?id=eq.${selectedLink.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:txn.id})});
+        txn.related_transaction_id=selectedLink.id;
+        linkSection.innerHTML="";
+        linkSection.append(h("div",{style:{color:"rgba(255,255,255,0.4)",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}},"🔗 Linked Transaction"));
+        const linkInfoEl=h("div",{style:{color:"rgba(255,255,255,0.55)"}});
+        linkInfoEl.innerHTML=`<div style="margin-bottom:2px"><b>${selectedLink.description}</b></div><div>${fmtD(selectedLink.date)} &middot; ${fmtF(selectedLink.amount_usd)} &middot; ${selectedLink.category_id}</div>`;
+        linkSection.append(linkInfoEl);
+        const newUnlink=h("button",{class:"pg-btn",style:{marginTop:"8px",fontSize:"10px",color:"rgba(224,122,95,0.8)"},onClick:async()=>{
+          newUnlink.textContent="Unlinking...";newUnlink.disabled=true;
+          try{
+            await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:null})});
+            await sb(`transactions?id=eq.${selectedLink.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:null})});
+            txn.related_transaction_id=null;linkSection.remove();
+          }catch(e){alert("Unlink failed: "+e.message);newUnlink.textContent="Unlink";newUnlink.disabled=false}
+        }},"Unlink");
+        linkSection.append(newUnlink);
+      }catch(e){alert("Link failed: "+e.message);lsConfirmBtn.textContent="Confirm Link";lsConfirmBtn.disabled=false}
+    });
+    linkSection.append(linkSearch);
+    modal.append(linkSection);
   }
 
   modal.append(btnRow);

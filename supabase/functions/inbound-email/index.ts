@@ -144,7 +144,15 @@ const EMAIL_PARSERS: Record<string, EmailParser> = {
       /.+ paid you \$[\d,.]+/.test(subject),
     parse: parseVenmoEmail,
   },
-  // Future parsers: rakuten, chase_alert, subscription, etc.
+  rakuten: {
+    detect: (from, subject) =>
+      from.toLowerCase().includes("rakuten.com") ||
+      from.toLowerCase().includes("ebates.com") ||
+      (subject.toLowerCase().includes("cash back") && subject.toLowerCase().includes("rakuten")) ||
+      (subject.toLowerCase().includes("cashback") && from.toLowerCase().includes("rakuten")),
+    parse: parseRakutenEmail,
+  },
+  // Future parsers: chase_alert, subscription, etc.
 };
 
 // ═══════════════════════════════════════════════════════
@@ -162,15 +170,12 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   let amount = 0;
 
   if (isPaid) {
-    // "You paid Aud Li $110.00"
     const m = subject.match(/You paid (.+?) \$([0-9,.]+)/);
     if (m) { counterparty = m[1]; amount = parseFloat(m[2].replace(/,/g, "")); }
   } else if (isPaidRequest) {
-    // "Joanna Zhang paid your $72.50 request"
     const m = subject.match(/(.+?) paid your \$([0-9,.]+)/);
     if (m) { counterparty = m[1]; amount = parseFloat(m[2].replace(/,/g, "")); }
   } else if (isReceived) {
-    // "You received $50.00 from Kevin Chen" or "Kevin Chen paid you $50.00"
     const m1 = subject.match(/received \$([0-9,.]+) from (.+)/);
     const m2 = subject.match(/(.+?) paid you \$([0-9,.]+)/);
     if (m1) { amount = parseFloat(m1[1].replace(/,/g, "")); counterparty = m1[2]; }
@@ -194,23 +199,16 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
     }
   }
 
-  // Parse note from Venmo body
-  // The note sits between two blank lines, right before "See transaction":
-  //   "$\n72\n.\n50\n\nGao viet\n\nSee transaction"
-  //   "$110.00\n\nBuoy\n\nSee transaction"
   let note = "";
   if (venmoBody) {
-    // Primary: text on its own line between blank lines, before "See transaction"
     const noteMatch1 = venmoBody.match(/\n\n([^\n]+)\n\nSee transaction/);
     if (noteMatch1) note = noteMatch1[1].trim();
-    // Fallback: "$amount\n\nnote\n"
     if (!note) {
       const noteMatch2 = venmoBody.match(/\$[\d,.]+\s*\n\s*\n\s*(.+?)\s*\n/);
       if (noteMatch2) note = noteMatch2[1].trim();
     }
   }
 
-  // Parse date from Venmo body: "Date\nMar 06, 2026"
   let txnDate: string | null = null;
   if (venmoBody) {
     const dateMatch = venmoBody.match(/Date\s*\n\s*(\w+ \d{1,2}, \d{4})/);
@@ -219,7 +217,6 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
     }
   }
 
-  // Parse Transaction ID from Venmo body
   let txnId: string | null = null;
   if (venmoBody) {
     const idMatch = venmoBody.match(/Transaction ID\s*\n\s*(\d+)/);
@@ -227,19 +224,15 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   }
 
   const direction = isPaid ? "paid" : "received";
-  const amountUsd = isPaid ? amount : -amount; // positive = expense, negative = income
+  const amountUsd = isPaid ? amount : -amount;
 
-  // Title-case helper: "gao viet" → "Gao Viet"
   const titleCase = (s: string) => s.replace(/\b\w/g, c => c.toUpperCase());
-
-  // Build description — forwarding note category overrides the format
   let description: string;
   const fwdCat = forwardingNote?.category;
   const fwdHint = forwardingNote?.descriptionHint;
   const displayNote = note ? titleCase(note) : "";
 
   if (isPaid) {
-    // OUTGOING: "You paid"
     if (fwdCat) {
       const catLabel = fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1);
       description = displayNote
@@ -250,7 +243,6 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
       description = `Venmo - ${counterparty}${displayNote ? ` (${displayNote})` : ""}`;
     }
   } else {
-    // INCOMING: "You received" / "paid you" / "paid your request"
     const catLabel = fwdCat
       ? fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1)
       : null;
@@ -262,10 +254,9 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
     } else {
       description = `Reimbursed - ${counterparty}`;
     }
+    // Reimbursements use the forwarding note category (not "income")
   }
 
-  // Apply forwarding note overrides
-  // Reimbursements use the forwarding note category (not "income") — the negative amount reduces that category's total
   let categoryId: string | null = isPaid ? null : (fwdCat || null);
   let tag: string | undefined;
   let paymentType = "Venmo";
@@ -300,6 +291,96 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
 }
 
 // ═══════════════════════════════════════════════════════
+// Rakuten Parser
+// ═══════════════════════════════════════════════════════
+
+function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }): ParsedEmail {
+  const subject = rawSubject.replace(/^Fwd:\s*/i, "").trim();
+
+  // Extract cashback amount from the email body
+  // Rakuten emails prominently show the dollar amount at the top: "$147.00"
+  // This appears as the cashback amount in the "Cash Back is now in your Pending balance" context
+  let cashbackAmount: number | null = null;
+  let storeName: string | null = null;
+  let orderDate: string | null = null;
+  let orderId: string | null = null;
+
+  // Try text body first
+  const bodyToSearch = text || html || "";
+
+  // Amount: look for prominent dollar amount (usually the first/biggest one)
+  // In Rakuten cashback emails, the cashback amount is displayed prominently
+  const amtMatch = bodyToSearch.match(/\$([0-9]+(?:\.[0-9]{2})?)/);
+  if (amtMatch) {
+    cashbackAmount = parseFloat(amtMatch[1]);
+  }
+
+  // Order number
+  const orderMatch = bodyToSearch.match(/Order number\s*\n?\s*([a-f0-9-]+)/i) ||
+                     bodyToSearch.match(/Order number\s*([a-f0-9-]+)/i);
+  if (orderMatch) orderId = orderMatch[1];
+
+  // Order date: "Online order date2/11/26" or "Online order date 2/11/26"
+  const dateMatch = bodyToSearch.match(/order date\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  if (dateMatch) {
+    const parts = dateMatch[1].split("/");
+    if (parts.length === 3) {
+      const yr = parts[2].length === 2 ? "20" + parts[2] : parts[2];
+      orderDate = `${yr}-${parts[0].padStart(2, "0")}-${parts[1].padStart(2, "0")}`;
+    }
+  }
+
+  // Try to extract store name from subject or body
+  // Subject patterns: "You've earned Cash Back at Vrbo" or "Cash Back from Vrbo"
+  const storeSubjMatch = subject.match(/(?:earned|from|at)\s+(?:Cash\s*Back\s+(?:at|from)\s+)?(.+?)(?:\s*[!.]|$)/i);
+  if (storeSubjMatch) storeName = storeSubjMatch[1].trim();
+
+  // The cashback amount is NEGATIVE because it's money owed to Mark (a credit)
+  // Following the Rakuten Working Capital pattern from FEA-37:
+  // Negative = credit on the Rakuten account (Rakuten owes Mark money)
+  const amountUsd = cashbackAmount ? -cashbackAmount : 0;
+
+  // Build description: "Rakuten - {Store}" matching historical pattern
+  // If no store name extracted, use forwarding note or just "Rakuten"
+  let merchantName = storeName || "Unknown Store";
+
+  // Apply forwarding note context for better description
+  if (forwardingNote?.descriptionHint) {
+    // The user's forwarding note is the best source of context
+    // e.g., "Rakuten cash back for Vrbo Cozumel trip" → extract "Vrbo" as the merchant
+    merchantName = forwardingNote.descriptionHint;
+  }
+
+  const description = `Rakuten - ${merchantName}`;
+
+  // Rakuten cashback is categorized as "income" (it's earned cash back)
+  // payment_type = "Rakuten" (the Working Capital account)
+  let tag: string | undefined;
+  if (forwardingNote?.tag) tag = forwardingNote.tag;
+
+  return {
+    date: orderDate,
+    description,
+    amount_usd: amountUsd,
+    category_id: "income",  // Cashback earned = income
+    payment_type: "Rakuten",  // Working Capital account
+    tag,
+    service_start: orderDate,
+    service_end: orderDate,
+    service_days: 1,
+    daily_cost: amountUsd,
+    parsed_data: {
+      type: "cashback_earned",
+      store_name: storeName,
+      cashback_amount: cashbackAmount,
+      order_id: orderId,
+      order_date: orderDate,
+      forwarding_note: forwardingNote?.raw || null,
+    },
+  };
+}
+
+// ═══════════════════════════════════════════════════════
 // AI Categorization
 // ═══════════════════════════════════════════════════════
 
@@ -307,6 +388,9 @@ interface AIEnrichmentResult {
   cat?: string;
   conf?: string;
   desc?: string;
+  tag?: string;
+  payment_type?: string;
+  amount_usd?: number;
 }
 
 interface AIUnknownResult {
@@ -318,6 +402,7 @@ interface AIUnknownResult {
   confidence?: string;
   payment_type?: string;
   source_hint?: string;
+  tag?: string;
 }
 
 type AIResult = AIEnrichmentResult & AIUnknownResult;
@@ -330,6 +415,12 @@ async function aiCategorize(
   forwardingNote: ForwardingNote | null,
 ): Promise<AIResult | null> {
   if (!ANTHROPIC_KEY) return null;
+
+  // For Rakuten with a clear forwarding note, let AI interpret the full context
+  // to extract merchant name, tag, and description
+  if (source === "rakuten" && forwardingNote?.raw) {
+    return await aiInterpretForwardingNote(source, parsed!, forwardingNote, subject, textBody);
+  }
 
   // If forwarding note already provides a high-confidence category, skip AI
   if (forwardingNote?.category && forwardingNote.categoryConfidence === "high") {
@@ -364,12 +455,98 @@ async function aiCategorize(
     const text = data.content?.[0]?.text;
     if (!text) return null;
 
-    // Extract JSON from response (handle markdown code fences)
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
     return JSON.parse(jsonMatch[0]);
   } catch (e) {
     console.error("AI categorization failed:", e);
+    return null;
+  }
+}
+
+// New: AI interprets forwarding note in context of the email source
+// This is the "smarter" approach — let AI read the full context and decide
+async function aiInterpretForwardingNote(
+  source: string,
+  parsed: ParsedEmail,
+  forwardingNote: ForwardingNote,
+  subject: string,
+  textBody: string,
+): Promise<AIResult | null> {
+  const prompt = `You are a personal finance assistant helping parse a forwarded financial email.
+
+The user forwarded a ${source} email and added a note before forwarding. Your job is to interpret
+the user's note to extract the best description, category, tag, and any other context.
+
+EMAIL SOURCE: ${source}
+EMAIL SUBJECT: ${subject}
+PARSER-EXTRACTED DATA:
+- Description: ${parsed.description}
+- Amount: $${Math.abs(parsed.amount_usd || 0)}
+- Payment Type: ${parsed.payment_type}
+- Date: ${parsed.date || "unknown"}
+${parsed.parsed_data.store_name ? `- Store: ${parsed.parsed_data.store_name}` : ""}
+
+USER'S FORWARDING NOTE (text they typed before forwarding):
+"${forwardingNote.raw}"
+
+CONTEXT FOR ${source.toUpperCase()}:
+${source === "rakuten" ? `This is a Rakuten cashback notification. The amount ($${Math.abs(parsed.amount_usd || 0)}) is cashback EARNED, not the purchase price. The payment_type should always be "Rakuten". The category should be "income" for cashback earned. The description format should be "Rakuten - {StoreName}" matching historical patterns like "Rakuten - Chewy", "Rakuten - Sur la Table", "Rakuten - Vrbo".` : ""}
+
+DESCRIPTION STYLE GUIDE (match this format):
+- Rakuten cashback: "Rakuten - {StoreName}" (e.g., "Rakuten - Vrbo", "Rakuten - Chewy")
+- Venmo: "Venmo - {Person} ({Note})"
+
+CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
+
+From the user's forwarding note, extract:
+1. The best clean description (matching the style guide)
+2. A tag (trip/event tag if mentioned, lowercase, e.g., "cozumel")
+3. The correct category
+
+Return ONLY a JSON object:
+{
+  "desc": "<clean description matching style guide>",
+  "cat": "<category_id>",
+  "conf": "high|medium|low",
+  "tag": "<tag if mentioned, null otherwise>"
+}
+
+Rules:
+- Look for trip names, location references, or event names → those become tags
+- "cozumel trip" → tag: "cozumel"
+- For Rakuten, the description should be "Rakuten - {Store}" not the full forwarding note
+- Extract the actual store/merchant name from the note or email context`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 500,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`AI forwarding note error: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    const text = data.content?.[0]?.text;
+    if (!text) return null;
+
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    return JSON.parse(jsonMatch[0]);
+  } catch (e) {
+    console.error("AI forwarding note interpretation failed:", e);
     return null;
   }
 }
@@ -408,17 +585,24 @@ function buildUnknownEmailPrompt(subject: string, textBody: string, forwardingNo
 
 CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
 
+KNOWN PAYMENT TYPES: Chase Chequing, Chase Sapphire, Chase Freedom, AMEX Rose Gold, Bilt, Venmo, Rakuten, Apple, Capital One, Uber, and others.
+
 Email subject: ${subject}
 Email body (first 2000 chars): ${(textBody || "").slice(0, 2000)}`;
 
   if (forwardingNote?.descriptionHint || forwardingNote?.raw) {
-    prompt += `\nUser's forwarding note (STRONG hint): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
+    prompt += `\nUser's forwarding note (STRONG hint — the user typed this when forwarding, it often contains the category, tag, or description context): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
   }
 
   prompt += `
 
 If this email contains a financial transaction (purchase, payment, refund, cashback, subscription charge), extract it.
 If not a financial email, return {"is_transaction": false}.
+
+IMPORTANT: 
+- If the user's forwarding note mentions a trip name or location (e.g., "cozumel", "japan"), extract it as a tag.
+- If the email is from Rakuten about cashback, use payment_type "Rakuten" and category "income".
+- The description should be clean and match patterns like "Rakuten - Vrbo" or "Venmo - PersonName".
 
 Return ONLY a JSON object:
 {
@@ -428,8 +612,9 @@ Return ONLY a JSON object:
   "amount_usd": 123.45,
   "category_id": "<category>",
   "confidence": "high|medium|low",
-  "payment_type": "<best guess payment account or 'unknown'>",
-  "source_hint": "<what service sent this email>"
+  "payment_type": "<best guess payment account>",
+  "source_hint": "<what service sent this email>",
+  "tag": "<trip/event tag if mentioned in forwarding note, null otherwise>"
 }`;
 
   return prompt;
@@ -456,7 +641,6 @@ function buildCandidate(
   emailMeta: EmailMeta,
   forwardingNote: ForwardingNote | null,
 ): Record<string, unknown> {
-  // Start with parsed fields (if parser succeeded)
   const base: Record<string, unknown> = parsed ? { ...parsed } : {};
 
   // If AI returned results for an unknown email, use those
@@ -472,14 +656,19 @@ function buildCandidate(
     base.daily_cost = aiResult.amount_usd;
   }
 
-  // AI enrichment for known sources (category + description polish)
+  // AI enrichment: description, category, tag improvements
   const ai_category = aiResult?.cat || (base.category_id as string) || null;
   const ai_confidence = aiResult?.conf || aiResult?.confidence || (base.category_id ? "medium" : "low");
   const ai_description = aiResult?.desc || (base.description as string) || null;
 
-  // Forwarding note overrides (highest priority)
+  // AI-extracted tag (from forwarding note interpretation)
+  const ai_tag = aiResult?.tag || null;
+
+  // Forwarding note overrides (highest priority for explicit structured hints)
   let finalPaymentType = base.payment_type || null;
-  let finalTag = (base.tag as string) || "";
+  let finalTag = ai_tag || (base.tag as string) || "";
+  
+  // Forwarding note structured hints override AI
   if (forwardingNote?.paymentType) finalPaymentType = forwardingNote.paymentType;
   if (forwardingNote?.tag) finalTag = forwardingNote.tag;
 
@@ -487,11 +676,14 @@ function buildCandidate(
   const parsedData = (base.parsed_data as Record<string, unknown>) || {};
   if (forwardingNote?.raw) parsedData.forwarding_note = forwardingNote.raw;
 
+  // Use AI description if provided (it's usually better formatted)
+  const finalDescription = ai_description || (base.description as string) || emailMeta.email_subject;
+
   return {
     source,
     status: (source === "unknown" && !aiResult?.is_transaction) ? "skipped" : "pending",
     date: base.date || null,
-    description: ai_description || (base.description as string) || emailMeta.email_subject,
+    description: finalDescription,
     category_id: ai_category || "other",
     amount_usd: base.amount_usd ?? null,
     currency: "USD",
@@ -513,7 +705,6 @@ function buildCandidate(
     email_body_html: emailMeta.email_body_html?.slice(0, MAX_HTML_BODY) || null,
     email_message_id: emailMeta.email_message_id,
     email_received_at: emailMeta.email_received_at,
-    // Forwarding note columns
     forwarding_note: forwardingNote?.raw || null,
     forwarding_category: forwardingNote?.category || null,
     forwarding_hint: forwardingNote?.descriptionHint || null,
@@ -525,12 +716,11 @@ function buildCandidate(
 // ═══════════════════════════════════════════════════════
 
 Deno.serve(async (req: Request): Promise<Response> => {
-  // Only accept POST
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  // 1. Validate webhook secret (optional — Postmark inbound can't send custom headers)
+  // 1. Validate webhook secret
   const reqSecret = req.headers.get("X-Webhook-Secret");
   if (WEBHOOK_SECRET && reqSecret && reqSecret !== WEBHOOK_SECRET) {
     return new Response("Unauthorized", { status: 401 });
@@ -565,7 +755,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  // 4.5. Extract forwarding note from text above Gmail's forwarded message divider
+  // 4.5. Extract forwarding note
   const forwardingNote = extractForwardingNote(textBody);
 
   // 5. Detect source and parse
@@ -591,13 +781,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  // 6. AI categorization (enrichment for known sources, full extraction for unknown)
+  // 6. AI categorization
   let aiResult: AIResult | null = null;
   try {
     aiResult = await aiCategorize(source, parsed, subject || "", textBody || "", forwardingNote);
   } catch (e) {
     console.error("AI categorization error:", e);
-    // Continue without AI — will default to ai_confidence="low"
   }
 
   // 7. Build candidate row
@@ -611,7 +800,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     parse_errors: parseErrors,
   }, forwardingNote);
 
-  // 7.5. Fallback date from email received date if parser couldn't extract one
+  // 7.5. Fallback date from email received date
   if (!candidate.date && emailDate) {
     const fallbackDate = new Date(emailDate).toISOString().slice(0, 10);
     candidate.date = fallbackDate;
@@ -629,7 +818,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     });
   }
 
-  // 9. Success — return 200 so Postmark doesn't retry
+  // 9. Success
   return new Response(JSON.stringify({ status: "ok", source, forwarding_note: forwardingNote?.raw || null }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
