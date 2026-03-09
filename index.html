@@ -1079,6 +1079,22 @@ function renderEmailReviewTable(container,candidates){
     }
   }},"Save Approved");
   bulkBar.append(saveBtn);
+
+  const skippedItems=candidates.filter(c=>c._status==="skipped");
+  if(skippedItems.length){
+    const dismissBtn=h("button",{class:"pg-btn",style:"color:var(--r);border-color:rgba(224,122,95,0.3)",onClick:async()=>{
+      if(dismissBtn.dataset.confirm!=="1"){dismissBtn.dataset.confirm="1";dismissBtn.textContent="Confirm Dismiss";setTimeout(()=>{dismissBtn.dataset.confirm="0";dismissBtn.textContent="\u2715 Dismiss Skipped ("+skippedItems.length+")"},3000);return}
+      dismissBtn.textContent="Dismissing...";dismissBtn.disabled=true;
+      try{
+        for(const c of skippedItems)await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"dismissed"})});
+        const remaining=candidates.filter(c=>c._status!=="skipped");
+        candidates.length=0;candidates.push(...remaining);
+        renderEmailReviewTable(container,candidates);
+      }catch(e){alert("Dismiss failed: "+e.message);dismissBtn.textContent="\u2715 Dismiss Skipped ("+skippedItems.length+")";dismissBtn.disabled=false}
+    }},"\u2715 Dismiss Skipped ("+skippedItems.length+")");
+    bulkBar.append(dismissBtn);
+  }
+
   container.append(bulkBar);
 
   const wrap=h("div",{style:{overflowX:"auto"}});
