@@ -1232,6 +1232,9 @@ async function commitEmailImports(candidates){
   const banner=document.getElementById("emailImportBanner");
   if(banner)banner.remove();
   state.pendingEmails=0;
+  // Trigger reimbursement auto-linking for newly committed Venmo reimbursements
+  const newReimb=valid.filter(c=>c.amount_usd<0&&c.payment_type==="Venmo");
+  if(newReimb.length)setTimeout(()=>scanForReimbursementLinks().catch(e=>console.error("Post-commit link scan:",e)),1000);
   return{
     count:valid.length,
     imported:valid,
@@ -1239,6 +1242,70 @@ async function commitEmailImports(candidates){
     dupes:candidates.filter(c=>c._isDuplicate).length
   };
 }
+
+async function scanForReimbursementLinks(){
+  try{
+    const cutoff=new Date(Date.now()-90*864e5).toISOString().slice(0,10);
+    const reimbursements=await sb(
+      `transactions?payment_type=eq.Venmo&amount_usd=lt.0`+
+      `&related_transaction_id=is.null&date=gte.${cutoff}`+
+      `&select=id,date,description,amount_usd,category_id,tag`
+    );
+    if(!reimbursements.length)return;
+    const expandedCutoff=new Date(Date.now()-120*864e5).toISOString().slice(0,10);
+    const expenses=await sb(
+      `transactions?amount_usd=gt.0&related_transaction_id=is.null`+
+      `&date=gte.${expandedCutoff}`+
+      `&select=id,date,description,amount_usd,category_id,payment_type,tag`
+    );
+    const links=[];
+    for(const reimb of reimbursements){
+      const reimbAmt=Math.abs(reimb.amount_usd);
+      const noteMatch=reimb.description.match(/Reimbursed - (.+?)(?:\s*\(.+?\))?\s*-\s*\w+$/);
+      const reimbNote=noteMatch?noteMatch[1].toLowerCase().trim():"";
+      let bestMatch=null,bestScore=0;
+      for(const exp of expenses){
+        let score=0;
+        if(reimbAmt>exp.amount_usd*1.05)continue;
+        const ratio=reimbAmt/exp.amount_usd;
+        const CLEAN_FRACTIONS=[1,1/2,1/3,1/4,1/5,2/3,3/4,2/5,3/5,4/5];
+        const isCleanFraction=CLEAN_FRACTIONS.some(f=>Math.abs(ratio-f)<0.03);
+        if(Math.abs(reimbAmt-exp.amount_usd)<1.0)score+=40;
+        else if(isCleanFraction)score+=35;
+        else if(reimbAmt<exp.amount_usd)score+=10;
+        const daysDiff=Math.abs((new Date(reimb.date)-new Date(exp.date))/864e5);
+        if(daysDiff<=3)score+=25;
+        else if(daysDiff<=14)score+=20;
+        else if(daysDiff<=30)score+=10;
+        else if(daysDiff<=90)score+=5;
+        else continue;
+        const expDesc=exp.description.toLowerCase();
+        if(reimbNote&&expDesc.includes(reimbNote))score+=35;
+        else if(reimbNote){
+          const words=reimbNote.split(/\s+/).filter(w=>w.length>=3);
+          const matches=words.filter(w=>expDesc.includes(w));
+          if(matches.length>0)score+=15*(matches.length/words.length);
+        }
+        if(reimb.category_id&&reimb.category_id===exp.category_id)score+=10;
+        if(reimb.tag&&reimb.tag===exp.tag)score+=10;
+        if(score>bestScore){bestScore=score;bestMatch=exp}
+      }
+      if(bestMatch&&bestScore>=60){
+        links.push({reimbursement:reimb,expense:bestMatch,score:bestScore});
+        expenses.splice(expenses.indexOf(bestMatch),1);
+      }
+    }
+    for(const link of links){
+      await sb(`transactions?id=eq.${link.reimbursement.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
+        related_transaction_id:link.expense.id,
+        ...(link.reimbursement.category_id==="other"?{category_id:link.expense.category_id}:{})
+      })});
+      await sb(`transactions?id=eq.${link.expense.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:link.reimbursement.id})});
+    }
+    if(links.length>0)console.log(`Auto-linked ${links.length} reimbursement(s)`);
+  }catch(e){console.error("Link scan error:",e)}
+}
+
 
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
@@ -2046,6 +2113,30 @@ function openLedgerEditModal(txn,onSaved){
   modal.append(mRow(mField("Service Start",mSs),seField));
   modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
   modal.append(previewEl);
+
+  // Linked transaction section
+  if(txn.related_transaction_id){
+    const linkSection=h("div",{style:{background:"rgba(74,111,165,0.08)",border:"1px solid rgba(74,111,165,0.2)",borderRadius:"8px",padding:"10px 14px",marginBottom:"14px",fontSize:"11px"}});
+    linkSection.append(h("div",{style:{color:"rgba(255,255,255,0.4)",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}},"\uD83D\uDD17 Linked Transaction"));
+    const linkInfo=h("div",{style:{color:"rgba(255,255,255,0.55)"}},`Loading linked transaction #${txn.related_transaction_id}...`);
+    linkSection.append(linkInfo);
+    const unlinkBtn=h("button",{class:"pg-btn",style:{marginTop:"8px",fontSize:"10px",color:"rgba(224,122,95,0.8)"},onClick:async()=>{
+      unlinkBtn.textContent="Unlinking...";unlinkBtn.disabled=true;
+      try{
+        await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:null})});
+        await sb(`transactions?id=eq.${txn.related_transaction_id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:null})});
+        txn.related_transaction_id=null;linkSection.remove();
+      }catch(e){alert("Unlink failed: "+e.message);unlinkBtn.textContent="Unlink";unlinkBtn.disabled=false}
+    }},"Unlink");
+    linkSection.append(unlinkBtn);
+    modal.append(linkSection);
+    // Fetch linked transaction details
+    sb(`transactions?id=eq.${txn.related_transaction_id}&select=id,date,description,amount_usd,category_id`).then(rows=>{
+      if(rows.length){const p=rows[0];linkInfo.innerHTML=`<div style="margin-bottom:2px"><b>${p.description}</b></div><div>${fmtD(p.date)} &middot; ${fmtF(p.amount_usd)} &middot; ${p.category_id}</div>`}
+      else{linkInfo.textContent="Linked transaction not found"}
+    }).catch(()=>{linkInfo.textContent="Could not load linked transaction"});
+  }
+
   modal.append(btnRow);
   bg.append(modal);
   document.body.append(bg);
@@ -2094,7 +2185,7 @@ async function renderLedger(el){
 
   async function loadPage(){
     document.getElementById("ledgerBody").innerHTML="Loading...";
-    let q=`transactions?order=date.desc,id.desc&limit=${PS}&offset=${state.page*PS}`;
+    let q=`transactions?select=*,related_transaction_id&order=date.desc,id.desc&limit=${PS}&offset=${state.page*PS}`;
     if(f.cat)q+=`&category_id=eq.${f.cat}`;
     if(f.pt)q+=`&payment_type=eq.${encodeURIComponent(f.pt)}`;
     if(f.dfrom)q+=`&date=gte.${f.dfrom}`;
@@ -2116,9 +2207,13 @@ async function renderLedger(el){
     tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
     const tbody=document.createElement("tbody");
     txns.forEach(t=>{
-      const tr=h("tr",{style:{cursor:"pointer"},onClick:()=>openLedgerEditModal(t,loadPage)});
+      const isLinked=!!t.related_transaction_id;
+      const tr=h("tr",{style:{cursor:"pointer",...(isLinked?{borderLeft:"3px solid var(--b)"}:{})},onClick:()=>openLedgerEditModal(t,loadPage)});
       tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
-      tr.append(h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},t.description));
+      const descTd=h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+      if(isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:"Linked to related transaction"},"\uD83D\uDD17"));
+      descTd.append(document.createTextNode(t.description));
+      tr.append(descTd);
       const catTd=h("td");catTd.append(h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+"22",color:CC[t.category_id]||"#888"}},t.category_id));tr.append(catTd);
       const amtTd=h("td",{class:"r m",style:{color:t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}});amtTd.append(document.createTextNode(fmtF(t.amount_usd)));if(t.currency!=="USD")amtTd.append(h("span",{style:{color:"rgba(255,255,255,0.25)",marginLeft:"3px",fontSize:"10px"}},t.currency));tr.append(amtTd);
       tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}},t.payment_type||""));
@@ -2303,6 +2398,8 @@ async function init(){
       }
     }
   }catch(e){/* silent — non-critical */}
+  // Auto-link reimbursements (fire-and-forget, don't block app load)
+  scanForReimbursementLinks().catch(e=>console.error("Link scan error:",e));
   // Refresh button handler
   document.getElementById("refreshBtn").addEventListener("click",function(){
     this.classList.add("spinning");

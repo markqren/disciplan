@@ -208,20 +208,35 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   const fwdCat = forwardingNote?.category;
   const fwdHint = forwardingNote?.descriptionHint;
 
-  if (fwdCat && isPaid) {
-    // Category-aware description: "Restaurant - Buoy" instead of "Venmo - Aud Li (Buoy)"
-    const catLabel = fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1);
-    const mainNote = note || counterparty;
-    description = `${catLabel} - ${mainNote}`;
-    if (fwdHint) description += ` (${fwdHint})`;
-  } else if (isPaid) {
-    description = `Venmo - ${counterparty}${note ? ` (${note})` : ""}`;
+  if (isPaid) {
+    // OUTGOING: "You paid"
+    if (fwdCat) {
+      const catLabel = fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1);
+      description = note
+        ? `${catLabel} - ${note} - ${counterparty}`
+        : `${catLabel} - ${counterparty}`;
+      if (fwdHint) description += ` (${fwdHint})`;
+    } else {
+      description = `Venmo - ${counterparty}${note ? ` (${note})` : ""}`;
+    }
   } else {
-    description = `Venmo from ${counterparty}${note ? ` (${note})` : ""}`;
+    // INCOMING: "You received" / "paid you" / "paid your request"
+    const catLabel = fwdCat
+      ? fwdCat.charAt(0).toUpperCase() + fwdCat.slice(1)
+      : null;
+    const firstName = counterparty.split(" ")[0];
+    if (note) {
+      description = catLabel
+        ? `Reimbursed - ${note} (${catLabel}) - ${firstName}`
+        : `Reimbursed - ${note} - ${firstName}`;
+    } else {
+      description = `Reimbursed - ${counterparty}`;
+    }
   }
 
   // Apply forwarding note overrides
-  let categoryId: string | null = isPaid ? null : "income";
+  // Reimbursements use the forwarding note category (not "income") — the negative amount reduces that category's total
+  let categoryId: string | null = isPaid ? null : (fwdCat || null);
   let tag: string | undefined;
   let paymentType = "Venmo";
 
