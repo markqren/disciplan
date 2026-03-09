@@ -450,6 +450,47 @@ function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=documen
 
 let state={tab:"income",year:2025,txnCount:0,page:0,pendingEmails:0};
 
+
+// Ensure a tag exists in the tags table; prompt user to create if new
+async function ensureTagExists(tagName){
+  if(\!tagName)return;
+  const existing=await sb("tags?select=name");
+  if(existing.some(t=>t.name.toLowerCase()===tagName.toLowerCase()))return;
+  return new Promise(resolve=>{
+    const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg){bg.remove();resolve()}}});
+    const modal=h("div",{class:"modal"});
+    const hdr=h("div",{style:{marginBottom:"20px"}});
+    hdr.append(h("h3",{style:{margin:"0"}},"New Tag Detected"));
+    hdr.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginTop:"6px"}},`"${tagName}" doesn't exist in the tags table yet.`));
+    modal.append(hdr);
+    const tStart=h("input",{class:"inp",type:"date"});
+    const tEnd=h("input",{class:"inp",type:"date"});
+    const tType=h("select",{class:"inp"});
+    ["trip","event","recurring"].forEach(v=>tType.append(h("option",{value:v},v)));
+    function mF(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+    function mR(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+    modal.append(mR(mF("Start Date",tStart),mF("End Date",tEnd)));
+    modal.append(mR(mF("Tag Type",tType)));
+    const errEl=h("div",{style:{color:"var(--r)",fontSize:"11px",marginBottom:"8px",minHeight:"16px"}});
+    modal.append(errEl);
+    const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px"}});
+    const createBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
+      if(\!tStart.value||\!tEnd.value){errEl.textContent="Start and end dates are required.";return}
+      if(tEnd.value<tStart.value){errEl.textContent="End date must be after start date.";return}
+      createBtn.textContent="Creating...";createBtn.disabled=true;
+      try{
+        await sb("tags",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({name:tagName,start_date:tStart.value,end_date:tEnd.value,tag_type:tType.value})});
+        bg.remove();resolve();
+      }catch(e){errEl.textContent="Failed: "+e.message;createBtn.textContent="Create Tag";createBtn.disabled=false}
+    }},"Create Tag");
+    const skipBtn=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{bg.remove();resolve()}},"Skip");
+    btnRow.append(createBtn,skipBtn);
+    modal.append(btnRow);
+    bg.append(modal);
+    document.body.append(bg);
+  });
+}
+
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // TABS
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
@@ -556,7 +597,9 @@ function renderEntry(el){
     const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
     submitBtn.textContent="Saving...";
     try{
-      await sb("transactions",{method:"POST",body:JSON.stringify({date:f.date,service_start:f.ss,service_end:f.se,description:f.desc,category_id:f.cat,original_amount:orig,currency:f.cur,fx_rate:fx,amount_usd:Math.round(usd*100)/100,payment_type:f.pt,tag:f.tag.toLowerCase().trim(),daily_cost:Math.round(usd/days*1e6)/1e6,service_days:days,credit:""})});
+      const tagVal=f.tag.toLowerCase().trim();
+      if(tagVal)await ensureTagExists(tagVal);
+      await sb("transactions",{method:"POST",body:JSON.stringify({date:f.date,service_start:f.ss,service_end:f.se,description:f.desc,category_id:f.cat,original_amount:orig,currency:f.cur,fx_rate:fx,amount_usd:Math.round(usd*100)/100,payment_type:f.pt,tag:tagVal,daily_cost:Math.round(usd/days*1e6)/1e6,service_days:days,credit:""})});
       document.getElementById("okMsg").classList.remove("hidden");
       setTimeout(()=>document.getElementById("okMsg")?.classList.add("hidden"),2500);
       descInp.value="";amtInp.value="";tagInp.value="";fxInp.value="";
@@ -977,6 +1020,8 @@ async function commitImport(candidates){
       });
     }
   }
+  const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
+  for(const t of uniqueTags)await ensureTagExists(t);
   await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
@@ -1222,6 +1267,8 @@ async function commitEmailImports(candidates){
     daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||"",
     import_batch:batchId
   }));
+  const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
+  for(const t of uniqueTags)await ensureTagExists(t);
   await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   const now=new Date().toISOString();
   for(const c of valid){
@@ -2125,13 +2172,15 @@ function openLedgerEditModal(txn,onSaved){
     const sdays=Math.max(1,Math.floor((se-ss)/864e5)+1);
     const amt=Math.round(parseFloat(mAmt.value)*100)/100;
     const dc=Math.round(amt/sdays*1e6)/1e6;
+    const tagVal=(mTag.value||"").toLowerCase().trim();
     try{
+      if(tagVal)await ensureTagExists(tagVal);
       await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
         date:mDate.value,description:mDesc.value,category_id:mCat.value,
         amount_usd:amt,original_amount:amt,
         service_start:mSs.value,service_end:mSe.value,
         service_days:sdays,daily_cost:dc,
-        payment_type:mPt.value,tag:(mTag.value||"").toLowerCase().trim()
+        payment_type:mPt.value,tag:tagVal
       })});
       bg.remove();
       const msg=document.getElementById("ledgerOkMsg");
