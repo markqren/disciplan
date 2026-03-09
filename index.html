@@ -181,13 +181,14 @@ const CC={entertainment:"#E07A5F",food:"#F2CC8F",groceries:"#E9C46A",restaurant:
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];
 const CATS_LIST=[{id:"entertainment",l:"Entertainment"},{id:"food",l:"Food (other)"},{id:"groceries",l:"Groceries"},{id:"restaurant",l:"Restaurant"},{id:"home",l:"Home (other)"},{id:"rent",l:"Rent"},{id:"furniture",l:"Furniture"},{id:"health",l:"Health"},{id:"personal",l:"Personal (other)"},{id:"clothes",l:"Clothes"},{id:"tech",l:"Tech"},{id:"transportation",l:"Transportation"},{id:"utilities",l:"Utilities"},{id:"financial",l:"Financial"},{id:"other",l:"Other"},{id:"income",l:"Income"},{id:"investment",l:"Investment"}];
-const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
+const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","Splitwise","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
 const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"}};
 const CC_PAY_NAMES={"Chase Sapphire":["Bill Paid: Chase Sapphire","Chase Sapphire Bill Payment"],"Chase United":["Bill Paid: Chase United","Chase United Bill Payment"],"Chase Freedom":["Bill Paid: Chase Freedom","Chase Freedom Bill Payment"],"Chase Aeroplan":["Bill Paid: Chase Aeroplan","Chase Aeroplan Bill Payment"],"AMEX Rose Gold":["Bill Paid: AMEX Rose Gold","Amex Rose Gold Bill Payment"],"Bilt":["Bill Paid: Bilt","Bilt Card Payment"],"Apple":["Bill Paid: Apple","Apple Bill Payment"],"Venmo Credit":["Bill Paid: Venmo","Venmo Bill Payment"],"Capital One":["Bill Paid: Capital One","Capital One Bill Payment"],"Uber":["Bill Paid: Uber","Uber Bill Payment"]};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
+const SPLIT_PRESETS=[{label:"50%",value:0.5},{label:"33%",value:1/3},{label:"25%",value:0.25},{label:"Custom",value:null}];
 const PF_ACM={us_equity:{label:"US Equity",color:"#4A6FA5",target:70},intl_equity:{label:"International",color:"#81B29A",target:10},crypto:{label:"Crypto",color:"#E07A5F",target:5},balanced:{label:"Balanced",color:"#F2CC8F",target:5},money_market:{label:"Money Market",color:"#6B9AC4",target:5},target_date:{label:"Target Date",color:"#9B8EA0",target:5}};
 const PF_ATL={retirement_401k:"401(k)",retirement_ira:"IRA",brokerage:"Brokerage",tax_free:"Tax-Free",hsa:"HSA",rsu:"RSU",crypto:"Crypto"};
 const PF_ACCT_ANN_OVERRIDE={schwab_401k:7.3,vanguard_401k:null};
@@ -1311,9 +1312,52 @@ async function scanForReimbursementLinks(){
   }catch(e){console.error("Link scan error:",e)}
 }
 
+async function fetchReimburseFriends(){
+  const creditRows=await sb("transactions?payment_type=eq.Transfer&credit=neq.&select=credit&limit=5000");
+  const reimbRows=await sb("transactions?description=like.Reimbursed*&amount_usd=lt.0&select=description&limit=5000");
+  const counts={};
+  for(const r of creditRows){const name=(r.credit||"").trim();if(name)counts[name]=(counts[name]||0)+1}
+  for(const r of reimbRows){const m=r.description.match(/-\s*(\w+)\s*$/);if(m){const name=m[1].trim();counts[name]=(counts[name]||0)+1}}
+  return Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([name])=>name);
+}
+
+async function createReimbursement(originalTxn,person,splitRatio,paymentType,note){
+  const reimbAmount=Math.round(-(originalTxn.amount_usd*splitRatio)*100)/100;
+  const ss=originalTxn.service_start||originalTxn.date;
+  const se=originalTxn.service_end||originalTxn.date;
+  const serviceDays=Math.max(1,Math.round((new Date(se)-new Date(ss))/864e5)+1);
+  const dailyCost=Math.round(reimbAmount/serviceDays*1e6)/1e6;
+  const firstName=person.split(" ")[0];
+  const description=`Reimbursed - ${originalTxn.description} - ${firstName}`;
+  const newTxn={
+    date:originalTxn.date,
+    service_start:ss,
+    service_end:se,
+    description,
+    category_id:originalTxn.category_id,
+    original_amount:reimbAmount,
+    currency:"USD",
+    fx_rate:1,
+    amount_usd:reimbAmount,
+    payment_type:paymentType,
+    tag:(originalTxn.tag||"").toLowerCase().trim(),
+    daily_cost:dailyCost,
+    service_days:serviceDays,
+    credit:"",
+    related_transaction_id:originalTxn.id
+  };
+  const result=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(newTxn)});
+  const newId=result[0]?.id;
+  if(newId&&!originalTxn.related_transaction_id){
+    await sb(`transactions?id=eq.${originalTxn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({related_transaction_id:newId})});
+  }
+  state.txnCount++;
+  return result;
+}
 
 
-// ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
+
+//●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // INCOME STATEMENT
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
@@ -2068,7 +2112,8 @@ function openLedgerEditModal(txn,onSaved){
   updatePreview();
 
   // Action buttons
-  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  const isReimbursable=txn.amount_usd>0&&!["income","investment","financial","adjustment"].includes(txn.category_id);
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:isReimbursable?"1fr auto auto auto":"1fr auto auto",gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
     mSave.textContent="Saving...";mSave.disabled=true;
     const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
@@ -2111,7 +2156,142 @@ function openLedgerEditModal(txn,onSaved){
   }},"Delete");
 
   const mCancel=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel");
-  btnRow.append(mSave,mDel,mCancel);
+
+  // Reimburse button (only for reimbursable expenses)
+  const mReimb=isReimbursable?h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",width:"auto",padding:"12px 20px"},onClick:()=>showReimburseForm()},"\uD83D\uDCB8 Reimburse"):null;
+
+  function showReimburseForm(){
+    // Save edit form content and replace with reimburse form
+    const editContent=Array.from(modal.children);
+    modal.innerHTML="";
+    let selectedPerson="",selectedRatio=0.5,customInput=null;
+
+    // Header
+    const rHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+    const rHdrLeft=h("div");
+    rHdrLeft.append(h("h3",{style:{margin:"0"}},"\uD83D\uDCB8 Reimburse"));
+    rHdrLeft.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginTop:"4px"}},`${txn.description} \u00B7 ${fmtF(txn.amount_usd)}`));
+    const rClose=h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715");
+    rHdr.append(rHdrLeft,rClose);
+    modal.append(rHdr);
+
+    // Person selection
+    const personWrap=h("div",{style:{marginBottom:"14px"}});
+    personWrap.append(h("label",{class:"lbl"},"Person"));
+    const personSelect=h("select",{class:"inp",onChange:()=>{selectedPerson=personSelect.value;if(personSelect.value)personFree.value="";updateRPreview()}});
+    personSelect.append(h("option",{value:""},"Loading..."));
+    personSelect.disabled=true;
+    const personFree=h("input",{class:"inp",type:"text",placeholder:"or type a name",style:{marginTop:"6px"},onInput:()=>{selectedPerson=personFree.value.trim();if(selectedPerson)personSelect.value="";updateRPreview()}});
+    personWrap.append(personSelect,personFree);
+    modal.append(personWrap);
+
+    // Load friends async
+    fetchReimburseFriends().then(friends=>{
+      personSelect.innerHTML="";
+      if(friends.length){
+        personSelect.append(h("option",{value:""},"Select a person..."));
+        friends.forEach(name=>{personSelect.append(h("option",{value:name},name))});
+        personSelect.disabled=false;
+      }else{
+        personSelect.classList.add("hidden");
+      }
+    }).catch(()=>{personSelect.classList.add("hidden")});
+
+    // Split presets
+    const splitWrap=h("div",{style:{marginBottom:"14px"}});
+    splitWrap.append(h("label",{class:"lbl"},"Split"));
+    const splitBtns=h("div",{style:{display:"flex",gap:"6px",flexWrap:"wrap"}});
+    const customWrap=h("div",{class:"hidden",style:{marginTop:"6px"}});
+    const customInp=h("input",{class:"inp",type:"text",placeholder:"e.g. 40% or $60",style:{width:"140px"},onInput:()=>{
+      const v=customInp.value.trim();
+      if(v.startsWith("$")){const d=parseFloat(v.slice(1));if(!isNaN(d)&&d>0){selectedRatio=d/txn.amount_usd}}
+      else{const p=parseFloat(v.replace("%",""));if(!isNaN(p)&&p>0){selectedRatio=p/100}}
+      updateRPreview();
+    }});
+    customWrap.append(customInp);
+
+    SPLIT_PRESETS.forEach(sp=>{
+      const b=h("button",{class:"pg-btn",style:{padding:"6px 14px",fontSize:"11px",border:"1px solid rgba(255,255,255,0.1)"},onClick:()=>{
+        splitBtns.querySelectorAll("button").forEach(x=>{x.style.background="";x.style.borderColor="rgba(255,255,255,0.1)"});
+        b.style.background="rgba(74,111,165,0.3)";b.style.borderColor="var(--b)";
+        if(sp.value!==null){selectedRatio=sp.value;customWrap.classList.add("hidden")}
+        else{customWrap.classList.remove("hidden");customInp.focus()}
+        updateRPreview();
+      }},sp.label);
+      if(sp.value===0.5){b.style.background="rgba(74,111,165,0.3)";b.style.borderColor="var(--b)"}
+      splitBtns.append(b);
+    });
+    splitWrap.append(splitBtns,customWrap);
+    modal.append(splitWrap);
+
+    // Amount display
+    const amtDisplay=h("div",{style:{marginBottom:"14px"}});
+    amtDisplay.append(h("label",{class:"lbl"},"Reimbursement Amount"));
+    const amtVal=h("div",{style:{fontSize:"20px",fontWeight:"700",color:"var(--g)",fontFamily:"var(--mono)"}});
+    amtDisplay.append(amtVal);
+    modal.append(amtDisplay);
+
+    // Payment method
+    const rPt=h("select",{class:"inp",onChange:()=>updateRPreview()});
+    PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Venmo")o.selected=true;rPt.append(o)});
+    modal.append(mRow(mField("Payment Method",rPt)));
+
+    // Note
+    const rNote=h("input",{class:"inp",type:"text",placeholder:"optional context"});
+    modal.append(mRow(mField("Note",rNote)));
+
+    // Preview
+    const rPreview=h("div",{class:"preview",style:{marginBottom:"14px"}});
+    modal.append(rPreview);
+
+    // Validation error
+    const errEl=h("div",{style:{color:"var(--r)",fontSize:"11px",marginBottom:"8px",minHeight:"16px"}});
+    modal.append(errEl);
+
+    function updateRPreview(){
+      const amt=Math.round(txn.amount_usd*selectedRatio*100)/100;
+      amtVal.textContent=fmtF(-amt);
+      const pName=selectedPerson||"___";
+      const firstName=pName.split(" ")[0];
+      const desc=`Reimbursed - ${txn.description} - ${firstName}`;
+      rPreview.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Preview</div>
+        <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-amt)} \u00B7 ${rPt.value} \u00B7 ${txn.category_id}</div>
+        <div style="font-size:11px;color:rgba(74,111,165,0.7);margin-top:4px">\uD83D\uDD17 Linked to: ${txn.description}</div>`;
+    }
+    updateRPreview();
+
+    // Action buttons
+    const rBtnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"4px"}});
+    const rCreate=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
+      // Validate
+      const person=selectedPerson.trim();
+      if(!person){errEl.textContent="Please select or type a person name.";return}
+      const reimbAmt=Math.round(txn.amount_usd*selectedRatio*100)/100;
+      if(reimbAmt<=0){errEl.textContent="Reimbursement amount must be greater than $0.";return}
+      if(reimbAmt>txn.amount_usd){errEl.textContent="Reimbursement cannot exceed the original amount.";return}
+      errEl.textContent="";
+      rCreate.textContent="Creating...";rCreate.disabled=true;
+      try{
+        await createReimbursement(txn,person,selectedRatio,rPt.value,rNote.value);
+        bg.remove();
+        const msg=document.getElementById("ledgerOkMsg");
+        if(msg){msg.textContent="Reimbursement created";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+        document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        onSaved();
+      }catch(e){alert("Failed: "+e.message);rCreate.textContent="Create Reimbursement";rCreate.disabled=false}
+    }},"Create Reimbursement");
+    const rBack=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{
+      modal.innerHTML="";
+      editContent.forEach(c=>modal.append(c));
+    }},"Back");
+    rBtnRow.append(rCreate,rBack);
+    modal.append(rBtnRow);
+  }
+
+  btnRow.append(mSave);
+  if(mReimb)btnRow.append(mReimb);
+  btnRow.append(mDel,mCancel);
 
   modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
