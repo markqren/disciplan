@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 <style>
 :root{--bg:#0a0a14;--card:rgba(255,255,255,0.025);--bdr:rgba(255,255,255,0.07);--tx:#e8e8e4;--dim:rgba(255,255,255,0.5);--g:#81B29A;--r:#E07A5F;--b:#4A6FA5;--y:#F2CC8F;--mono:'JetBrains Mono',monospace;--sans:'Outfit',system-ui,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -123,6 +124,7 @@ const SB_URL = "https://mjuannepfodstbsxweuc.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qdWFubmVwZm9kc3Ric3h3ZXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzODcwMzksImV4cCI6MjA4Njk2MzAzOX0.6TqLUAhvWMjDunpird0_9FMnDiT4qRuYaH6XbXmKOnA";
 const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
 let currentSession = null;
+if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js";
 
 function authHeaders(extra = {}) {
   const token = currentSession?.access_token || SB_KEY;
@@ -186,6 +188,7 @@ const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
 const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"}};
+const PAYSLIP_PROFILES={pinterest:{detect:t=>t.includes("Pinterest, Inc.")&&t.includes("Pay Period Begin"),company:"Pinterest",incomeItems:["Regular Salary Pay","Connectivity Reimbursement","GTL","Wellness Reimbursement","Home Office Setup Stipend","Sign on Bonus"],rsuIndicators:["RSU Gain"],postTaxExclude:["401(k) After-tax Deferral","RSU Gain Offset"],benefitEarnings:["GTL"]}};
 const CC_PAY_NAMES={"Chase Sapphire":["Bill Paid: Chase Sapphire","Chase Sapphire Bill Payment"],"Chase United":["Bill Paid: Chase United","Chase United Bill Payment"],"Chase Freedom":["Bill Paid: Chase Freedom","Chase Freedom Bill Payment"],"Chase Aeroplan":["Bill Paid: Chase Aeroplan","Chase Aeroplan Bill Payment"],"AMEX Rose Gold":["Bill Paid: AMEX Rose Gold","Amex Rose Gold Bill Payment"],"Bilt":["Bill Paid: Bilt","Bilt Card Payment"],"Apple":["Bill Paid: Apple","Apple Bill Payment"],"Venmo Credit":["Bill Paid: Venmo","Venmo Bill Payment"],"Capital One":["Bill Paid: Capital One","Capital One Bill Payment"],"Uber":["Bill Paid: Uber","Uber Bill Payment"]};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
 const SPLIT_PRESETS=[{label:"50%",value:0.5},{label:"33%",value:1/3},{label:"25%",value:0.25},{label:"Custom",value:null}];
@@ -201,6 +204,8 @@ function today(){return new Date().toISOString().slice(0,10)}
 function endOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth()+1,0).toISOString().slice(0,10)}
 function addDays(d,n){return new Date(new Date(d+"T00:00:00").getTime()+(n-1)*864e5).toISOString().slice(0,10)}
 function getDefEnd(cat,ss){const r=ACCRUAL_D[cat];if(!r||!ss)return ss;if(r==="month")return endOfMonth(ss);return addDays(ss,r)}
+function getQuarterlyVestingPeriod(d){const dt=new Date(d+"T00:00:00"),y=dt.getFullYear(),m=dt.getMonth();if(m<3)return{start:`${y}-01-01`,end:`${y}-03-31`};if(m<6)return{start:`${y}-04-01`,end:`${y}-06-30`};if(m<9)return{start:`${y}-07-01`,end:`${y}-09-30`};return{start:`${y}-10-01`,end:`${y}-12-31`}}
+function convertMMDDYYYY(s){const p=s.split("/");return`${p[2]}-${p[0].padStart(2,"0")}-${p[1].padStart(2,"0")}`}
 
 function parseCSV(text){
   const s=text.charCodeAt(0)===0xFEFF?text.slice(1):text;
@@ -443,6 +448,138 @@ function h(tag,attrs,children){
 // Chart instances to destroy before recreating
 let charts={};
 function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=document.getElementById(id);if(!ctx)return;charts[id]=new Chart(ctx,cfg)}
+
+// Payslip PDF parsing (FEA-45)
+function pn(s){return parseFloat(String(s).replace(/,/g,""))||0}
+
+function extractLinesFromPage(tc){
+  const items=tc.items.filter(i=>i.str.trim());
+  if(!items.length)return[];
+  const groups=[];let cur=[items[0]],cy=items[0].transform[5];
+  for(let i=1;i<items.length;i++){
+    const it=items[i],y=it.transform[5];
+    if(Math.abs(y-cy)<=2){cur.push(it)}
+    else{groups.push({y:cy,items:cur});cur=[it];cy=y}
+  }
+  groups.push({y:cy,items:cur});
+  groups.sort((a,b)=>b.y-a.y);
+  return groups.map(g=>{
+    g.items.sort((a,b)=>a.transform[4]-b.transform[4]);
+    return g.items.map(i=>i.str).join(" ");
+  });
+}
+
+function parsePayslipPage(lines,fullText){
+  // Extract 3 consecutive dates
+  const dm=fullText.match(/(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})\s+(\d{2}\/\d{2}\/\d{4})/);
+  if(!dm)return null;
+  const ppb=convertMMDDYYYY(dm[1]),ppe=convertMMDDYYYY(dm[2]),cd=convertMMDDYYYY(dm[3]);
+
+  // Parse Current summary row
+  const cm=fullText.match(/Current\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)/);
+  if(!cm)return null;
+  const grossPay=pn(cm[2]),preTaxSum=pn(cm[3]),empTaxSum=pn(cm[4]),postTaxSum=pn(cm[5]),netPay=pn(cm[6]);
+
+  // Skip if all zeros
+  if(grossPay===0&&empTaxSum===0&&preTaxSum===0&&postTaxSum===0){
+    return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay:0,netPay:0,
+      earningsTotal:0,employeeTaxTotal:0,preTaxTotal:0,postTaxTotal:0,
+      gtl:0,deferral401k:0,rsuOffset:0,isRSU:false,isSkip:true};
+  }
+
+  // Section totals from summary lines
+  let earningsTotal=0,employeeTaxTotal=0,preTaxTotal=0,postTaxTotal=0;
+  for(const ln of lines){
+    const em=ln.match(/^Earnings\s+([\d,.]+)\s+[\d,.]+\s+Employee Taxes\s+([\d,.]+)/);
+    if(em){earningsTotal=pn(em[1]);employeeTaxTotal=pn(em[2])}
+    const pm=ln.match(/^Pre Tax Deductions\s+([\d,.]+)\s+[\d,.]+\s+Post Tax Deductions\s+([\d,.]+)/);
+    if(pm){preTaxTotal=pn(pm[1]);postTaxTotal=pn(pm[2])}
+  }
+
+  // GTL current amount (earnings item with date range)
+  const gm=fullText.match(/GTL\s+\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}\s+\d+\s+\d+\s+([\d,.]+)/);
+  const gtl=gm?pn(gm[1]):0;
+
+  // 401(k) After-tax Deferral: 2 numbers = [current, YTD], 1 number = YTD only
+  let deferral401k=0;
+  const km=fullText.match(/401\(k\) After-tax Deferral\s+([\d,.]+)(?:\s+([\d,.]+))?/);
+  if(km&&km[2])deferral401k=pn(km[1]);
+
+  // RSU Gain Offset: same pattern
+  let rsuOffset=0;
+  const rm=fullText.match(/RSU Gain Offset\s+([\d,.]+)(?:\s+([\d,.]+))?/);
+  if(rm&&rm[2])rsuOffset=pn(rm[1]);
+
+  // RSU detection: RSU Gain followed by a date
+  const isRSU=!!fullText.match(/RSU Gain\s+\d{2}\/\d{2}\/\d{4}/);
+
+  return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay,netPay,
+    earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
+    gtl,deferral401k,rsuOffset,isRSU,isSkip:false};
+}
+
+async function parsePayslipPDF(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const pages=[];
+  for(let i=1;i<=pdf.numPages;i++){
+    const pg=await pdf.getPage(i);
+    const tc=await pg.getTextContent();
+    const lines=extractLinesFromPage(tc);
+    const fullText=tc.items.map(it=>it.str).join(" ");
+    const parsed=parsePayslipPage(lines,fullText);
+    if(parsed)pages.push(parsed);
+  }
+  return pages;
+}
+
+function generatePayslipTransactions(pages,enteredDate){
+  const txns=[];
+  for(const p of pages){
+    if(p.isSkip)continue;
+    const ss=p.payPeriodBegin,se=p.payPeriodEnd;
+    if(p.isRSU){
+      const vp=getQuarterlyVestingPeriod(ss);
+      const q=Math.ceil((new Date(ss+"T00:00:00").getMonth()+1)/3);
+      const y=new Date(ss+"T00:00:00").getFullYear();
+      txns.push({date:enteredDate,service_start:vp.start,service_end:vp.end,
+        description:`Pinterest Stock Units Vested (Q${q} ${y})`,category_id:"income",
+        amount_usd:-p.earningsTotal,payment_type:"Charles Schwab",
+        _group:`${fmtD(ss)} \u2013 ${fmtD(se)} (RSU Vesting)`,_source:"rsu",_pageData:p});
+      txns.push({date:enteredDate,service_start:vp.start,service_end:vp.end,
+        description:"Income Taxes and Social Security",category_id:"income",
+        amount_usd:p.employeeTaxTotal,payment_type:"Charles Schwab",
+        _group:`${fmtD(ss)} \u2013 ${fmtD(se)} (RSU Vesting)`,_source:"rsu_tax",_pageData:p});
+    }else{
+      const postTaxNon401k=Math.round((p.postTaxTotal-p.deferral401k-p.rsuOffset)*100)/100;
+      const medical=Math.round((p.preTaxTotal+postTaxNon401k+p.gtl)*100)/100;
+      const grp=`${fmtD(ss)} \u2013 ${fmtD(se)} (Regular)`;
+      txns.push({date:enteredDate,service_start:ss,service_end:se,
+        description:"Pinterest Income",category_id:"income",
+        amount_usd:-p.earningsTotal,payment_type:"Chase Chequing",
+        _group:grp,_source:"salary",_pageData:p});
+      txns.push({date:enteredDate,service_start:ss,service_end:se,
+        description:"Income Taxes and Social Security",category_id:"income",
+        amount_usd:p.employeeTaxTotal,payment_type:"Chase Chequing",
+        _group:grp,_source:"tax",_pageData:p});
+      txns.push({date:enteredDate,service_start:ss,service_end:se,
+        description:"Medical Insurance Benefits",category_id:"health",
+        amount_usd:medical,payment_type:"Chase Chequing",
+        _group:grp,_source:"benefits",_pageData:p});
+      if(p.deferral401k>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"401K",category_id:"financial",
+          amount_usd:p.deferral401k,payment_type:"Chase Chequing",
+          _group:grp,_source:"401k_out",_pageData:p});
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Vanguard Deposited 401K",category_id:"financial",
+          amount_usd:-p.deferral401k,payment_type:"Vanguard",
+          _group:grp,_source:"401k_in",_pageData:p});
+      }
+    }
+  }
+  return txns;
+}
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 // STATE
@@ -768,6 +905,83 @@ function renderEntry(el){
   emailCard.append(emailBody);
   el.append(emailCard);
   if(emailOpen){emailBody._loaded=true;loadEmailImports()}
+
+  // ── Payslip Import Section (FEA-45) ──
+  const psCard=h("div",{class:"cd"});
+  let psOpen=false;
+  const psHdr=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"},onClick:()=>{
+    psOpen=!psOpen;psArrow.textContent=psOpen?"\u25BE":"\u25B8";psBody.classList.toggle("hidden");
+  }});
+  const psArrow=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},"\u25B8");
+  psHdr.append(psArrow,h("h3",{style:{margin:"0"}},"\uD83D\uDCB0 Payslip Import"));
+  psCard.append(psHdr);
+
+  const psBody=h("div",{class:"hidden",style:{marginTop:"16px"}});
+  let psCandidates=null;
+  let psSkippedPages=[];
+
+  const psFileInp=h("input",{class:"inp",type:"file",accept:".pdf,.csv"});
+  const psDateInp=h("input",{class:"inp",type:"date",value:today()});
+  const psStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
+  const psReview=h("div");
+
+  const psBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
+    const file=psFileInp.files[0];
+    if(!file)return alert("Choose a payslip PDF first.");
+    psBtn.disabled=true;psBtn.textContent="Processing...";
+    psStatus.classList.remove("hidden");
+    psStatus.style.color="rgba(255,255,255,0.4)";
+    psStatus.textContent="Parsing PDF...";
+    try{
+      if(!window.pdfjsLib)throw new Error("PDF parser not available. Reload the page.");
+      const pages=await parsePayslipPDF(file);
+      if(!pages.length)throw new Error("No payslip pages found. Is this a Pinterest payslip?");
+
+      const active=pages.filter(p=>!p.isSkip);
+      psSkippedPages=pages.filter(p=>p.isSkip);
+
+      psStatus.textContent=`Found ${pages.length} payslip pages (${active.length} active, ${psSkippedPages.length} skipped)...`;
+
+      const enteredDate=psDateInp.value||today();
+      const txns=generatePayslipTransactions(pages,enteredDate);
+
+      txns.forEach(c=>{
+        c._status="pending";
+        c._isDuplicate=false;
+        c._rawDescription=c.description;
+        c.currency="USD";c.fx_rate=1;
+        c.original_amount=c.amount_usd;
+        c.credit="";
+        const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+        c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+        c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+      });
+
+      psCandidates=txns;
+
+      psStatus.textContent="Checking for duplicates...";
+      const ptGroups={};
+      for(const c of txns){const pt=c.payment_type;if(!ptGroups[pt])ptGroups[pt]=[];ptGroups[pt].push(c)}
+      for(const[pt,group] of Object.entries(ptGroups)){await findDuplicates(group,pt)}
+
+      const dupes=txns.filter(c=>c._isDuplicate).length;
+      psStatus.textContent=`${txns.length} transactions generated \u00b7 ${dupes} duplicates`;
+
+      renderPayslipReviewTable(psReview,psCandidates,psSkippedPages);
+    }catch(e){
+      psStatus.textContent="Error: "+e.message;
+      psStatus.style.color="var(--r)";
+    }
+    psBtn.disabled=false;psBtn.textContent="Import";
+  }},"Import");
+
+  psBody.append(row(field("Payslip PDF",psFileInp),field("Entered Date",psDateInp)));
+  psBody.append(psBtn);
+  psBody.append(psStatus);
+  psBody.append(psReview);
+  psCard.append(psBody);
+  el.append(psCard);
+
 }
 
 function renderReviewTable(container,candidates){
@@ -1161,6 +1375,147 @@ function renderEmailReviewTable(container,candidates){
   container.append(wrap);
 }
 
+
+function renderPayslipReviewTable(container,candidates,skippedPages){
+  container.innerHTML="";
+  const pending=candidates.filter(c=>c._status==="pending").length;
+  const approved=candidates.filter(c=>c._status==="approved").length;
+  const dupes=candidates.filter(c=>c._isDuplicate).length;
+  const committed=candidates.filter(c=>c._status==="committed").length;
+
+  container.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"12px"}},
+    `${candidates.length} transactions \u00b7 ${pending} pending \u00b7 ${approved} approved \u00b7 ${dupes} duplicates${committed?" \u00b7 "+committed+" committed":""}`));
+
+  const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
+  bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
+    candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
+    renderPayslipReviewTable(container,candidates,skippedPages);
+  }},"\u2713 Approve All"));
+
+  let saving=false;
+  const saveBtn=h("button",{class:"pg-btn",style:"color:#fff;background:rgba(129,178,154,0.2);border-color:rgba(129,178,154,0.4);font-weight:600",onClick:async()=>{
+    if(saving)return;
+    const appr=candidates.filter(c=>c._status==="approved");
+    if(!appr.length)return alert("No approved transactions to save.");
+    saving=true;saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    try{
+      const summary=await commitPayslipImport(candidates);
+      renderPayslipReviewTable(container,candidates,skippedPages);
+      const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
+      const dates=summary.imported.map(c=>c.date).sort();
+      sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
+      sumEl.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
+        state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
+      }},"View in Ledger \u2192"));
+      container.append(sumEl);
+      saveBtn.textContent="Saved";
+    }catch(e){
+      console.error("commitPayslipImport error:",e);
+      alert("Error saving: "+e.message);
+      saveBtn.disabled=false;saveBtn.textContent="Save Approved";
+    }
+  }},"Save Approved");
+  bulkBar.append(saveBtn);
+  container.append(bulkBar);
+
+  // Group by _group
+  const groups=[];const groupMap={};
+  candidates.forEach(c=>{
+    if(!groupMap[c._group]){groupMap[c._group]=[];groups.push(c._group)}
+    groupMap[c._group].push(c);
+  });
+
+  const wrap=h("div",{style:{overflowX:"auto"}});
+  const tbl=h("table");
+  const thead=h("thead");
+  thead.innerHTML=`<tr><th style="width:36px"></th><th>Description</th><th class="r">Amount</th><th>Category</th><th class="hide-m">Service Period</th><th class="hide-m">Payment</th></tr>`;
+  tbl.append(thead);
+  const tbody=h("tbody");
+
+  groups.forEach(grp=>{
+    const grpTxns=groupMap[grp];
+    const pd=grpTxns[0]?._pageData;
+
+    // Group header row
+    const hdrTr=h("tr",{style:{background:"rgba(255,255,255,0.03)"}});
+    const hdrTd=h("td",{style:{padding:"8px 10px",fontSize:"12px",fontWeight:"600",color:"rgba(255,255,255,0.6)",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+    hdrTd.setAttribute("colspan","6");
+    hdrTd.textContent="\u2500\u2500 "+grp+" ";
+    if(pd&&!pd.isRSU&&!pd.isSkip){
+      const expectedNet=Math.round((pd.earningsTotal-pd.gtl-pd.employeeTaxTotal-pd.preTaxTotal-pd.postTaxTotal)*100)/100;
+      const diff=Math.abs(expectedNet-pd.netPay);
+      const chk=h("span",{style:{fontSize:"10px",fontWeight:"400",color:diff>0.02?"var(--r)":"rgba(255,255,255,0.3)"}},
+        ` \u00b7 Net Pay: ${fmtF(pd.netPay)}`+(diff>0.02?` \u26a0 (expected ${fmtF(expectedNet)})`:" \u2713"));
+      hdrTd.append(chk);
+    }
+    hdrTr.append(hdrTd);
+    tbody.append(hdrTr);
+
+    // Transaction rows
+    grpTxns.forEach(c=>{
+      const idx=candidates.indexOf(c);
+      const tr=h("tr",{style:{borderLeft:c._status==="approved"?"3px solid var(--g)":c._isDuplicate?"3px solid var(--y)":"3px solid transparent",opacity:c._status==="skipped"?"0.4":"1"}});
+
+      const statusIcon=c._status==="approved"?"\u2713":c._status==="skipped"?"\u2715":c._status==="committed"?"\u2713":"\u25CB";
+      const statusColor=c._status==="approved"?"var(--g)":c._status==="skipped"?"var(--r)":c._status==="committed"?"var(--b)":"rgba(255,255,255,0.3)";
+      tr.append(h("td",{style:{cursor:c._status==="committed"?"default":"pointer",textAlign:"center",fontSize:"14px",color:statusColor,userSelect:"none"},onClick:()=>{
+        if(c._status==="committed")return;
+        if(c._isDuplicate&&c._status==="skipped")c._status="pending";
+        else if(c._status==="pending")c._status="approved";
+        else if(c._status==="approved")c._status="skipped";
+        else c._status="pending";
+        renderPayslipReviewTable(container,candidates,skippedPages);
+      }},statusIcon));
+
+      const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openPayslipEditModal(candidates,idx,container,skippedPages)}});
+      const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+      descMain.textContent=c.description;
+      const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+      descSub.textContent=c._skipReason||"";
+      descTd.append(descMain,descSub);
+      tr.append(descTd);
+
+      tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
+
+      const catTd=h("td");
+      const catSel=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"},onChange:e=>{
+        c.category_id=e.target.value;
+        c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_end;
+        const ss2=new Date(c.service_start+"T00:00:00"),se2=new Date(c.service_end+"T00:00:00");
+        c.service_days=Math.max(1,Math.floor((se2-ss2)/864e5)+1);
+        c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+        renderPayslipReviewTable(container,candidates,skippedPages);
+      }});
+      CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;catSel.append(o)});
+      catTd.append(catSel);
+      tr.append(catTd);
+
+      tr.append(h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap",fontSize:"11px"}},
+        c.service_start===c.service_end?fmtD(c.service_start):`${fmtD(c.service_start)}\u2013${fmtD(c.service_end)}`));
+
+      tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px"}},c.payment_type));
+
+      tbody.append(tr);
+    });
+  });
+
+  // Skipped periods
+  if(skippedPages&&skippedPages.length){
+    skippedPages.forEach(p=>{
+      const tr=h("tr",{style:{opacity:"0.35"}});
+      const td=h("td",{style:{padding:"6px 10px",fontSize:"11px",fontStyle:"italic",color:"rgba(255,255,255,0.3)"}});
+      td.setAttribute("colspan","6");
+      td.textContent=`\u26a0 ${fmtD(p.payPeriodBegin)} \u2013 ${fmtD(p.payPeriodEnd)}: Skipped (YTD-only stub, $0 current pay)`;
+      tr.append(td);
+      tbody.append(tr);
+    });
+  }
+
+  tbl.append(tbody);
+  wrap.append(tbl);
+  container.append(wrap);
+}
+
 function openEmailEditModal(candidates,idx,reviewContainer){
   const c=candidates[idx];
   let seManual=false;
@@ -1269,6 +1624,112 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   document.body.append(bg);
 }
 
+
+function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
+  const c=candidates[idx];
+  let seManual=false;
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal"});
+
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+  const hdrLeft=h("div");
+  hdrLeft.append(h("h3",{style:{margin:"0"}},"Edit Payslip Transaction"));
+  hdrLeft.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"4px"}},c._group||""));
+  const closeBtn3=h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715");
+  hdr.append(hdrLeft,closeBtn3);
+  modal.append(hdr);
+
+  function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===3?"1fr 1fr 1fr":ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+  function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+
+  const mDate=h("input",{class:"inp",type:"date",value:c.date,onInput:psUpdatePreview});
+  const mDesc=h("input",{class:"inp",type:"text",value:c.description});
+  const mAmt=h("input",{class:"inp",type:"number",step:"0.01",value:c.amount_usd,onInput:psUpdatePreview});
+
+  const mCat=h("select",{class:"inp",onChange:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value;psUpdateHint()}
+    psUpdatePreview();
+  }});
+  CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;mCat.append(o)});
+
+  const mSs=h("input",{class:"inp",type:"date",value:c.service_start,onInput:()=>{
+    if(!seManual){mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value}
+    psUpdatePreview();
+  }});
+  const mSe=h("input",{class:"inp",type:"date",value:c.service_end,onInput:()=>{
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";psUpdatePreview();
+  }});
+  const psHintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
+  function psUpdateHint(){const r=ACCRUAL_D[mCat.value];psHintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: end of month)":`(Auto: ${r} days)`):""}
+  psUpdateHint();
+  const psSeLbl=h("label",{class:"lbl"});psSeLbl.append("Service End ");psSeLbl.append(psHintSpan);
+  const psSeField=h("div");psSeField.append(psSeLbl);psSeField.append(mSe);
+
+  const mPt=h("select",{class:"inp"});
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
+  const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
+
+  const psPreviewEl=h("div",{class:"preview hidden"});
+  function psUpdatePreview(){
+    const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){psPreviewEl.classList.add("hidden");return}
+    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
+    if(se<ss){psPreviewEl.classList.add("hidden");return}
+    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const daily=a/days;
+    psPreviewEl.classList.remove("hidden");
+    psPreviewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">USD Amount</div><div style="font-size:18px;font-weight:700;color:#fff;font-family:var(--mono)">${fmtF(a)}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Service Days</div><div style="font-size:18px;font-weight:700;color:var(--b);font-family:var(--mono)">${days}</div></div>
+      <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Daily Cost</div><div style="font-size:18px;font-weight:700;color:var(--g);font-family:var(--mono)">${fmtF(daily)}/d</div></div>
+    </div>`;
+  }
+  psUpdatePreview();
+
+  // Payslip page data reference
+  const pd=c._pageData;
+  const refSection=h("div",{style:{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"8px",padding:"10px 14px",marginBottom:"14px",fontSize:"11px",color:"rgba(255,255,255,0.35)"}});
+  const refLines=[];
+  if(pd){
+    refLines.push(`Period: ${fmtD(pd.payPeriodBegin)} \u2013 ${fmtD(pd.payPeriodEnd)}`);
+    refLines.push(`Earnings: ${fmtF(pd.earningsTotal)} \u00b7 Taxes: ${fmtF(pd.employeeTaxTotal)}`);
+    refLines.push(`Pre-Tax: ${fmtF(pd.preTaxTotal)} \u00b7 Post-Tax: ${fmtF(pd.postTaxTotal)}`);
+    if(pd.gtl)refLines.push(`GTL: ${fmtF(pd.gtl)}`);
+    if(pd.deferral401k)refLines.push(`401(k) Deferral: ${fmtF(pd.deferral401k)}`);
+    if(pd.isRSU)refLines.push("Type: RSU Vesting");
+    refLines.push(`Net Pay: ${fmtF(pd.netPay)} \u00b7 Gross Pay: ${fmtF(pd.grossPay)}`);
+  }
+  refSection.innerHTML=refLines.map(l=>`<div style="margin-bottom:2px">${l}</div>`).join("");
+
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  btnRow.append(h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+    c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
+    c.original_amount=c.amount_usd;c.category_id=mCat.value;
+    c.service_start=mSs.value;c.service_end=mSe.value;
+    c.payment_type=mPt.value;c.tag=mTag.value;
+    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    c._status="approved";
+    bg.remove();
+    renderPayslipReviewTable(reviewContainer,candidates,skippedPages);
+  }},"Save & Approve"));
+  btnRow.append(h("button",{class:"btn",style:{background:"rgba(224,122,95,0.15)",color:"var(--r)",width:"auto",padding:"12px 20px"},onClick:()=>{
+    c._status="skipped";bg.remove();renderPayslipReviewTable(reviewContainer,candidates,skippedPages);
+  }},"Skip"));
+  btnRow.append(h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel"));
+
+  modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
+  modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
+  modal.append(mRow(mField("Service Start",mSs),psSeField));
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  modal.append(psPreviewEl);
+  modal.append(refSection);
+  modal.append(btnRow);
+  bg.append(modal);
+  document.body.append(bg);
+}
+
 async function commitEmailImports(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
   if(!approved.length)throw new Error("No approved transactions to save.");
@@ -1301,6 +1762,37 @@ async function commitEmailImports(candidates){
   // Trigger reimbursement auto-linking for newly committed Venmo reimbursements
   const newReimb=valid.filter(c=>c.amount_usd<0&&c.payment_type==="Venmo");
   if(newReimb.length)setTimeout(()=>scanForReimbursementLinks().catch(e=>console.error("Post-commit link scan:",e)),1000);
+  return{
+    count:valid.length,
+    imported:valid,
+    skipped:candidates.filter(c=>c._status==="skipped").length,
+    dupes:candidates.filter(c=>c._isDuplicate).length
+  };
+}
+
+
+async function commitPayslipImport(candidates){
+  const approved=candidates.filter(c=>c._status==="approved");
+  if(!approved.length)throw new Error("No approved transactions to save.");
+  const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
+  if(valid.length<approved.length)console.warn(`commitPayslipImport: dropped ${approved.length-valid.length} rows with missing dates`);
+  if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  const batchId="payslip-"+new Date().toISOString().slice(0,16);
+  const rows=valid.map(c=>({
+    date:c.date,service_start:c.service_start,service_end:c.service_end,
+    description:c.description,category_id:c.category_id,
+    original_amount:c.amount_usd,currency:"USD",fx_rate:1,
+    amount_usd:Math.round(c.amount_usd*100)/100,
+    payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
+    daily_cost:c.daily_cost,service_days:c.service_days,credit:"",
+    import_batch:batchId
+  }));
+  const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
+  for(const t of uniqueTags)await ensureTagExists(t);
+  await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
+  state.txnCount+=rows.length;
+  document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  valid.forEach(c=>c._status="committed");
   return{
     count:valid.length,
     imported:valid,

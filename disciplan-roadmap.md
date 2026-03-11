@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 8, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 11, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
@@ -35,10 +35,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (54 items)</summary>
+<summary><strong>✅ Completed</strong> (55 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-45 | **Payslip Import** — Upload Pinterest payslip PDFs. pdf.js integration parses each page, detects regular pay vs RSU vesting, generates 3-5 transactions per pay period matching Mark's existing income recording style (Pinterest Income, Income Taxes, Medical Insurance Benefits, 401K double-entry). Review table with pay-period grouping, net pay checksum validation, edit modal, duplicate detection, batch commit. | Feature → Done | Mar 11 |
 | DAT-04 | **Fix USD→CAD→USD Round-Trip on Original Import** — Original import used the `Amount in CAD` column (USD × 1.37) and converted back at 0.73, introducing rounding errors. Cumulative error: $9,339.27 across 7,844 USD transactions. Fixed via bulk SQL: `SET amount_usd = original_amount, daily_cost = original_amount / service_days` for all original-import USD transactions. Re-ran Credits & Transfers balance adjustments (15 new adjustments) to restore targets: Home = $11,232.80 (CA$15,387.40), HSA = $587.50, FSA = $321.90, all others = $0.00. | Data → Done | Mar 8 |
 | FEA-42 | **Auto-Create Tags on New Tag Names** — When a tag name is used that doesn't exist in the `tags` table, a "New Tag Detected" modal prompts for start_date, end_date, and tag_type (trip/event/recurring), then POSTs to Supabase. Skip button saves the transaction without creating a tag row. Shared `ensureTagExists()` helper hooked into all 4 save points: Entry tab, Ledger edit modal, CSV import (`commitImport`), and email import (`commitEmailImports`). Bulk imports deduplicate to unique tag names so the modal only appears once per new tag. | Feature → Done | Mar 8 |
 | FEA-43 | **Manual Transaction Linking in Ledger Edit Modal** — "Link to Transaction" button in edit modal when no link exists. Inline search UI: type description, search ledger, click result to select, confirm to create bidirectional `related_transaction_id` link. Shows linked transaction details + unlink button after linking. Supports Rakuten cashback→purchase linking and general-purpose manual linking. | Feature → Done | Mar 8 |
