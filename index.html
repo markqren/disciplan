@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 :root{--bg:#0a0a14;--card:rgba(255,255,255,0.025);--bdr:rgba(255,255,255,0.07);--tx:#e8e8e4;--dim:rgba(255,255,255,0.5);--g:#81B29A;--r:#E07A5F;--b:#4A6FA5;--y:#F2CC8F;--mono:'JetBrains Mono',monospace;--sans:'Outfit',system-ui,sans-serif}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -124,7 +124,7 @@ const SB_URL = "https://mjuannepfodstbsxweuc.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qdWFubmVwZm9kc3Ric3h3ZXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzODcwMzksImV4cCI6MjA4Njk2MzAzOX0.6TqLUAhvWMjDunpird0_9FMnDiT4qRuYaH6XbXmKOnA";
 const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
 let currentSession = null;
-if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js";
+if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 function authHeaders(extra = {}) {
   const token = currentSession?.access_token || SB_KEY;
