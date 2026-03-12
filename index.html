@@ -3036,9 +3036,11 @@ async function renderLedger(el){
 
   const fb=document.getElementById("filterBar");
 
-  // Search input
-  const si=h("input",{style:fS+";width:160px",placeholder:"Search description...",value:f.q});
-  si.addEventListener("keydown",e=>{if(e.key==="Enter"){f.q=si.value;state.page=0;loadPage()}});
+  // Search input (debounced auto-search + Enter for immediate)
+  const si=h("input",{style:fS+";width:160px",placeholder:"Search...",value:f.q});
+  let searchTimer;
+  si.addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{f.q=si.value;state.page=0;loadPage()},300)});
+  si.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();clearTimeout(searchTimer);f.q=si.value;state.page=0;loadPage()}});
   fb.append(si);
 
   // Category filter
@@ -3074,7 +3076,7 @@ async function renderLedger(el){
     if(f.pt)q+=`&payment_type=eq.${encodeURIComponent(f.pt)}`;
     if(f.dfrom)q+=`&date=gte.${f.dfrom}`;
     if(f.dto)q+=`&date=lte.${f.dto}`;
-    if(f.q)q+=`&description=ilike.*${encodeURIComponent(f.q)}*`;
+    if(f.q){const eq=encodeURIComponent(f.q);let orParts=`description.ilike.*${eq}*,tag.ilike.*${eq}*,payment_type.ilike.*${eq}*`;const num=parseFloat(f.q);if(!isNaN(num)&&String(num)===f.q.trim())orParts+=`,amount_usd.eq.${num}`;q+=`&or=(${orParts})`}
     const txns=await sb(q);
     // Group linked transactions adjacent by transaction_group_id
     const groupPositions={};
@@ -3104,6 +3106,9 @@ async function renderLedger(el){
     const wrap=h("div",{style:{overflowX:"auto"}});
     const tbl=h("table");
     tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
+    // Highlight helper: wraps matching substrings in styled spans
+    const hq=f.q&&f.q.length>=2?f.q.toLowerCase():"";
+    function hilite(text,el){if(!text){el.append(document.createTextNode(""));return}if(!hq){el.append(document.createTextNode(text));return}const low=text.toLowerCase();const idx=low.indexOf(hq);if(idx===-1){el.append(document.createTextNode(text));return}el.append(document.createTextNode(text.slice(0,idx)));el.append(h("span",{style:"background:rgba(242,204,143,0.25);border-radius:2px;padding:0 1px"},text.slice(idx,idx+hq.length)));el.append(document.createTextNode(text.slice(idx+hq.length)))}
     const tbody=document.createElement("tbody");
     txns.forEach(t=>{
       const isLinked=!!t.transaction_group_id;
@@ -3112,14 +3117,14 @@ async function renderLedger(el){
       tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
       const descTd=h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
       if(isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
-      descTd.append(document.createTextNode(t.description));
+      hilite(t.description,descTd);
       tr.append(descTd);
-      const catTd=h("td");catTd.append(h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+"22",color:CC[t.category_id]||"#888"}},t.category_id));tr.append(catTd);
-      const amtTd=h("td",{class:"r m",style:{color:t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}});amtTd.append(document.createTextNode(fmtF(t.amount_usd)));if(t.currency!=="USD")amtTd.append(h("span",{style:{color:"rgba(255,255,255,0.25)",marginLeft:"3px",fontSize:"10px"}},t.currency));tr.append(amtTd);
-      tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}},t.payment_type||""));
+      const catTd=h("td");const catBadge=h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+"22",color:CC[t.category_id]||"#888"}});hilite(t.category_id,catBadge);catTd.append(catBadge);tr.append(catTd);
+      const amtTd=h("td",{class:"r m",style:{color:t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}});const amtStr=fmtF(t.amount_usd);if(hq&&amtStr.replace(/[,$]/g,"").includes(hq))hilite(amtStr,amtTd);else amtTd.append(document.createTextNode(amtStr));if(t.currency!=="USD")amtTd.append(h("span",{style:{color:"rgba(255,255,255,0.25)",marginLeft:"3px",fontSize:"10px"}},t.currency));tr.append(amtTd);
+      const ptTd=h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}});hilite(t.payment_type||"",ptTd);tr.append(ptTd);
       const spTd=h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});spTd.append(document.createTextNode(fmtD(t.service_start)+"\u2013"+fmtD(t.service_end)));if(t.service_days>1)spTd.append(h("span",{style:{marginLeft:"3px",color:"rgba(255,255,255,0.2)"}},`(${t.service_days}d)`));tr.append(spTd);
       tr.append(h("td",{class:"r m hide-m",style:{color:"var(--g)"}},fmtF(t.daily_cost)));
-      const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});if(t.tag){const tagSpan=h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px",cursor:"pointer"},onClick:e=>{e.stopPropagation();state.tagDetail=t.tag;state.tab="tags";history.replaceState(null,null,"#tags");renderTabs();renderContent()}},t.tag);tagSpan.addEventListener("mouseenter",()=>tagSpan.style.background="rgba(74,111,165,0.2)");tagSpan.addEventListener("mouseleave",()=>tagSpan.style.background="rgba(255,255,255,0.06)");tagTd.append(tagSpan)}tr.append(tagTd);
+      const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});if(t.tag){const tagSpan=h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px",cursor:"pointer"},onClick:e=>{e.stopPropagation();state.tagDetail=t.tag;state.tab="tags";history.replaceState(null,null,"#tags");renderTabs();renderContent()}});hilite(t.tag,tagSpan);tagSpan.addEventListener("mouseenter",()=>tagSpan.style.background="rgba(74,111,165,0.2)");tagSpan.addEventListener("mouseleave",()=>tagSpan.style.background="rgba(255,255,255,0.06)");tagTd.append(tagSpan)}tr.append(tagTd);
       tbody.append(tr);
     });
     tbl.append(tbody);wrap.append(tbl);
