@@ -488,7 +488,7 @@ function parsePayslipPage(lines,fullText){
       gtl:0,deferral401k:0,rsuOffset:0,isRSU:false,isSkip:true};
   }
 
-  // Section totals from summary lines
+  // Section totals: try combined-line format first (old layout), then "Total:" lines (new layout)
   let earningsTotal=0,employeeTaxTotal=0,preTaxTotal=0,postTaxTotal=0;
   for(const ln of lines){
     const em=ln.match(/^Earnings\s+([\d,.]+)\s+[\d,.]+\s+Employee Taxes\s+([\d,.]+)/);
@@ -496,9 +496,31 @@ function parsePayslipPage(lines,fullText){
     const pm=ln.match(/^Pre Tax Deductions\s+([\d,.]+)\s+[\d,.]+\s+Post Tax Deductions\s+([\d,.]+)/);
     if(pm){preTaxTotal=pn(pm[1]);postTaxTotal=pn(pm[2])}
   }
+  // Fallback: parse "Total:" lines after each section header (new PDF layout)
+  if(!earningsTotal&&!employeeTaxTotal){
+    const sectionOrder=["Earnings","Employee Taxes","Pre Tax Deductions","Post Tax Deductions"];
+    let curSection="";
+    for(const ln of lines){
+      const sh=sectionOrder.find(s=>ln.trim()===s||ln.startsWith(s+" "));
+      if(sh){curSection=sh;continue}
+      if(curSection){const tm=ln.match(/^Total:\s+([\d,.]+)/);if(tm){
+        const v=pn(tm[1]);
+        if(curSection==="Earnings")earningsTotal=v;
+        else if(curSection==="Employee Taxes")employeeTaxTotal=v;
+        else if(curSection==="Pre Tax Deductions")preTaxTotal=v;
+        else if(curSection==="Post Tax Deductions")postTaxTotal=v;
+        curSection="";
+      }}
+    }
+  }
+  // Fallback to Current row values for any section totals missing due to cross-page splits
+  if(!earningsTotal)earningsTotal=grossPay;
+  if(!employeeTaxTotal)employeeTaxTotal=empTaxSum;
+  if(!preTaxTotal&&preTaxSum)preTaxTotal=preTaxSum;
+  if(!postTaxTotal&&postTaxSum)postTaxTotal=postTaxSum;
 
   // GTL current amount (earnings item with date range)
-  const gm=fullText.match(/GTL\s+\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}\s+\d+\s+\d+\s+([\d,.]+)/);
+  const gm=fullText.match(/GTL\s+\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}\s+[\d,.]+\s+[\d,.]+\s+([\d,.]+)/);
   const gtl=gm?pn(gm[1]):0;
 
   // 401(k) After-tax Deferral: 2 numbers = [current, YTD], 1 number = YTD only
