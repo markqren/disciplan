@@ -150,7 +150,8 @@ async function sb(path,opts={}){
   try{
     const r=await fetch(`${SB_URL}/rest/v1/${path}`,{...rest,headers:{...authHeaders(),...(hd||{})}});
     if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);
-    const data=await r.json();
+    const txt=await r.text();
+    const data=txt?JSON.parse(txt):[];
     if(method==="GET") cacheSet(path,data);
     return data;
   }catch(e){
