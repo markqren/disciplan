@@ -197,10 +197,11 @@ const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazo
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
-const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"}};
+const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&hd.includes("Category")&&hd.includes("Extended Details"),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")}};
 const PAYSLIP_PROFILES={pinterest:{detect:t=>t.includes("Pinterest, Inc.")&&t.includes("Pay Period Begin"),company:"Pinterest",incomeItems:["Regular Salary Pay","Connectivity Reimbursement","GTL","Wellness Reimbursement","Home Office Setup Stipend","Sign on Bonus"],rsuIndicators:["RSU Gain"],postTaxExclude:["401(k) After-tax Deferral","RSU Gain Offset"],benefitEarnings:["GTL"]}};
 const CC_PAY_NAMES={"Chase Sapphire":["Bill Paid: Chase Sapphire","Chase Sapphire Bill Payment"],"Chase United":["Bill Paid: Chase United","Chase United Bill Payment"],"Chase Freedom":["Bill Paid: Chase Freedom","Chase Freedom Bill Payment"],"Chase Aeroplan":["Bill Paid: Chase Aeroplan","Chase Aeroplan Bill Payment"],"AMEX Rose Gold":["Bill Paid: AMEX Rose Gold","Amex Rose Gold Bill Payment"],"Bilt":["Bill Paid: Bilt","Bilt Card Payment"],"Apple":["Bill Paid: Apple","Apple Bill Payment"],"Venmo Credit":["Bill Paid: Venmo","Venmo Bill Payment"],"Capital One":["Bill Paid: Capital One","Capital One Bill Payment"],"Uber":["Bill Paid: Uber","Uber Bill Payment"]};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
+const AMEX_CAT_MAP={"Restaurant-Restaurant":"restaurant","Restaurant-Bar & Café":"restaurant","Merchandise & Supplies-Groceries":"groceries","Merchandise & Supplies-Department Stores":"personal","Merchandise & Supplies-Mail Order":"personal","Merchandise & Supplies-Internet Purchase":"personal","Transportation-Fuel":"transportation","Transportation-Taxis & Coach":"transportation","Transportation-Transit":"transportation","Transportation-Parking":"transportation","Transportation-Other":"transportation","Entertainment-General Attractions":"entertainment","Entertainment-Ticketing":"entertainment","Travel-Airline":"transportation","Travel-Lodging":"home","Travel-Other":"transportation","Business Services-Health Care":"health","Fees & Adjustments-Fees & Adjustments":"financial","Communications-Cable & Internet":"utilities","Communications-Telephone":"utilities"};
 const SPLIT_PRESETS=[{label:"50%",value:0.5},{label:"33%",value:1/3},{label:"25%",value:0.25},{label:"Custom",value:null}];
 const PF_ACM={us_equity:{label:"US Equity",color:"#4A6FA5",target:70},intl_equity:{label:"International",color:"#81B29A",target:10},crypto:{label:"Crypto",color:"#E07A5F",target:5},balanced:{label:"Balanced",color:"#F2CC8F",target:5},money_market:{label:"Money Market",color:"#6B9AC4",target:5},target_date:{label:"Target Date",color:"#9B8EA0",target:5}};
 const PF_ATL={retirement_401k:"401(k)",retirement_ira:"IRA",brokerage:"Brokerage",tax_free:"Tax-Free",hsa:"HSA",rsu:"RSU",crypto:"Crypto"};
@@ -361,9 +362,10 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
   const date=dp.length===3?`${dp[2]}-${dp[0].padStart(2,"0")}-${dp[1].padStart(2,"0")}`:rawDate;
   const badDate=!date||!/^\d{4}-\d{2}-\d{2}$/.test(date);
   const rawAmt=parseFloat(row[cols.amount])||0;
-  const isReturn=(row[cols.type]||"").toLowerCase()==="return";
-  const isCCPay=(row[cols.type]||"")==="Payment";
-  const isSkip=badDate||profile.skipTypes.includes(row[cols.type]||"");
+  const typeVal=cols.type!=="_none_"?(row[cols.type]||""):"";
+  const isReturn=typeVal.toLowerCase()==="return";
+  const isCCPay=typeVal==="Payment"||(profile.detectPayment&&profile.detectPayment(row));
+  const isSkip=badDate||(typeVal&&profile.skipTypes.includes(typeVal));
   let amt=profile.transformAmount(rawAmt);
   if(isReturn)amt=-Math.abs(amt);
   if(isCCPay){
@@ -403,12 +405,13 @@ async function findDuplicates(candidates,paymentType){
   }
 }
 
+function fallbackCatMap(bankCat){return AMEX_CAT_MAP[bankCat]||CHASE_CAT_MAP[bankCat]||"other"}
 function applyAIResults(candidates,aiResults){
   if(!aiResults){
     for(const c of candidates){
       if(c._status==="skipped")continue;
       if(c._isCCPayment)continue;
-      c.category_id=CHASE_CAT_MAP[c._bankCategory]||"other";
+      c.category_id=fallbackCatMap(c._bankCategory);
       c.ai_confidence="low";
       c.service_end=getDefEnd(c.category_id,c.date)||c.date;
       const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
@@ -424,7 +427,7 @@ function applyAIResults(candidates,aiResults){
     if(c._isCCPayment)continue;
     const ai=byIdx[i];
     if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc}
-    else{c.category_id=CHASE_CAT_MAP[c._bankCategory]||"other";c.ai_confidence="low"}
+    else{c.category_id=fallbackCatMap(c._bankCategory);c.ai_confidence="low"}
     c.service_end=getDefEnd(c.category_id,c.date)||c.date;
     const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
     c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
@@ -853,7 +856,7 @@ function renderEntry(el){
       if(!csv.rows.length)throw new Error("No data rows found in CSV.");
 
       const profile=detectBankProfile(csv.headers);
-      if(!profile)throw new Error("Unrecognized bank format. Expected headers: Transaction Date, Post Date, Memo");
+      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase, AMEX");
 
       // Auto-detect payment type from filename (only if user hasn't manually changed it)
       if(!impPtManual){
