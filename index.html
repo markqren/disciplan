@@ -84,6 +84,15 @@ select.inp{cursor:pointer;appearance:auto}
 .ref-btn.spinning{animation:spin 0.6s linear}
 .offline-banner{background:rgba(224,122,95,0.15);color:var(--y);text-align:center;padding:6px 12px;font-size:11px;border-bottom:1px solid rgba(224,122,95,0.2)}
 .offline-banner.hidden{display:none}
+.batch-bar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(18,18,31,0.95);backdrop-filter:blur(12px);border:1px solid rgba(255,255,255,0.12);border-radius:12px;padding:10px 20px;display:flex;align-items:center;gap:12px;z-index:50;box-shadow:0 8px 32px rgba(0,0,0,0.5)}
+.batch-bar .bb-count{font-size:12px;font-weight:600;color:var(--g);white-space:nowrap}
+.batch-bar .bb-btn{padding:6px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.7);font-size:11px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:all 0.15s}
+.batch-bar .bb-btn:hover{border-color:rgba(255,255,255,0.2);color:#fff}
+.batch-bar .bb-btn.bb-edit{border-color:rgba(129,178,154,0.3);color:var(--g)}
+.batch-bar .bb-btn.bb-link{border-color:rgba(74,111,165,0.3);color:var(--b)}
+.batch-bar .bb-btn.bb-del{border-color:rgba(224,122,95,0.3);color:var(--r)}
+.batch-bar .bb-btn.bb-cancel{color:rgba(255,255,255,0.4)}
+.ldg-chk{width:16px;height:16px;accent-color:var(--g);cursor:pointer}
 </style>
 </head>
 <body>
@@ -670,6 +679,7 @@ function renderTabs(){
 
 function renderContent(){
   const ob=document.getElementById("offlineBanner");if(ob)ob.classList.add("hidden");
+  document.querySelectorAll(".batch-bar").forEach(b=>b.remove());
   const el=document.getElementById("content");
   el.innerHTML="";
   if(state.tab==="entry")renderEntry(el);
@@ -3046,6 +3056,110 @@ function openLedgerEditModal(txn,onSaved){
   document.body.append(bg);
 }
 
+function openBatchEditModal(txns,onDone){
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal"});
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+  hdr.append(h("h3",{style:{margin:"0"}},`Batch Edit (${txns.length} items)`));
+  hdr.append(h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
+  modal.append(hdr);
+  modal.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",marginBottom:"16px"}},"Only non-empty fields will be applied. Leave blank for no change."));
+
+  function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+  function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+
+  const bCat=h("select",{class:"inp"});
+  bCat.append(h("option",{value:""},"— no change —"));
+  CATS_LIST.forEach(c=>bCat.append(h("option",{value:c.id},c.l)));
+
+  const bPt=h("select",{class:"inp"});
+  bPt.append(h("option",{value:""},"— no change —"));
+  PTS.forEach(p=>bPt.append(h("option",{value:p},p)));
+
+  const bTag=h("input",{class:"inp",type:"text",placeholder:"no change"});
+  const bTagClear=h("label",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",display:"flex",alignItems:"center",gap:"4px",marginTop:"4px"}});
+  const bTagClearChk=h("input",{type:"checkbox"});
+  bTagClear.append(bTagClearChk,document.createTextNode("Clear tag"));
+
+  const bDate=h("input",{class:"inp",type:"date"});
+  const bSs=h("input",{class:"inp",type:"date"});
+  const bSe=h("input",{class:"inp",type:"date"});
+
+  modal.append(mRow(mField("Category",bCat),mField("Payment Type",bPt)));
+  const tagField=h("div");tagField.append(h("label",{class:"lbl"},"Tag"));tagField.append(bTag);tagField.append(bTagClear);
+  modal.append(mRow(tagField,mField("Date",bDate)));
+  modal.append(mRow(mField("Service Start",bSs),mField("Service End",bSe)));
+
+  const errEl=h("div",{style:{color:"var(--r)",fontSize:"11px",marginBottom:"8px",minHeight:"16px"}});
+  modal.append(errEl);
+
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"4px"}});
+  const saveBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
+    saveBtn.textContent="Saving...";saveBtn.disabled=true;errEl.textContent="";
+    try{
+      const patch={};
+      if(bCat.value)patch.category_id=bCat.value;
+      if(bPt.value)patch.payment_type=bPt.value;
+      if(bDate.value)patch.date=bDate.value;
+      const tagVal=bTag.value.trim().toLowerCase();
+      if(bTagClearChk.checked)patch.tag="";
+      else if(tagVal){await ensureTagExists(tagVal);patch.tag=tagVal}
+
+      const needsRecalc=bSs.value||bSe.value;
+      const ids=txns.map(t=>t.id);
+
+      if(needsRecalc){
+        // Per-transaction recalc since each has different amount_usd
+        for(const t of txns){
+          const tPatch={...patch};
+          const ss=bSs.value||t.service_start;
+          const se=bSe.value||t.service_end;
+          tPatch.service_start=ss;tPatch.service_end=se;
+          const ssD=new Date(ss+"T00:00:00"),seD=new Date(se+"T00:00:00");
+          const days=Math.max(1,Math.floor((seD-ssD)/864e5)+1);
+          tPatch.service_days=days;
+          tPatch.daily_cost=Math.round(t.amount_usd/days*1e6)/1e6;
+          await sb(`transactions?id=eq.${t.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify(tPatch)});
+        }
+      }else if(Object.keys(patch).length>0){
+        await sb(`transactions?id=in.(${ids.join(",")})`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify(patch)});
+      }else{errEl.textContent="No changes specified.";saveBtn.textContent="Apply Changes";saveBtn.disabled=false;return}
+
+      bg.remove();
+      const msg=document.getElementById("ledgerOkMsg");
+      if(msg){msg.textContent=`Updated ${txns.length} items`;msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      onDone();
+    }catch(e){errEl.textContent="Error: "+e.message;saveBtn.textContent="Apply Changes";saveBtn.disabled=false}
+  }},"Apply Changes");
+  const cancelBtn=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel");
+  btnRow.append(saveBtn,cancelBtn);
+  modal.append(btnRow);
+  bg.append(modal);
+  document.body.append(bg);
+}
+
+async function doBatchLink(txns,onDone){
+  if(txns.length<2){alert("Select at least 2 transactions to link.");return}
+  // Determine target group: use min ID, merge any existing groups
+  const existingGroups=new Set(txns.filter(t=>t.transaction_group_id).map(t=>t.transaction_group_id));
+  const allIds=txns.map(t=>t.id);
+  const targetGroup=Math.min(...allIds,...(existingGroups.size?existingGroups:[]));
+
+  try{
+    // Merge any existing groups into target
+    for(const gid of existingGroups){
+      if(gid!==targetGroup){
+        await sb(`transactions?transaction_group_id=eq.${gid}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
+      }
+    }
+    // Set all selected to target group
+    await sb(`transactions?id=in.(${allIds.join(",")})`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
+    const msg=document.getElementById("ledgerOkMsg");
+    if(msg){msg.textContent=`Linked ${txns.length} items`;msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+    onDone();
+  }catch(e){alert("Batch link failed: "+e.message)}
+}
+
 async function renderLedger(el){
   const PS=50;
   if(!state.lf)state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};
@@ -3054,7 +3168,45 @@ async function renderLedger(el){
   // Cache tags for cross-tab navigation
   const tagMap={};sb("tags?order=start_date.desc").then(rows=>{for(const r of rows)tagMap[r.name]=r});
 
+  // Batch selection state
+  const selected=new Set();
+  let currentTxns=[];
+
   el.innerHTML=`<div class="cd"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">Transactions</h3><span id="ledgerOkMsg" class="ok-msg hidden"></span><div id="pgNav"></div></div><div id="filterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div><div id="ledgerBody">Loading...</div></div>`;
+
+  // Floating action bar for batch operations
+  const batchBar=h("div",{class:"batch-bar hidden"});
+  const bbCount=h("span",{class:"bb-count"});
+  const bbEdit=h("button",{class:"bb-btn bb-edit",onClick:()=>openBatchEditModal(currentTxns.filter(t=>selected.has(t.id)),()=>{selected.clear();updateBatchBar();loadPage()})},"\u270F Edit");
+  const bbLink=h("button",{class:"bb-btn bb-link",onClick:()=>doBatchLink(currentTxns.filter(t=>selected.has(t.id)),()=>{selected.clear();updateBatchBar();loadPage()})},"\uD83D\uDD17 Link");
+  let bbDelTimer=null;
+  const bbDel=h("button",{class:"bb-btn bb-del",onClick:async()=>{
+    if(bbDel.dataset.confirm!=="1"){bbDel.dataset.confirm="1";bbDel.textContent=`Confirm Delete (${selected.size})`;bbDelTimer=setTimeout(()=>{bbDel.dataset.confirm="0";bbDel.textContent="\uD83D\uDDD1 Delete"},3000);return}
+    if(bbDelTimer)clearTimeout(bbDelTimer);
+    bbDel.textContent="Deleting...";bbDel.disabled=true;
+    try{
+      const ids=[...selected];
+      await sb(`transactions?id=in.(${ids.join(",")})`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
+      state.txnCount-=ids.length;
+      document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      selected.clear();updateBatchBar();
+      const msg=document.getElementById("ledgerOkMsg");
+      if(msg){msg.textContent=`Deleted ${ids.length} items`;msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      loadPage();
+    }catch(e){alert("Batch delete failed: "+e.message);bbDel.textContent="\uD83D\uDDD1 Delete";bbDel.disabled=false;bbDel.dataset.confirm="0"}
+  }},"\uD83D\uDDD1 Delete");
+  const bbCancel=h("button",{class:"bb-btn bb-cancel",onClick:()=>{selected.clear();updateBatchBar();document.querySelectorAll(".ldg-chk").forEach(c=>c.checked=false);const ha=document.getElementById("ldgChkAll");if(ha)ha.checked=false}},"\u2715 Cancel");
+  batchBar.append(bbCount,bbEdit,bbLink,bbDel,bbCancel);
+  document.body.append(batchBar);
+
+  function updateBatchBar(){
+    if(selected.size>0){batchBar.classList.remove("hidden");bbCount.textContent=`\u2611 ${selected.size} selected`}
+    else{batchBar.classList.add("hidden")}
+    bbDel.dataset.confirm="0";bbDel.textContent="\uD83D\uDDD1 Delete";bbDel.disabled=false;
+    if(bbDelTimer){clearTimeout(bbDelTimer);bbDelTimer=null}
+    const ha=document.getElementById("ldgChkAll");
+    if(ha)ha.checked=currentTxns.length>0&&currentTxns.every(t=>selected.has(t.id));
+  }
 
   const fb=document.getElementById("filterBar");
 
@@ -3088,10 +3240,11 @@ async function renderLedger(el){
   fb.append(dt);
 
   // Clear button
-  const clr=h("button",{class:"pg-btn",style:"font-size:11px",onClick:()=>{state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};state.page=0;renderLedger(el)}},"Clear");
+  const clr=h("button",{class:"pg-btn",style:"font-size:11px",onClick:()=>{state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};state.page=0;selected.clear();updateBatchBar();renderLedger(el)}},"Clear");
   fb.append(clr);
 
   async function loadPage(){
+    selected.clear();updateBatchBar();
     document.getElementById("ledgerBody").innerHTML="Loading...";
     let q=`transactions?select=*&order=date.desc,id.desc&limit=${PS}&offset=${state.page*PS}`;
     if(f.cat)q+=`&category_id=eq.${f.cat}`;
@@ -3127,15 +3280,18 @@ async function renderLedger(el){
 
     const wrap=h("div",{style:{overflowX:"auto"}});
     const tbl=h("table");
-    tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
+    tbl.innerHTML=`<thead><tr><th style="width:30px;padding:10px 4px"><input type="checkbox" class="ldg-chk" id="ldgChkAll"></th><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
     // Highlight helper: wraps matching substrings in styled spans
     const hq=f.q&&f.q.length>=2?f.q.toLowerCase():"";
     function hilite(text,el){if(!text){el.append(document.createTextNode(""));return}if(!hq){el.append(document.createTextNode(text));return}const low=text.toLowerCase();const idx=low.indexOf(hq);if(idx===-1){el.append(document.createTextNode(text));return}el.append(document.createTextNode(text.slice(0,idx)));el.append(h("span",{style:"background:rgba(242,204,143,0.25);border-radius:2px;padding:0 1px"},text.slice(idx,idx+hq.length)));el.append(document.createTextNode(text.slice(idx+hq.length)))}
+    currentTxns=txns;
     const tbody=document.createElement("tbody");
     txns.forEach(t=>{
       const isLinked=!!t.transaction_group_id;
       const gSize=isLinked?groupCounts[t.transaction_group_id]:0;
       const tr=h("tr",{style:{cursor:"pointer",...(isLinked?{borderLeft:"3px solid var(--b)"}:{})},onClick:()=>openLedgerEditModal(t,loadPage)});
+      const chk=h("input",{type:"checkbox",class:"ldg-chk",onClick:e=>e.stopPropagation(),onChange:e=>{if(e.target.checked)selected.add(t.id);else selected.delete(t.id);updateBatchBar()}});
+      tr.append(h("td",{style:{padding:"9px 4px"}},[chk]));
       tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
       const descTd=h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
       if(isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
@@ -3151,6 +3307,12 @@ async function renderLedger(el){
     });
     tbl.append(tbody);wrap.append(tbl);
     const body=document.getElementById("ledgerBody");body.innerHTML="";body.append(wrap);
+    document.getElementById("ldgChkAll")?.addEventListener("change",e=>{
+      const checked=e.target.checked;
+      currentTxns.forEach(t=>{if(checked)selected.add(t.id);else selected.delete(t.id)});
+      document.querySelectorAll(".ldg-chk:not(#ldgChkAll)").forEach(c=>c.checked=checked);
+      updateBatchBar();
+    });
   }
   loadPage();
 }
