@@ -494,7 +494,7 @@ function parsePayslipPage(lines,fullText){
   if(grossPay===0&&empTaxSum===0&&preTaxSum===0&&postTaxSum===0){
     return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay:0,netPay:0,
       earningsTotal:0,employeeTaxTotal:0,preTaxTotal:0,postTaxTotal:0,
-      gtl:0,deferral401k:0,rsuOffset:0,isRSU:false,isSkip:true};
+      gtl:0,deferral401k:0,match401k:0,rsuOffset:0,isRSU:false,isSkip:true};
   }
 
   // Section totals: try combined-line format first (old layout), then "Total:" lines (new layout)
@@ -537,6 +537,11 @@ function parsePayslipPage(lines,fullText){
   const km=fullText.match(/401\(k\) After-tax Deferral\s+([\d,.]+)(?:\s+([\d,.]+))?/);
   if(km&&km[2])deferral401k=pn(km[1]);
 
+  // 401(k) Company/Employer Match: same pattern
+  let match401k=0;
+  const mm=fullText.match(/(?:401\(k\)\s*(?:Company|Employer)\s*Match|Company\s*Match|Employer\s*Match)\s+([\d,.]+)(?:\s+([\d,.]+))?/i);
+  if(mm&&mm[2])match401k=pn(mm[1]);else if(mm&&mm[1]&&!mm[2])match401k=0; // YTD only, no current
+
   // RSU Gain Offset: same pattern
   let rsuOffset=0;
   const rm=fullText.match(/RSU Gain Offset\s+([\d,.]+)(?:\s+([\d,.]+))?/);
@@ -547,7 +552,7 @@ function parsePayslipPage(lines,fullText){
 
   return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay,netPay,
     earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    gtl,deferral401k,rsuOffset,isRSU,isSkip:false};
+    gtl,deferral401k,match401k,rsuOffset,isRSU,isSkip:false};
 }
 
 async function parsePayslipPDF(file){
@@ -607,6 +612,12 @@ function generatePayslipTransactions(pages,enteredDate){
           description:"Vanguard Deposited 401K",category_id:"financial",
           amount_usd:-p.deferral401k,payment_type:"Vanguard",
           _group:grp,_source:"401k_in",_pageData:p});
+      }
+      if(p.match401k>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"401K Match",category_id:"income",
+          amount_usd:-p.match401k,payment_type:"Vanguard",
+          _group:grp,_source:"401k_match",_pageData:p});
       }
     }
   }
