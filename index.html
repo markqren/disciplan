@@ -393,10 +393,12 @@ async function findDuplicates(candidates,paymentType){
   const dates=candidates.filter(c=>c._status!=="skipped").map(c=>c.date).sort();
   if(!dates.length)return;
   const minD=dates[0],maxD=dates[dates.length-1];
-  const existing=await sb(`transactions?payment_type=eq.${encodeURIComponent(paymentType)}&date=gte.${minD}&date=lte.${maxD}&select=date,amount_usd,description`);
+  const existing=await sb(`transactions?payment_type=eq.${encodeURIComponent(paymentType)}&date=gte.${minD}&date=lte.${maxD}&select=date,amount_usd,description,service_start,service_end`);
   for(const c of candidates){
     if(c._status==="skipped")continue;
-    c._isDuplicate=existing.some(e=>e.date===c.date&&Math.abs(Math.abs(e.amount_usd)-Math.abs(c.amount_usd))<0.02);
+    c._isDuplicate=existing.some(e=>e.date===c.date&&Math.abs(Math.abs(e.amount_usd)-Math.abs(c.amount_usd))<0.02
+      &&(!c.service_start||!e.service_start||c.service_start===e.service_start)
+      &&(!c.service_end||!e.service_end||c.service_end===e.service_end));
     if(c._isDuplicate){c._status="skipped";c._skipReason="Duplicate"}
   }
 }
