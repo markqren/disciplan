@@ -1822,7 +1822,15 @@ async function commitPayslipImport(candidates){
   }));
   const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
   for(const t of uniqueTags)await ensureTagExists(t);
-  await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
+  const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
+  // Auto-link payslip groups by _group
+  const groupMap={};
+  valid.forEach((c,i)=>{if(c._group&&created[i]){if(!groupMap[c._group])groupMap[c._group]=[];groupMap[c._group].push(created[i].id)}});
+  for(const ids of Object.values(groupMap)){
+    if(ids.length<2)continue;
+    const gid=Math.min(...ids);
+    await sb(`transactions?id=in.(${ids.join(",")})`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:gid})});
+  }
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   valid.forEach(c=>c._status="committed");
@@ -3296,10 +3304,14 @@ async function renderLedger(el){
     function hilite(text,el){if(!text){el.append(document.createTextNode(""));return}if(!hq){el.append(document.createTextNode(text));return}const low=text.toLowerCase();const idx=low.indexOf(hq);if(idx===-1){el.append(document.createTextNode(text));return}el.append(document.createTextNode(text.slice(0,idx)));el.append(h("span",{style:"background:rgba(242,204,143,0.25);border-radius:2px;padding:0 1px"},text.slice(idx,idx+hq.length)));el.append(document.createTextNode(text.slice(idx+hq.length)))}
     currentTxns=txns;
     const tbody=document.createElement("tbody");
+    let prevGroupId=null;
     txns.forEach(t=>{
       const isLinked=!!t.transaction_group_id;
       const gSize=isLinked?groupCounts[t.transaction_group_id]:0;
-      const tr=h("tr",{style:{cursor:"pointer",...(isLinked?{borderLeft:"3px solid var(--b)"}:{})},onClick:()=>openLedgerEditModal(t,loadPage)});
+      const tr=h("tr",{style:{cursor:"pointer",...(isLinked?{borderLeft:"3px solid var(--b)"}:{}),
+        ...(isLinked&&prevGroupId&&prevGroupId!==t.transaction_group_id?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})}
+      ,onClick:()=>openLedgerEditModal(t,loadPage)});
+      prevGroupId=t.transaction_group_id||null;
       const chk=h("input",{type:"checkbox",class:"ldg-chk",onClick:e=>e.stopPropagation(),onChange:e=>{if(e.target.checked)selected.add(t.id);else selected.delete(t.id);updateBatchBar()}});
       tr.append(h("td",{style:{padding:"9px 4px",...(selectMode?{}:{display:"none"})}},[chk]));
       tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
