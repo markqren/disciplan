@@ -3171,6 +3171,7 @@ async function renderLedger(el){
   // Batch selection state
   const selected=new Set();
   let currentTxns=[];
+  let selectMode=false;
 
   el.innerHTML=`<div class="cd"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">Transactions</h3><span id="ledgerOkMsg" class="ok-msg hidden"></span><div id="pgNav"></div></div><div id="filterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div><div id="ledgerBody">Loading...</div></div>`;
 
@@ -3195,12 +3196,14 @@ async function renderLedger(el){
       loadPage();
     }catch(e){alert("Batch delete failed: "+e.message);bbDel.textContent="\uD83D\uDDD1 Delete";bbDel.disabled=false;bbDel.dataset.confirm="0"}
   }},"\uD83D\uDDD1 Delete");
-  const bbCancel=h("button",{class:"bb-btn bb-cancel",onClick:()=>{selected.clear();updateBatchBar();document.querySelectorAll(".ldg-chk").forEach(c=>c.checked=false);const ha=document.getElementById("ldgChkAll");if(ha)ha.checked=false}},"\u2715 Cancel");
+  const bbCancel=h("button",{class:"bb-btn bb-cancel",onClick:()=>exitSelectMode()},"\u2715 Cancel");
   batchBar.append(bbCount,bbEdit,bbLink,bbDel,bbCancel);
   document.body.append(batchBar);
 
+  function exitSelectMode(){selectMode=false;selected.clear();updateBatchBar();document.querySelectorAll(".ldg-chk").forEach(c=>c.closest("th,td").style.display="none");selBtn.textContent="Select"}
+
   function updateBatchBar(){
-    if(selected.size>0){batchBar.classList.remove("hidden");bbCount.textContent=`\u2611 ${selected.size} selected`}
+    if(selectMode&&selected.size>0){batchBar.classList.remove("hidden");bbCount.textContent=`\u2611 ${selected.size} selected`}
     else{batchBar.classList.add("hidden")}
     bbDel.dataset.confirm="0";bbDel.textContent="\uD83D\uDDD1 Delete";bbDel.disabled=false;
     if(bbDelTimer){clearTimeout(bbDelTimer);bbDelTimer=null}
@@ -3240,8 +3243,15 @@ async function renderLedger(el){
   fb.append(dt);
 
   // Clear button
-  const clr=h("button",{class:"pg-btn",style:"font-size:11px",onClick:()=>{state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};state.page=0;selected.clear();updateBatchBar();renderLedger(el)}},"Clear");
+  const clr=h("button",{class:"pg-btn",style:"font-size:11px",onClick:()=>{state.lf={cat:"",pt:"",dfrom:"",dto:"",q:""};state.page=0;selected.clear();selectMode=false;updateBatchBar();renderLedger(el)}},"Clear");
   fb.append(clr);
+
+  // Select mode toggle
+  const selBtn=h("button",{class:"pg-btn",style:"font-size:11px",onClick:()=>{
+    if(selectMode){exitSelectMode()}
+    else{selectMode=true;selBtn.textContent="Cancel Select";document.querySelectorAll(".ldg-chk").forEach(c=>c.closest("th,td").style.display="")}
+  }},"Select");
+  fb.append(selBtn);
 
   async function loadPage(){
     selected.clear();updateBatchBar();
@@ -3280,7 +3290,7 @@ async function renderLedger(el){
 
     const wrap=h("div",{style:{overflowX:"auto"}});
     const tbl=h("table");
-    tbl.innerHTML=`<thead><tr><th style="width:30px;padding:10px 4px"><input type="checkbox" class="ldg-chk" id="ldgChkAll"></th><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
+    tbl.innerHTML=`<thead><tr><th style="width:30px;padding:10px 4px;${selectMode?"":"display:none"}"><input type="checkbox" class="ldg-chk" id="ldgChkAll"></th><th>Date</th><th>Description</th><th>Category</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="hide-m">Service Period</th><th class="r hide-m">Daily Cost</th><th>Tag</th></tr></thead>`;
     // Highlight helper: wraps matching substrings in styled spans
     const hq=f.q&&f.q.length>=2?f.q.toLowerCase():"";
     function hilite(text,el){if(!text){el.append(document.createTextNode(""));return}if(!hq){el.append(document.createTextNode(text));return}const low=text.toLowerCase();const idx=low.indexOf(hq);if(idx===-1){el.append(document.createTextNode(text));return}el.append(document.createTextNode(text.slice(0,idx)));el.append(h("span",{style:"background:rgba(242,204,143,0.25);border-radius:2px;padding:0 1px"},text.slice(idx,idx+hq.length)));el.append(document.createTextNode(text.slice(idx+hq.length)))}
@@ -3291,7 +3301,7 @@ async function renderLedger(el){
       const gSize=isLinked?groupCounts[t.transaction_group_id]:0;
       const tr=h("tr",{style:{cursor:"pointer",...(isLinked?{borderLeft:"3px solid var(--b)"}:{})},onClick:()=>openLedgerEditModal(t,loadPage)});
       const chk=h("input",{type:"checkbox",class:"ldg-chk",onClick:e=>e.stopPropagation(),onChange:e=>{if(e.target.checked)selected.add(t.id);else selected.delete(t.id);updateBatchBar()}});
-      tr.append(h("td",{style:{padding:"9px 4px"}},[chk]));
+      tr.append(h("td",{style:{padding:"9px 4px",...(selectMode?{}:{display:"none"})}},[chk]));
       tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
       const descTd=h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
       if(isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
