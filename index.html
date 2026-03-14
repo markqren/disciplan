@@ -67,6 +67,8 @@ select.inp{cursor:pointer;appearance:auto}
 .login-card .inp{margin-bottom:14px}
 .login-err{color:var(--r);font-size:12px;font-weight:600;margin-bottom:12px;display:none}
 @media(max-width:700px){.g3,.g2{grid-template-columns:1fr}.chrt{height:220px}.hide-m{display:none!important}table{font-size:11px}th,td{padding:7px 4px}.st-v{font-size:20px}.tabs{gap:3px}.tab{padding:5px 10px;font-size:11px}}
+.is-tbl th:first-child,.is-tbl td:first-child{position:sticky;left:0;z-index:1;background:#0d0d18}
+@media(max-width:700px){.is-tbl col.is-mo{min-width:68px}}
 .pf-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
 .pf-acct{background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);border-radius:12px;overflow:hidden;margin-bottom:10px}
 .pf-acct-hdr{display:grid;grid-template-columns:1fr auto auto auto auto auto;gap:16px;padding:14px 20px;cursor:pointer;align-items:center;transition:background 0.15s}.pf-acct-hdr:hover{background:rgba(255,255,255,0.03)}
@@ -197,7 +199,7 @@ const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazo
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
 const DFX={USD:1,CAD:0.73,EUR:1.08,GBP:1.26,JPY:0.0067,CZK:0.043,TRY:0.031,MXN:0.058,TND:0.32,INR:0.012};
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
-const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&hd.includes("Category")&&hd.includes("Extended Details"),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")}};
+const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},chase_checking:{detect:hd=>hd.includes("Posting Date")&&hd.includes("Details")&&hd.includes("Balance"),columns:{date:"Posting Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"Type"},transformAmount:a=>Math.abs(a),skipTypes:[],currency:"USD",isCheckingAccount:true,detectBillPay:row=>{const d=row.Description||"",t=row.Type||"";if(t==="LOAN_PMT")return"Chase Card Payment";if(/CHASE CREDIT CRD AUTOPAY/i.test(d))return"Chase Card Autopay";if(/AMERICAN EXPRESS ACH PMT/i.test(d))return"AMEX Payment";if(/APPLECARD GSBANK/i.test(d))return"Apple Card Payment";if(/WF Credit Card.*AUTO PAY/i.test(d))return"Capital One Payment";if(/WELLS FARGO CARD B(ILT|PP)/i.test(d))return"Bilt Card Payment";return null},detectPayroll:row=>/PINTEREST.*PAYROLL|ORIG CO NAME:PINTEREST/i.test(row.Description||"")},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&hd.includes("Category")&&hd.includes("Extended Details"),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")}};
 const PAYSLIP_PROFILES={pinterest:{detect:t=>t.includes("Pinterest, Inc.")&&t.includes("Pay Period Begin"),company:"Pinterest",incomeItems:["Regular Salary Pay","Connectivity Reimbursement","GTL","Wellness Reimbursement","Home Office Setup Stipend","Sign on Bonus"],rsuIndicators:["RSU Gain"],postTaxExclude:["401(k) After-tax Deferral","RSU Gain Offset"],benefitEarnings:["GTL"]}};
 const CC_PAY_NAMES={"Chase Sapphire":["Bill Paid: Chase Sapphire","Chase Sapphire Bill Payment"],"Chase United":["Bill Paid: Chase United","Chase United Bill Payment"],"Chase Freedom":["Bill Paid: Chase Freedom","Chase Freedom Bill Payment"],"Chase Aeroplan":["Bill Paid: Chase Aeroplan","Chase Aeroplan Bill Payment"],"AMEX Rose Gold":["Bill Paid: AMEX Rose Gold","Amex Rose Gold Bill Payment"],"Bilt":["Bill Paid: Bilt","Bilt Card Payment"],"Apple":["Bill Paid: Apple","Apple Bill Payment"],"Venmo Credit":["Bill Paid: Venmo","Venmo Bill Payment"],"Capital One":["Bill Paid: Capital One","Capital One Bill Payment"],"Uber":["Bill Paid: Uber","Uber Bill Payment"]};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
@@ -237,7 +239,7 @@ function parseCSV(text){
   if(!filtered.length)return{headers:[],rows:[]};
   const headers=filtered[0].map(v=>v.trim());
   const rows=filtered.slice(1).map(r=>{const o={};headers.forEach((hd,i)=>o[hd]=r[i]?r[i].trim():"");return o})
-    .filter(r=>{const v=r[headers[0]]||"";return v!==""&&/\d/.test(v)});
+    .filter(r=>{const vals=Object.values(r);return vals.some(v=>v!=="")&&vals.some(v=>/\d/.test(v))});
   return{headers,rows};
 }
 
@@ -267,7 +269,7 @@ async function fetchSampleDescriptions(){
   return[...new Set(recent.map(r=>r.description))].slice(0,50);
 }
 
-async function aiCategorize(candidates,merchantPatterns,sampleDescriptions){
+async function aiCategorize(candidates,merchantPatterns,sampleDescriptions,isCheckingAccount){
   const apiKey=getApiKey();
   if(!apiKey)return null;
   const items=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
@@ -337,7 +339,26 @@ Rules:
 - Negative amounts (credits/refunds) that clearly offset an expense -> same category as the expense, NOT income
 - Positive amounts that are clearly income (paycheck, reimbursement) -> income
 - confidence: high = historical match or obvious merchant, medium = reasonable guess from bank category + description, low = ambiguous
-
+${isCheckingAccount?`
+CHECKING ACCOUNT CONTEXT:
+These are from a Chase checking account (mixed debits/credits). No bank category available — categorize entirely from description.
+- Zelle payments TO someone: "personal" (person-to-person transfer). Desc: "Zelle to [Name]"
+- Zelle payments FROM someone: "income". Desc: "Zelle from [Name]"
+- Venmo payments/cashouts: "personal". Desc: "Venmo Payment" or "Venmo Cashout"
+- ATM withdrawals: "financial". Desc: "ATM Withdrawal"
+- PGANDE / PG&E: "utilities". Desc: "PG&E"
+- IRS USATAXPYMT: "financial". Desc: "IRS Tax Payment"
+- CA DMV: "financial". Desc: "CA DMV"
+- Wise transfers: "financial". Desc: "Wise Transfer"
+- SPLITWISE PAYMENT: "personal". Desc: "Splitwise Payment"
+- PayPal TRANSFER: "income". Desc: "PayPal Transfer"
+- Google/Pinterest PAYROLL: "income". Desc: "Google Payroll" or "Pinterest Payroll"
+- FRANCHISE TAX BD CASTTAXRFD: "income". Desc: "CA State Tax Refund"
+- HEALTHEQUITY: "income". Desc: "HSA Reimbursement"
+- COSTCO debit card purchases: "groceries". Desc: "Groceries - Costco"
+- BILLPAY to specific vendors: categorize by vendor (e.g. Ashley Bond -> personal)
+- Credit returns (MISC_CREDIT): categorize by what the credit is for
+- Debit card purchases: categorize by merchant name`:""}
 Return ONLY the JSON array, no other text.`;
   try{
     const r=await fetch("https://api.anthropic.com/v1/messages",{
@@ -368,6 +389,13 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
   const isSkip=badDate||(typeVal&&profile.skipTypes.includes(typeVal));
   let amt=profile.transformAmount(rawAmt);
   if(isReturn)amt=-Math.abs(amt);
+  const baseFields={date,description:row[cols.description]||"",amount_usd:amt,currency:profile.currency||"USD",fx_rate:1,original_amount:amt,service_start:date,service_end:date,payment_type:paymentType,tag:bulkTag||"",credit:"",_rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",_rowIndex:index};
+  if(profile.isCheckingAccount&&!badDate){
+    const billName=profile.detectBillPay&&profile.detectBillPay(row);
+    if(billName)return{...baseFields,amount_usd:amt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:"Bill Payment: "+billName,_isBillPay:true};
+    if(profile.detectPayroll&&profile.detectPayroll(row))return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:"Payroll (payslip imported)",_isPayroll:true,_payrollAmount:amt};
+    if(rawAmt>0)return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"medium",service_days:1,daily_cost:amt,_status:"pending",_isDuplicate:false,_skipReason:null,_isCredit:true};
+  }
   if(isCCPay){
     const names=CC_PAY_NAMES[paymentType]||["Bill Paid: "+paymentType,paymentType+" Bill Payment"];
     return{
@@ -411,8 +439,8 @@ function applyAIResults(candidates,aiResults){
     for(const c of candidates){
       if(c._status==="skipped")continue;
       if(c._isCCPayment)continue;
-      c.category_id=fallbackCatMap(c._bankCategory);
-      c.ai_confidence="low";
+      if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);
+      if(!c.ai_confidence)c.ai_confidence="low";
       c.service_end=getDefEnd(c.category_id,c.date)||c.date;
       const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
       c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
@@ -427,7 +455,7 @@ function applyAIResults(candidates,aiResults){
     if(c._isCCPayment)continue;
     const ai=byIdx[i];
     if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc}
-    else{c.category_id=fallbackCatMap(c._bankCategory);c.ai_confidence="low"}
+    else{if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);if(!c.ai_confidence)c.ai_confidence="low"}
     c.service_end=getDefEnd(c.category_id,c.date)||c.date;
     const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
     c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
@@ -633,7 +661,7 @@ function generatePayslipTransactions(pages,enteredDate){
 // STATE
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-let state={tab:"income",year:2025,txnCount:0,page:0,pendingEmails:0};
+let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0};
 
 
 // Ensure a tag exists in the tags table; prompt user to create if new
@@ -856,13 +884,13 @@ function renderEntry(el){
       if(!csv.rows.length)throw new Error("No data rows found in CSV.");
 
       const profile=detectBankProfile(csv.headers);
-      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase, AMEX");
+      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX");
 
       // Auto-detect payment type from filename (only if user hasn't manually changed it)
       if(!impPtManual){
-        const fn=file.name.toLowerCase();
-        if(fn.includes("chase"))impPtSel.value="Chase Sapphire";
-        else if(fn.includes("amex"))impPtSel.value="AMEX Rose Gold";
+        if(profile.name==="chase_checking")impPtSel.value="Chase Chequing";
+        else if(profile.name==="chase")impPtSel.value="Chase Sapphire";
+        else if(profile.name==="amex")impPtSel.value="AMEX Rose Gold";
       }
       const pt=impPtSel.value;
       const tag=impTagInp.value.trim();
@@ -874,7 +902,7 @@ function renderEntry(el){
       // AI categorization
       impStatus.textContent="AI categorizing...";
       const[patterns,samples]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions()]);
-      const aiResults=await aiCategorize(candidates,patterns,samples);
+      const aiResults=await aiCategorize(candidates,patterns,samples,!!profile.isCheckingAccount);
       applyAIResults(candidates,aiResults);
 
       // Duplicate detection
@@ -1106,7 +1134,7 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}},fmtD(c.date)));
 
     const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}});
-    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c.description||c._rawDescription);
+    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c.description||c._rawDescription)+(c._linkToTransactionId?" \uD83D\uDD17":"");
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descMain.textContent=descText;
     if(c._isCCPayment){const pairHint=h("span",{style:{color:"rgba(255,255,255,0.3)",fontSize:"11px"}}," \u2192 Chase Chequing");descMain.append(pairHint)}
@@ -1218,6 +1246,68 @@ function openImportEditModal(candidates,idx,reviewContainer){
   }
   updatePreview();
 
+  // Link to Transaction section
+  const linkSection=h("div",{style:{marginTop:"12px",marginBottom:"4px"}});
+  const linkBody=h("div");
+  function renderImportLink(){
+    linkBody.innerHTML="";
+    if(c._linkToTransactionId){
+      const info=c._linkDisplay||{};
+      const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:"rgba(74,111,165,0.12)",borderRadius:"4px",marginTop:"6px"}});
+      const left=h("div");
+      left.innerHTML=`<div style="color:rgba(255,255,255,0.7)">${info.description||"Transaction #"+c._linkToTransactionId}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${info.date?fmtD(info.date):""} \u00b7 ${info.category_id||""} \u00b7 ${info.payment_type||""}</div>`;
+      row.append(left);
+      const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
+      if(info.amount_usd!=null)right.append(h("span",{style:{fontFamily:"var(--mono)",color:info.amount_usd<0?"var(--g)":"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(info.amount_usd)));
+      right.append(h("button",{class:"pg-btn",style:{fontSize:"9px",color:"rgba(224,122,95,0.7)",padding:"2px 6px"},onClick:()=>{
+        delete c._linkToTransactionId;delete c._linkToGroupId;delete c._linkDisplay;
+        renderImportLink();
+      }},"Unlink"));
+      row.append(right);
+      linkBody.append(row);
+      // Allow linking another or changing
+      const changeBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)",marginTop:"6px"},onClick:()=>{changeBtn.style.display="none";buildImportLinkSearch(linkBody)}},"\u2026 Change Link");
+      linkBody.append(changeBtn);
+    }else{
+      const linkToggle=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)"},onClick:()=>{linkToggle.style.display="none";buildImportLinkSearch(linkBody)}},"\uD83D\uDD17 Link to Transaction");
+      linkBody.append(linkToggle);
+    }
+  }
+  function buildImportLinkSearch(container){
+    const lsWrap=h("div",{style:{marginTop:"6px"}});
+    const lsRow=h("div",{style:{display:"flex",gap:"6px",marginBottom:"8px"}});
+    const lsInput=h("input",{class:"inp",type:"text",placeholder:"Search description...",style:{flex:"1",fontSize:"11px",padding:"5px 8px"}});
+    const lsBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"5px 10px"}},"Search");
+    lsRow.append(lsInput,lsBtn);lsWrap.append(lsRow);
+    const lsResults=h("div",{style:{maxHeight:"200px",overflowY:"auto"}});lsWrap.append(lsResults);
+    async function doSearch(){
+      const q=lsInput.value.trim();if(!q){lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>Type a description to search</div>";return}
+      lsBtn.textContent="...";lsBtn.disabled=true;
+      try{
+        const rows=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&order=date.desc&limit=20&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id`);
+        lsResults.innerHTML="";
+        if(!rows.length){lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>No transactions found</div>";return}
+        rows.forEach(r=>{
+          const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
+            c._linkToTransactionId=r.id;c._linkToGroupId=r.transaction_group_id||null;
+            c._linkDisplay={description:r.description,date:r.date,amount_usd:r.amount_usd,category_id:r.category_id,payment_type:r.payment_type};
+            lsWrap.remove();renderImportLink();
+          }});
+          const inGroup=!!r.transaction_group_id;
+          row.innerHTML=`<div><div style="color:rgba(255,255,255,0.7)">${r.description}${inGroup?" <span style='font-size:9px;color:rgba(255,255,255,0.3)'>(in group)</span>":""}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(r.date)} \u00b7 ${r.category_id} \u00b7 ${r.payment_type||""}</div></div><div style="font-family:var(--mono);color:rgba(255,255,255,0.6);white-space:nowrap;margin-left:8px">${fmtF(r.amount_usd)}</div>`;
+          lsResults.append(row);
+        });
+      }catch(e){lsResults.innerHTML=`<div style='color:var(--r);padding:8px'>Error: ${e.message}</div>`}
+      finally{lsBtn.textContent="Search";lsBtn.disabled=false}
+    }
+    lsBtn.addEventListener("click",doSearch);
+    lsInput.addEventListener("keydown",e=>{if(e.key==="Enter")doSearch()});
+    container.append(lsWrap);
+    lsInput.focus();
+  }
+  renderImportLink();
+  linkSection.append(linkBody);
+
   // Action buttons
   const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
@@ -1244,6 +1334,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
   modal.append(mRow(mField("Service Start",mSs),seField));
   modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
   modal.append(previewEl);
+  modal.append(linkSection);
   modal.append(btnRow);
   bg.append(modal);
   document.body.append(bg);
@@ -1286,9 +1377,20 @@ async function commitImport(candidates){
   }
   const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
   for(const t of uniqueTags)await ensureTagExists(t);
-  await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
+  const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  // Apply pre-set links from import edit modal
+  for(let i=0;i<valid.length;i++){
+    const c=valid[i];
+    if(!c._linkToTransactionId)continue;
+    const ins=inserted[i];if(!ins||!ins.id)continue;
+    const targetGroup=c._linkToGroupId||Math.min(ins.id,c._linkToTransactionId);
+    await sb(`transactions?id=eq.${ins.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
+    if(!c._linkToGroupId){
+      await sb(`transactions?id=eq.${c._linkToTransactionId}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
+    }
+  }
   valid.forEach(c=>c._status="committed");
   return{
     count:valid.length,
@@ -2078,12 +2180,14 @@ async function renderIS(el){
 
     // Detail table with subcategories
     const tblCard=h("div",{class:"cd"});
-    const activeMonths=mData.filter(m=>m.totE>0||m.inc>0).length||1;
-    let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table style="table-layout:fixed"><colgroup><col style="width:110px">`;
-    for(let i=0;i<12;i++)thtml+=`<col>`;
-    thtml+=`<col style="width:70px"><col style="width:70px"></colgroup><thead><tr><th>Category</th>`;
+    const now=new Date();const isCurrentYear=state.year===now.getFullYear();
+    const completedMonths=isCurrentYear?now.getMonth():12;
+    const activeMonths=Math.max(1,Math.min(mData.filter(m=>m.totE>0||m.inc>0).length,completedMonths));
+    let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table class="is-tbl" style="table-layout:fixed"><colgroup><col style="width:110px"><col style="width:70px"><col style="width:70px">`;
+    for(let i=0;i<12;i++)thtml+=`<col class="is-mo">`;
+    thtml+=`</colgroup><thead><tr><th>Category</th><th class="r" style="font-weight:700">Total</th><th class="r" style="font-weight:700">Avg</th>`;
     ML.forEach(m=>thtml+=`<th class="r">${m}</th>`);
-    thtml+=`<th class="r" style="font-weight:700">Total</th><th class="r" style="font-weight:700">Avg</th></tr></thead><tbody>`;
+    thtml+=`</tr></thead><tbody>`;
 
     const allRows=[];
     for(const p of PARENT_CATS){
@@ -2108,31 +2212,36 @@ async function renderIS(el){
         const parentId=Object.entries(SUB_MAP).find(([,ch])=>ch.includes(r.id))?.[0]||"";
         thtml+=`<tr class="sub-${parentId} hidden"><td style="padding-left:32px;color:rgba(255,255,255,0.5);font-weight:400;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}</td>`;
       }
-      r.m.forEach(v=>thtml+=`<td class="r m" style="color:${v<-0.5?"var(--g)":v>0.5?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.15)"}">${Math.abs(v)>0.5?fmtT(Math.round(v)):""}</td>`);
       thtml+=`<td class="r m" style="font-weight:${r.par?700:500};color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.6)"}">${fmtT(Math.round(r.t))}</td>`;
-      thtml+=`<td class="r m" style="color:rgba(255,255,255,0.4)">${fmtT(Math.round(avg))}</td></tr>`;
+      thtml+=`<td class="r m" style="color:rgba(255,255,255,0.4)">${fmtT(Math.round(avg))}</td>`;
+      r.m.forEach(v=>thtml+=`<td class="r m" style="color:${v<-0.5?"var(--g)":v>0.5?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.15)"}">${Math.abs(v)>0.5?fmtT(Math.round(v)):""}</td>`);
+      thtml+=`</tr>`;
     }
 
     // Totals rows
     thtml+=`<tr style="border-top:2px solid rgba(255,255,255,0.1)"><td style="font-weight:700;color:var(--r)">Total Expenses</td>`;
-    mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(m.totE))}</td>`);
     thtml+=`<td class="r m" style="color:var(--r);font-weight:700">${fmtT(Math.round(totE))}</td>`;
-    thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(totE/activeMonths))}</td></tr>`;
+    thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(totE/activeMonths))}</td>`;
+    mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(m.totE))}</td>`);
+    thtml+=`</tr>`;
 
     thtml+=`<tr><td style="font-weight:700;color:var(--b)">Income</td>`;
-    mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(m.inc))}</td>`);
     thtml+=`<td class="r m" style="color:var(--b);font-weight:700">${fmtT(Math.round(totI))}</td>`;
-    thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(totI/activeMonths))}</td></tr>`;
+    thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(totI/activeMonths))}</td>`;
+    mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(m.inc))}</td>`);
+    thtml+=`</tr>`;
 
     thtml+=`<tr style="border-top:1px solid rgba(255,255,255,0.08)"><td style="font-weight:700;color:var(--g)">Net Savings</td>`;
-    mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round(m.net))}</td>`);
     thtml+=`<td class="r m" style="color:var(--g);font-weight:700">${fmtT(Math.round(totI-totE))}</td>`;
-    thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round((totI-totE)/activeMonths))}</td></tr>`;
+    thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round((totI-totE)/activeMonths))}</td>`;
+    mData.forEach(m=>thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round(m.net))}</td>`);
+    thtml+=`</tr>`;
 
     thtml+=`<tr><td style="font-weight:700;color:#F2CC8F">Savings Rate</td>`;
-    mData.forEach(m=>thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
     thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
-    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td></tr>`;
+    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
+    mData.forEach(m=>thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
+    thtml+=`</tr>`;
 
     thtml+=`</tbody></table></div>`;
     tblCard.innerHTML=thtml;
@@ -2209,7 +2318,7 @@ async function renderBS(el){
     snapBar.innerHTML=`<div><span style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.6)">Snapshots</span><span style="font-size:11px;color:rgba(255,255,255,0.3);margin-left:8px">${snapDates.length} saved${latestSnap?` · Last: ${fmtD(latestSnap)} (${daysSinceSnap}d ago)`:""}</span></div>`;
     const snapBtn=h("button",{class:"pg-btn",style:{background:"rgba(129,178,154,0.12)",borderColor:"rgba(129,178,154,0.3)",color:"var(--g)",padding:"6px 14px"},onClick:async()=>{
       snapBtn.textContent="Loading...";snapBtn.disabled=true;
-      try{const accounts=await sb("accounts?is_active=eq.true&order=display_order");showSnapshotForm(accounts,latestSnap,()=>renderContent())}
+      try{const accounts=await sb("accounts?is_active=eq.true&order=display_order");showSnapshotForm(accounts,latestSnap,()=>renderContent(),ledgerBals)}
       catch(e){alert("Error: "+e.message);snapBtn.textContent="📸 Take Snapshot";snapBtn.disabled=false}
     }},"📸 Take Snapshot");
     snapBar.append(snapBtn);
@@ -2677,23 +2786,29 @@ async function showTagDetail(tag){
 // SNAPSHOT FORM
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-function showSnapshotForm(accounts, lastDate, onSave){
+function showSnapshotForm(accounts, lastDate, onSave, liveBals){
   const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   const modal=h("div",{class:"modal",style:{maxWidth:"640px"}});
+
+  // Build lookup: account label → live ledger balance
+  const balByLabel={};
+  if(liveBals)for(const lb of liveBals){const b=parseFloat(lb.net_balance)||0;if(Math.abs(b)>=0.01)balByLabel[lb.payment_type]=b}
 
   const groups={checking:[],savings:[],credit:[],investment:[],liability:[]};
   accounts.forEach(a=>(groups[a.account_type]||[]).push(a));
   const typeLabels={checking:"Checking",savings:"Savings",credit:"Credit Cards",investment:"Investments",liability:"Liabilities"};
 
-  let mhtml=`<div style="display:flex;justify-content:space-between;margin-bottom:20px"><div><h2 style="font-size:20px">New Balance Snapshot</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">Enter current balances for each account</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">\u2715</button></div>`;
+  let mhtml=`<div style="display:flex;justify-content:space-between;margin-bottom:20px"><div><h2 style="font-size:20px">New Balance Snapshot</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">Pre-filled from live ledger balances · edit any values before saving</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">\u2715</button></div>`;
   mhtml+=`<div style="margin-bottom:16px"><label class="lbl">Snapshot Date</label><input type="date" id="snapDate" class="inp" value="${today()}" style="max-width:200px"></div>`;
 
   for(const[type,accts]of Object.entries(groups)){
     if(!accts.length)continue;
     mhtml+=`<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">${typeLabels[type]||type}</div>`;
     accts.forEach(a=>{
-      mhtml+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:12px;color:rgba(255,255,255,0.6);min-width:160px">${a.label}</span><input type="number" step="0.01" class="inp snap-bal" data-id="${a.id}" placeholder="0.00" style="max-width:160px;font-family:var(--mono)"></div>`;
+      const live=balByLabel[a.label];
+      const val=live!==undefined?live.toFixed(2):"";
+      mhtml+=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><span style="font-size:12px;color:rgba(255,255,255,0.6);min-width:160px">${a.label}</span><input type="number" step="0.01" class="inp snap-bal" data-id="${a.id}" value="${val}" placeholder="0.00" style="max-width:160px;font-family:var(--mono)"></div>`;
     });
     mhtml+=`</div>`;
   }
@@ -3287,6 +3402,17 @@ async function renderLedger(el){
     if(f.dto)q+=`&date=lte.${f.dto}`;
     if(f.q){const eq=encodeURIComponent(f.q);let orParts=`description.ilike.*${eq}*,tag.ilike.*${eq}*,payment_type.ilike.*${eq}*`;const num=parseFloat(f.q);if(!isNaN(num)&&String(num)===f.q.trim())orParts+=`,amount_usd.eq.${num}`;q+=`&or=(${orParts})`}
     const txns=await sb(q);
+    // Backfill missing linked group members from other pages
+    const pageGroupIds=[...new Set(txns.filter(t=>t.transaction_group_id).map(t=>t.transaction_group_id))];
+    if(pageGroupIds.length){
+      const pageIds=new Set(txns.map(t=>t.id));
+      const missing=await sb(`transactions?transaction_group_id=in.(${pageGroupIds.join(",")})`
+        +`&id=not.in.(${[...pageIds].join(",")})&select=*&order=date.desc,id.desc`);
+      for(const m of missing){
+        const anchorIdx=txns.findIndex(t=>t.transaction_group_id===m.transaction_group_id);
+        if(anchorIdx>=0)txns.splice(anchorIdx+1,0,m);else txns.push(m);
+      }
+    }
     // Group linked transactions adjacent by transaction_group_id
     const groupPositions={};
     txns.forEach((t,i)=>{if(t.transaction_group_id){if(!groupPositions[t.transaction_group_id])groupPositions[t.transaction_group_id]=[];groupPositions[t.transaction_group_id].push(i)}});

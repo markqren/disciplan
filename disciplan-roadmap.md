@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 12, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 14, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
@@ -34,10 +34,18 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (58 items)</summary>
+<summary><strong>✅ Completed</strong> (66 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-53 | **Import Edit Modal: Link to Transaction** — Added "Link to Transaction" search UI to CSV import edit modal. Users can search existing DB transactions by description, select one to pre-link, and see linked transaction details with Unlink button. Link stored on candidate as `_linkToTransactionId`/`_linkToGroupId`. On commit, `commitImport` captures inserted row IDs and PATCHes `transaction_group_id` on both the new and target transactions. Review table shows 🔗 indicator for linked candidates. Mirrors ledger link UI pattern. | Feature → Done | Mar 14 |
+| FEA-52 | **Chase Chequing CSV Import** — Added `chase_checking` bank profile with header auto-detection (`Posting Date` + `Details` + `Balance`), bill payment detection (AMEX, Chase CC autopay, Apple Card, Capital One/WF, Bilt, LOAN_PMT), Pinterest payroll detection (auto-skipped as payslip-imported), and credit→income defaults. Checking-specific AI categorization context for Zelle, Venmo, ATM, PG&E, IRS, etc. Fixed CSV row filter to handle non-numeric first columns. Payment type auto-set to "Chase Chequing" from profile detection. | Feature → Done | Mar 13 |
+| FEA-51 | **Balance Sheet Snapshot Pre-Fill** — "Take Snapshot" button now pre-fills all account inputs with live ledger balances instead of requiring manual entry. Values are editable before saving. Accounts with zero balances left empty. | Feature → Done | Mar 12 |
+| FEA-48 | **AMEX Rose Gold CSV Import** — Added `amex` bank profile to CSV import pipeline with header auto-detection, column mapping, `detectPayment` for AUTOPAY rows, `detectCredit` for AMEX credit/reward rows. `AMEX_CAT_MAP` maps AMEX categories (e.g. "Restaurant-Restaurant", "Merchandise & Supplies-Groceries") to Disciplan categories as AI fallback. Updated `transformCSVRow` to handle missing type column. AI description cleanup applies existing style guide for proper formatting. | Feature → Done | Mar 12 |
+| BUG-12 | **Balance Sheet Total Liabilities Fix** — Credits & Transfers total (`creditTotal`) was being added to `totL`, offsetting real liabilities (e.g. -$11,184 showed as $957). Fixed by removing `creditTotal` from `totL` and adding it only to net worth calculation. | Bug → Done | Mar 12 |
+| BUG-13 | **Payslip Duplicate Detection Service Dates** — `findDuplicates` now compares `service_start` and `service_end` in addition to date/amount, preventing false positives when importing payslips with same date but different service periods. | Bug → Done | Mar 12 |
+| FEA-50 | **401K Company Match in Payslip Parser** — Added parsing for "401(k) Company Match" / "Employer Match" lines in payslip PDFs. Generates a separate "401K Match" income transaction on Vanguard, matching historical pattern (e.g. 1/29/25 Google 401K match). | Feature → Done | Mar 12 |
+| FEA-49 | **Linked Group Visual Separation + Payslip Auto-Linking** — Adjacent linked transaction groups in the ledger now show a subtle horizontal divider between different `transaction_group_id` groups instead of one continuous blue border. Payslip import (`commitPayslipImport`) now auto-links salary/tax/benefits/401K transactions by capturing POST return values and PATCHing `transaction_group_id` based on `_group`. | Feature → Done | Mar 12 |
 | FEA-47 | **Ledger Batch Selection & Operations** — Multi-select checkboxes on ledger rows with select-all header. Floating action bar appears at bottom when items selected, with Edit/Link/Delete/Cancel buttons. Batch Edit modal applies optional field changes (category, tag, payment type, date, service period) across all selected; recalculates daily_cost per-transaction when service period changes. Batch Link groups selected transactions under one transaction_group_id with existing group merge support. Batch Delete uses two-click confirmation pattern. Selection clears on page/filter change and after operations. | Feature → Done | Mar 12 |
 | DAT-05 | **Recategorize Ledger Adjustments to "Adjustment" Category** — Two batches: 15 DAT-04 Credits & Transfers adjustments (IDs 12713-12727) and 13 zero-balance/correction adjustments (IDs 12751-12780) recategorized from `financial` → `adjustment`. Adjustment category excluded from Income Statement (not in `PARENT_CATS`, skipped in cross-year view), Tags, and reimbursement logic. Added `adjustment` color (#B0BEC5 gray) to CC map and CATS_LIST. | Data → Done | Mar 11 |
 | FEA-46 | **Linked Transaction Viewer** — New `transaction_group_id` column enables transaction groups of 3+ (vs. old 1:1 `related_transaction_id` pairs). Edit modal shows all group members with descriptions, dates, amounts, and payment types. Net Amount footer aggregates all linked amounts. Individual Unlink buttons per member. "Link Another Transaction" button to add to existing groups. Ledger shows group count badge (e.g. `🔗3`) for groups > 2. Auto-linking and reimbursement creation use group-based linking with group merge support. | Feature → Done | Mar 11 |
