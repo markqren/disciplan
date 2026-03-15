@@ -218,6 +218,10 @@ const BUDGET_TARGETS={
 function getBudgetTargets(year){return BUDGET_TARGETS[year]||BUDGET_TARGETS[2025]}
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];
+// Cashback (FEA-14)
+const CB_COLORS={"AMEX Rose Gold":"#E07A5F","Chase United":"#4A6FA5","Chase Sapphire":"#3D405B","Aeroplan":"#D4A373","Bilt":"#81B29A","Capital One":"#CB997E","Rakuten":"#F2CC8F","Uber":"#9B8EA0","Venmo Credit":"#6B9AC4","AMEX":"#264653","Chase Aeroplan":"#5B8DB8","TD Visa":"#8B687F","Scotiabank":"#E9C46A","Apple":"#7FB3D8","Flying Blue":"#52556E","Venmo":"#A8DADC"};
+const CB_FEES={"AMEX Rose Gold":1075,"Chase Sapphire":985,"Chase United":345,"Chase Aeroplan":190,"Capital One":95,"AMEX":90};
+const CB_PTS_BAL={"Aeroplan":140992,"AMEX Rose Gold":123884,"Bilt":49752,"Chase Sapphire":8507};
 const CATS_LIST=[{id:"entertainment",l:"Entertainment"},{id:"food",l:"Food (other)"},{id:"groceries",l:"Groceries"},{id:"restaurant",l:"Restaurant"},{id:"home",l:"Home (other)"},{id:"rent",l:"Rent"},{id:"furniture",l:"Furniture"},{id:"health",l:"Health"},{id:"personal",l:"Personal (other)"},{id:"clothes",l:"Clothes"},{id:"tech",l:"Tech"},{id:"transportation",l:"Transportation"},{id:"utilities",l:"Utilities"},{id:"financial",l:"Financial"},{id:"other",l:"Other"},{id:"income",l:"Income"},{id:"investment",l:"Investment"},{id:"adjustment",l:"Adjustment"}];
 const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","Rakuten","Splitwise","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];
@@ -769,7 +773,7 @@ async function ensureTagExists(tagName){
 // TABS
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["portfolio","portfolio"],["tags","tags"],["ledger","ledger"],["export","export"]];
+const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["portfolio","portfolio"],["tags","tags"],["ledger","ledger"],["cashback","cashback"],["export","export"]];
 
 function renderTabs(){
   const bar=document.getElementById("tabBar");
@@ -800,6 +804,7 @@ function renderContent(){
   else if(state.tab==="portfolio")renderPortfolio(el);
   else if(state.tab==="tags")renderTags(el);
   else if(state.tab==="ledger")renderLedger(el);
+  else if(state.tab==="cashback")renderCashback(el);
   else if(state.tab==="export")renderExport(el);
 }
 
@@ -1164,7 +1169,10 @@ function renderReviewTable(container,candidates){
     try{
       const summary=await commitImport(candidates);
       renderReviewTable(container,candidates);
-      // Success summary
+      showUndo(`\u2713 Imported ${summary.count} transactions`,async()=>{
+        await sb(`transactions?import_batch=eq.${encodeURIComponent(summary.batchId)}`,{method:"DELETE"});
+        state.txnCount-=summary.count;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      });
       const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
@@ -1469,7 +1477,8 @@ async function commitImport(candidates){
     count:valid.length,
     imported:valid,
     skipped:candidates.filter(c=>c._status==="skipped").length,
-    dupes:candidates.filter(c=>c._isDuplicate).length
+    dupes:candidates.filter(c=>c._isDuplicate).length,
+    batchId
   };
 }
 
@@ -1502,6 +1511,11 @@ function renderEmailReviewTable(container,candidates){
     try{
       const summary=await commitEmailImports(candidates);
       renderEmailReviewTable(container,candidates);
+      showUndo(`\u2713 Imported ${summary.count} transactions`,async()=>{
+        await sb(`transactions?import_batch=eq.${encodeURIComponent(summary.batchId)}`,{method:"DELETE"});
+        for(const pid of summary.pendingIds)await sb(`pending_imports?id=eq.${pid}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"approved",committed_at:null})});
+        state.txnCount-=summary.count;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      });
       const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Committed ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
@@ -1625,6 +1639,10 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
     try{
       const summary=await commitPayslipImport(candidates);
       renderPayslipReviewTable(container,candidates,skippedPages);
+      showUndo(`\u2713 Imported ${summary.count} transactions`,async()=>{
+        await sb(`transactions?import_batch=eq.${encodeURIComponent(summary.batchId)}`,{method:"DELETE"});
+        state.txnCount-=summary.count;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      });
       const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
@@ -1990,7 +2008,9 @@ async function commitEmailImports(candidates){
     count:valid.length,
     imported:valid,
     skipped:candidates.filter(c=>c._status==="skipped").length,
-    dupes:candidates.filter(c=>c._isDuplicate).length
+    dupes:candidates.filter(c=>c._isDuplicate).length,
+    batchId,
+    pendingIds:valid.map(c=>c._id)
   };
 }
 
@@ -2029,7 +2049,8 @@ async function commitPayslipImport(candidates){
     count:valid.length,
     imported:valid,
     skipped:candidates.filter(c=>c._status==="skipped").length,
-    dupes:candidates.filter(c=>c._isDuplicate).length
+    dupes:candidates.filter(c=>c._isDuplicate).length,
+    batchId
   };
 }
 
@@ -3119,7 +3140,9 @@ function openLedgerEditModal(txn,onSaved){
 
   // Action buttons
   const isReimbursable=txn.amount_usd>0&&!["income","investment","financial","adjustment"].includes(txn.category_id);
-  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:isReimbursable?"1fr auto auto auto":"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  const isCashbackable=txn.amount_usd>0&&!["income","investment","adjustment"].includes(txn.category_id);
+  const extraBtns=(isReimbursable?1:0)+(isCashbackable?1:0);
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr"+(" auto".repeat(extraBtns+2)),gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
     mSave.textContent="Saving...";mSave.disabled=true;
     const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
@@ -3178,6 +3201,9 @@ function openLedgerEditModal(txn,onSaved){
 
   // Reimburse button (only for reimbursable expenses)
   const mReimb=isReimbursable?h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",width:"auto",padding:"12px 20px"},onClick:()=>showReimburseForm()},"\uD83D\uDCB8 Reimburse"):null;
+
+  // Cashback button (FEA-14)
+  const mCashback=isCashbackable?h("button",{class:"btn",style:{background:"rgba(242,204,143,0.15)",color:"#F2CC8F",width:"auto",padding:"12px 20px"},onClick:()=>showCashbackForm()},"\uD83C\uDFC6 Cashback"):null;
 
   function showReimburseForm(){
     // Save edit form content and replace with reimburse form
@@ -3308,8 +3334,143 @@ function openLedgerEditModal(txn,onSaved){
     modal.append(rBtnRow);
   }
 
+  // Cashback form (FEA-14)
+  function showCashbackForm(){
+    const editContent=Array.from(modal.children);
+    modal.innerHTML="";
+    let cbType="Dollar Value";
+
+    const cHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+    const cHdrLeft=h("div");
+    cHdrLeft.append(h("h3",{style:{margin:"0"}},"\uD83C\uDFC6 Cashback"));
+    cHdrLeft.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginTop:"4px"}},`${txn.description} \u00B7 ${fmtF(txn.amount_usd)}`));
+    cHdr.append(cHdrLeft,h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
+    modal.append(cHdr);
+
+    // Type selector
+    const typeWrap=h("div",{style:{marginBottom:"14px"}});
+    typeWrap.append(h("label",{class:"lbl"},"Cashback Type"));
+    const typeSelect=h("select",{class:"inp",onChange:()=>{cbType=typeSelect.value;ptsFields.style.display=cbType==="Points"?"grid":"none";updateCPreview()}});
+    typeSelect.append(h("option",{value:"Dollar Value"},"Dollar Value"));
+    typeSelect.append(h("option",{value:"Points"},"Points"));
+    typeWrap.append(typeSelect);
+    modal.append(typeWrap);
+
+    // Dollar value input
+    const dvWrap=h("div",{style:{marginBottom:"14px"}});
+    dvWrap.append(h("label",{class:"lbl"},"Dollar Value"));
+    const dvInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"e.g. 10.00",onInput:updateCPreview});
+    dvWrap.append(dvInp);
+    modal.append(dvWrap);
+
+    // Points fields (hidden by default)
+    const ptsFields=h("div",{style:{display:"none",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"14px"}});
+    const ptsAmtWrap=h("div");ptsAmtWrap.append(h("label",{class:"lbl"},"Points Redeemed"));
+    const ptsAmtInp=h("input",{class:"inp",type:"number",placeholder:"e.g. 30000",onInput:()=>{
+      const pts=parseFloat(ptsAmtInp.value)||0;const rate=parseFloat(ptsRateInp.value)||0;
+      if(pts>0&&rate>0)dvInp.value=(pts*rate/100).toFixed(2);
+      updateCPreview();
+    }});
+    ptsAmtWrap.append(ptsAmtInp);ptsFields.append(ptsAmtWrap);
+    const ptsRateWrap=h("div");ptsRateWrap.append(h("label",{class:"lbl"},"Rate (\u00A2/pt)"));
+    const ptsRateInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"e.g. 1.63",onInput:()=>{
+      const pts=parseFloat(ptsAmtInp.value)||0;const rate=parseFloat(ptsRateInp.value)||0;
+      if(pts>0&&rate>0)dvInp.value=(pts*rate/100).toFixed(2);
+      updateCPreview();
+    }});
+    ptsRateWrap.append(ptsRateInp);ptsFields.append(ptsRateWrap);
+    modal.append(ptsFields);
+
+    // Description
+    const descWrap=h("div",{style:{marginBottom:"14px"}});
+    descWrap.append(h("label",{class:"lbl"},"Description"));
+    const cDesc=h("input",{class:"inp",type:"text",value:"Cashback - "+txn.description});
+    descWrap.append(cDesc);
+    modal.append(descWrap);
+
+    // Preview
+    const cPreview=h("div",{class:"preview",style:{marginBottom:"14px"}});
+    modal.append(cPreview);
+
+    const errEl=h("div",{style:{color:"var(--r)",fontSize:"11px",marginBottom:"8px",minHeight:"16px"}});
+    modal.append(errEl);
+
+    function updateCPreview(){
+      const dv=parseFloat(dvInp.value)||0;
+      const desc=cDesc.value||"Cashback";
+      cPreview.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Preview</div>
+        <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-dv)} \u00B7 ${txn.payment_type} \u00B7 income</div>
+        <div style="font-size:11px;color:rgba(242,204,143,0.7);margin-top:4px">\uD83C\uDFC6 Cashback record: ${fmtF(dv)} ${cbType==="Points"?"("+((parseFloat(ptsAmtInp.value)||0).toLocaleString())+" pts)":""}</div>`;
+    }
+    updateCPreview();
+
+    const cBtnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"4px"}});
+    const cCreate=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
+      const dv=parseFloat(dvInp.value);
+      if(!dv||dv<=0){errEl.textContent="Dollar value must be greater than $0.";return}
+      errEl.textContent="";
+      cCreate.textContent="Creating...";cCreate.disabled=true;
+
+      try{
+        // 1. Create negative income transaction (same pattern as reimbursement)
+        const ss=txn.service_start||txn.date;
+        const se=txn.service_end||txn.date;
+        const serviceDays=Math.max(1,Math.round((new Date(se)-new Date(ss))/864e5)+1);
+        const amt=-Math.abs(dv);
+        const dc=Math.round(amt/serviceDays*1e6)/1e6;
+        const newTxn={
+          date:txn.date,service_start:ss,service_end:se,
+          description:cDesc.value||"Cashback - "+txn.description,
+          category_id:"income",original_amount:amt,currency:"USD",fx_rate:1,
+          amount_usd:amt,payment_type:txn.payment_type,
+          tag:(txn.tag||"").toLowerCase().trim(),
+          daily_cost:dc,service_days:serviceDays,credit:""
+        };
+        const result=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(newTxn)});
+        const newId=result[0]?.id;
+
+        // Link to original transaction
+        if(newId){
+          const newTxnObj={id:newId,transaction_group_id:null};
+          await linkToGroup(txn,newTxnObj);
+        }
+        state.txnCount++;
+
+        // 2. Create cashback_redemptions record
+        const redemptionAmount=cbType==="Points"?(parseFloat(ptsAmtInp.value)||dv):dv;
+        const rate=cbType==="Points"?(parseFloat(ptsRateInp.value)||1)/100:1;
+        await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({
+          date:txn.date,item:cDesc.value||"Cashback - "+txn.description,
+          redemption_amount:redemptionAmount,payment_type:txn.payment_type,
+          cashback_type:cbType,redemption_rate:rate,dollar_value:dv,
+          transaction_id:newId||null
+        })});
+
+        bg.remove();
+        showUndo("\u2713 Cashback: "+fmtF(dv),async()=>{
+          // Undo: delete both the transaction and cashback record
+          if(newId){
+            await sb(`transactions?id=eq.${newId}`,{method:"DELETE"});
+            state.txnCount--;
+          }
+          await sb(`cashback_redemptions?transaction_id=eq.${newId}`,{method:"DELETE"});
+          onSaved();
+        });
+        document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        onSaved();
+      }catch(e){alert("Failed: "+e.message);cCreate.textContent="Create Cashback";cCreate.disabled=false}
+    }},"Create Cashback");
+    const cBack=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{
+      modal.innerHTML="";editContent.forEach(c=>modal.append(c));
+    }},"Back");
+    cBtnRow.append(cCreate,cBack);
+    modal.append(cBtnRow);
+  }
+
   btnRow.append(mSave);
   if(mReimb)btnRow.append(mReimb);
+  if(mCashback)btnRow.append(mCashback);
   btnRow.append(mDel,mCancel);
 
   modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
@@ -3718,6 +3879,107 @@ async function renderLedger(el){
     });
   }
   loadPage();
+}
+
+
+// CASHBACK (FEA-14)
+
+async function renderCashback(el){
+  el.innerHTML='<div style="margin-bottom:16px"><h2>Cashback & Rewards</h2><p class="sub">Credit card rewards tracking · All time</p></div><div id="cbBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>';
+  try{
+    const rows=await sb('cashback_redemptions?order=date.desc');
+    const body=document.getElementById("cbBody");body.innerHTML="";
+
+    // Aggregate per-card
+    const byCard={};
+    for(const r of rows){
+      const c=r.payment_type;
+      if(!byCard[c])byCard[c]={count:0,dollarValue:0,ptsRedeemed:0};
+      byCard[c].count++;
+      byCard[c].dollarValue+=parseFloat(r.dollar_value)||0;
+      if(r.cashback_type==="Points")byCard[c].ptsRedeemed+=parseFloat(r.redemption_amount)||0;
+    }
+    const totalRedeemed=Object.values(byCard).reduce((s,c)=>s+c.dollarValue,0);
+    const totalFees=Object.values(CB_FEES).reduce((s,v)=>s+v,0);
+    const netGain=totalRedeemed-totalFees;
+    const numCards=Object.keys(byCard).length;
+
+    // KPI cards
+    const stats=h("div",{class:"g4"});
+    stats.append(statCard("\uD83C\uDFC6","Total Redeemed",fmtN(totalRedeemed),"var(--g)"));
+    stats.append(statCard("\uD83D\uDCB3","Annual Fees",fmtN(totalFees),"var(--r)"));
+    stats.append(statCard("\u2728","Net CC Gain",fmtN(netGain),"var(--y)"));
+    stats.append(statCard("\uD83C\uDFB4","Active Cards",String(numCards),"var(--b)"));
+    body.append(stats);
+
+    // Per-card summary table
+    const tblCard=h("div",{class:"cd"});
+    const cardEntries=Object.entries(byCard).sort((a,b)=>b[1].dollarValue-a[1].dollarValue);
+    let thtml='<h3>Per-Card Summary</h3><div style="overflow-x:auto"><table><thead><tr><th>Card</th><th class="r hide-m">Pts Balance</th><th class="r">Redemptions</th><th class="r">$ Redeemed</th><th class="r hide-m">Fees</th><th class="r">Net Gain</th></tr></thead><tbody>';
+    let tTotalRedeem=0,tTotalFee=0,tTotalNet=0;
+    for(const[card,d]of cardEntries){
+      const fee=CB_FEES[card]||0;
+      const net=d.dollarValue-fee;
+      const ptsBal=CB_PTS_BAL[card];
+      const color=CB_COLORS[card]||"#888";
+      tTotalRedeem+=d.dollarValue;tTotalFee+=fee;tTotalNet+=net;
+      thtml+='<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
+      thtml+='<td class="r m hide-m" style="color:rgba(255,255,255,0.4)">'+(ptsBal?ptsBal.toLocaleString():"")+'</td>';
+      thtml+='<td class="r m" style="color:rgba(255,255,255,0.5)">'+d.count+'</td>';
+      thtml+='<td class="r m" style="color:var(--g)">'+fmtT(Math.round(d.dollarValue))+'</td>';
+      thtml+='<td class="r m hide-m" style="color:var(--r)">'+(fee?fmtT(fee):"")+'</td>';
+      thtml+='<td class="r m" style="color:var(--y)">'+fmtT(Math.round(net))+'</td></tr>';
+    }
+    thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Total</td><td class="r m hide-m"></td><td class="r m">'+rows.length+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet))+'</td></tr>';
+    thtml+='</tbody></table></div>';
+    tblCard.innerHTML=thtml;
+    body.append(tblCard);
+
+    // Stacked bar chart by year
+    const byYearCard={};
+    for(const r of rows){
+      const y=r.date.slice(0,4);
+      if(!byYearCard[y])byYearCard[y]={};
+      const c=r.payment_type;
+      byYearCard[y][c]=(byYearCard[y][c]||0)+(parseFloat(r.dollar_value)||0);
+    }
+    const years=Object.keys(byYearCard).sort();
+    const allCards=[...new Set(rows.map(r=>r.payment_type))];
+    // Sort cards by total value desc for better chart stacking
+    allCards.sort((a,b)=>(byCard[b]?.dollarValue||0)-(byCard[a]?.dollarValue||0));
+
+    const chartCard=h("div",{class:"cd"});
+    chartCard.innerHTML='<h3>Redemptions by Year</h3><div class="chrt"><canvas id="cbChart"></canvas></div>';
+    body.append(chartCard);
+
+    const datasets=allCards.map(card=>({
+      label:card,
+      data:years.map(y=>Math.round(byYearCard[y]?.[card]||0)),
+      backgroundColor:(CB_COLORS[card]||"#888")+"CC",
+      borderRadius:2
+    }));
+
+    setTimeout(()=>makeChart("cbChart",{type:"bar",data:{labels:years,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.5)",font:{size:10},usePointStyle:true,pointStyleWidth:12,boxWidth:8}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+": "+fmtT(ctx.raw)}}},scales:{x:{stacked:true,ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
+
+    // Recent redemptions table
+    const recentCard=h("div",{class:"cd"});
+    const showCount=Math.min(50,rows.length);
+    let rhtml='<h3>Recent Redemptions</h3><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Item</th><th class="hide-m">Card</th><th class="hide-m">Type</th><th class="r">Value</th></tr></thead><tbody>';
+    for(let i=0;i<showCount;i++){
+      const r=rows[i];
+      const color=CB_COLORS[r.payment_type]||"#888";
+      rhtml+='<tr><td class="m" style="color:rgba(255,255,255,0.55);white-space:nowrap">'+fmtD(r.date)+'</td>';
+      rhtml+='<td style="color:rgba(255,255,255,0.8);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.item+'</td>';
+      rhtml+='<td class="hide-m"><span class="badge" style="background:'+color+'22;color:'+color+'">'+r.payment_type+'</span></td>';
+      rhtml+='<td class="hide-m" style="color:rgba(255,255,255,0.4)">'+r.cashback_type+'</td>';
+      rhtml+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+    }
+    rhtml+='</tbody></table></div>';
+    if(rows.length>showCount)rhtml+='<div style="text-align:center;padding:8px;font-size:11px;color:rgba(255,255,255,0.3)">Showing '+showCount+' of '+rows.length+' redemptions</div>';
+    else rhtml+='<div style="text-align:center;padding:8px;font-size:11px;color:rgba(255,255,255,0.3)">'+rows.length+' total redemptions</div>';
+    recentCard.innerHTML=rhtml;
+    body.append(recentCard);
+  }catch(e){document.getElementById("cbBody").innerHTML='<div class="cd" style="color:var(--r)">Error: '+e.message+'</div>'}
 }
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
