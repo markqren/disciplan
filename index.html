@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0a0a14">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
 <title>The Disciplan</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -98,6 +101,12 @@ select.inp{cursor:pointer;appearance:auto}
 .batch-bar .bb-btn.bb-del{border-color:rgba(224,122,95,0.3);color:var(--r)}
 .batch-bar .bb-btn.bb-cancel{color:rgba(255,255,255,0.4)}
 .ldg-chk{width:16px;height:16px;accent-color:var(--g);cursor:pointer}
+.undo-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1e2f;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 16px;display:flex;align-items:center;gap:12px;z-index:200;font-size:13px;color:rgba(255,255,255,0.7);box-shadow:0 4px 20px rgba(0,0,0,0.5);animation:slideUp 0.2s ease-out}
+.undo-toast button{background:rgba(74,111,165,0.25);color:var(--b);border:none;border-radius:6px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer}
+.undo-toast button:hover{background:rgba(74,111,165,0.4)}
+.undo-toast .undo-dismiss{background:0;color:rgba(255,255,255,0.3);padding:2px 6px;font-size:14px;min-width:0}
+.undo-toast .undo-dismiss:hover{color:rgba(255,255,255,0.6);background:0}
+@keyframes slideUp{from{transform:translateX(-50%) translateY(20px);opacity:0}to{transform:translateX(-50%) translateY(0);opacity:1}}
 </style>
 </head>
 <body>
@@ -147,8 +156,10 @@ function authHeaders(extra = {}) {
 
 // Cache helpers for offline fallback (FEA-32)
 const CACHE_PREFIX="dc_";
-function cacheSet(key,data){try{sessionStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch(e){}}
-function cacheGet(key){try{const raw=sessionStorage.getItem(CACHE_PREFIX+key);return raw?JSON.parse(raw):null}catch(e){return null}}
+function cacheSet(key,data){try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch(e){
+  if(e.name==='QuotaExceededError'){const entries=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(CACHE_PREFIX)){try{entries.push([k,JSON.parse(localStorage.getItem(k)).ts||0])}catch{}}}entries.sort((a,b)=>a[1]-b[1]);const n=Math.max(1,Math.floor(entries.length*0.25));for(let i=0;i<n;i++)localStorage.removeItem(entries[i][0]);try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch{}}
+}}
+function cacheGet(key){try{const raw=localStorage.getItem(CACHE_PREFIX+key);return raw?JSON.parse(raw):null}catch(e){return null}}
 function showOfflineBanner(ts){
   const el=document.getElementById("offlineBanner");
   if(el){
@@ -520,6 +531,24 @@ function h(tag,attrs,children){
   return el;
 }
 
+// Global undo toast
+let _undoTimer=null;
+function showUndo(label,undoFn){
+  document.querySelector('.undo-toast')?.remove();
+  if(_undoTimer)clearTimeout(_undoTimer);
+  const toast=h("div",{class:"undo-toast"});
+  toast.append(h("span",{},label));
+  const btn=h("button",{onClick:async()=>{
+    btn.disabled=true;btn.textContent="Undoing...";
+    try{await undoFn();toast.remove()}
+    catch(e){btn.textContent="Failed";setTimeout(()=>toast.remove(),2000)}
+  }},"Undo");
+  const dismiss=h("button",{class:"undo-dismiss",onClick:()=>{if(_undoTimer)clearTimeout(_undoTimer);toast.remove()}},"\u2715");
+  toast.append(btn,dismiss);
+  document.body.append(toast);
+  _undoTimer=setTimeout(()=>toast.remove(),10000);
+}
+
 // Chart instances to destroy before recreating
 let charts={};
 function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=document.getElementById(id);if(!ctx)return;charts[id]=new Chart(ctx,cfg)}
@@ -745,8 +774,10 @@ const TABS=[["entry","+ new entry"],["income","income statement"],["balance","ba
 function renderTabs(){
   const bar=document.getElementById("tabBar");
   bar.innerHTML="";
+  const offline=!navigator.onLine;
   TABS.forEach(([id,label])=>{
-    const b=h("button",{class:"tab"+(state.tab===id?" on":""),onClick:()=>{state.tab=id;history.replaceState(null,null,"#"+id);renderTabs();renderContent()}},label);
+    const disabled=offline&&(id==="entry"||id==="export");
+    const b=h("button",{class:"tab"+(state.tab===id?" on":""),style:disabled?{opacity:"0.3",cursor:"default"}:{},onClick:()=>{state.tab=id;history.replaceState(null,null,"#"+id);renderTabs();renderContent()}},label);
     bar.append(b);
   });
   const so=h("button",{class:"tab",style:{color:"rgba(255,255,255,0.3)",borderColor:"transparent",fontSize:"11px"},onClick:()=>supabaseClient.auth.signOut()},"sign out");
@@ -758,6 +789,10 @@ function renderContent(){
   document.querySelectorAll(".batch-bar").forEach(b=>b.remove());
   const el=document.getElementById("content");
   el.innerHTML="";
+  if(!navigator.onLine&&(state.tab==="entry"||state.tab==="export")){
+    el.innerHTML=`<div class="cd" style="text-align:center;padding:48px 24px"><div style="font-size:32px;margin-bottom:12px">\uD83D\uDCE1</div><h3 style="margin-bottom:8px">Offline Mode</h3><p style="font-size:13px;color:rgba(255,255,255,0.5)">${state.tab==="entry"?"Adding new transactions":"Exporting data"} requires an internet connection.<br>Browse cached data in other tabs while offline.</p></div>`;
+    return;
+  }
   if(state.tab==="entry")renderEntry(el);
   else if(state.tab==="income"&&state.year==="all")renderCrossYear(el);
   else if(state.tab==="income")renderIS(el);
@@ -845,14 +880,18 @@ function renderEntry(el){
     try{
       const tagVal=f.tag.toLowerCase().trim();
       if(tagVal)await ensureTagExists(tagVal);
-      await sb("transactions",{method:"POST",body:JSON.stringify({date:f.date,service_start:f.ss,service_end:f.se,description:f.desc,category_id:f.cat,original_amount:orig,currency:f.cur,fx_rate:fx,amount_usd:Math.round(usd*100)/100,payment_type:f.pt,tag:tagVal,daily_cost:Math.round(usd/days*1e6)/1e6,service_days:days,credit:""})});
-      document.getElementById("okMsg").classList.remove("hidden");
-      setTimeout(()=>document.getElementById("okMsg")?.classList.add("hidden"),2500);
+      const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({date:f.date,service_start:f.ss,service_end:f.se,description:f.desc,category_id:f.cat,original_amount:orig,currency:f.cur,fx_rate:fx,amount_usd:Math.round(usd*100)/100,payment_type:f.pt,tag:tagVal,daily_cost:Math.round(usd/days*1e6)/1e6,service_days:days,credit:""})});
+      const newId=Array.isArray(created)?created[0]?.id:created?.id;
+      const savedDesc=f.desc;
       descInp.value="";amtInp.value="";tagInp.value="";fxInp.value="";
       f.desc="";f.amt="";f.tag="";f.fx="";f.seManual=false;
       previewEl.classList.add("hidden");
       state.txnCount++;
-      document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
+      document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
+      if(newId)showUndo("\u2713 Added: "+savedDesc,async()=>{
+        await sb(`transactions?id=eq.${newId}`,{method:"DELETE"});
+        state.txnCount--;document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
+      });
     }catch(e){alert("Error: "+e.message)}
     submitBtn.textContent="Add Transaction";
   }},"Add Transaction");
@@ -3088,6 +3127,11 @@ function openLedgerEditModal(txn,onSaved){
     const amt=Math.round(parseFloat(mAmt.value)*100)/100;
     const dc=Math.round(amt/sdays*1e6)/1e6;
     const tagVal=(mTag.value||"").toLowerCase().trim();
+    const prev={date:txn.date,description:txn.description,category_id:txn.category_id,
+      amount_usd:txn.amount_usd,original_amount:txn.original_amount,
+      service_start:txn.service_start,service_end:txn.service_end,
+      service_days:txn.service_days,daily_cost:txn.daily_cost,
+      payment_type:txn.payment_type,tag:txn.tag};
     try{
       if(tagVal)await ensureTagExists(tagVal);
       await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
@@ -3098,8 +3142,10 @@ function openLedgerEditModal(txn,onSaved){
         payment_type:mPt.value,tag:tagVal
       })});
       bg.remove();
-      const msg=document.getElementById("ledgerOkMsg");
-      if(msg){msg.textContent="Updated";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      showUndo("\u2713 Edited: "+txn.description,async()=>{
+        await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify(prev)});
+        onSaved();
+      });
       onSaved();
     }catch(e){alert("Save failed: "+e.message);mSave.textContent="Save";mSave.disabled=false}
   }},"Save");
@@ -3113,13 +3159,17 @@ function openLedgerEditModal(txn,onSaved){
     }
     if(delTimer)clearTimeout(delTimer);
     mDel.textContent="Deleting...";mDel.disabled=true;
+    const txnCopy={...txn};delete txnCopy.id;
     try{
       await sb(`transactions?id=eq.${txn.id}`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
       state.txnCount--;
       document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
       bg.remove();
-      const msg=document.getElementById("ledgerOkMsg");
-      if(msg){msg.textContent="Deleted";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      showUndo("\u2713 Deleted: "+txn.description,async()=>{
+        await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id:txn.id,...txnCopy})});
+        state.txnCount++;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        onSaved();
+      });
       onSaved();
     }catch(e){alert("Delete failed: "+e.message);mDel.textContent="Delete";mDel.disabled=false;mDel.dataset.confirm="0"}
   }},"Delete");
@@ -3421,9 +3471,10 @@ function openBatchEditModal(txns,onDone){
 
       const needsRecalc=bSs.value||bSe.value;
       const ids=txns.map(t=>t.id);
+      const patchKeys=Object.keys(patch).concat(needsRecalc?["service_start","service_end","service_days","daily_cost"]:[]);
+      const prevStates=txns.map(t=>{const p={id:t.id};patchKeys.forEach(k=>{if(t[k]!==undefined)p[k]=t[k]});return p});
 
       if(needsRecalc){
-        // Per-transaction recalc since each has different amount_usd
         for(const t of txns){
           const tPatch={...patch};
           const ss=bSs.value||t.service_start;
@@ -3440,8 +3491,10 @@ function openBatchEditModal(txns,onDone){
       }else{errEl.textContent="No changes specified.";saveBtn.textContent="Apply Changes";saveBtn.disabled=false;return}
 
       bg.remove();
-      const msg=document.getElementById("ledgerOkMsg");
-      if(msg){msg.textContent=`Updated ${txns.length} items`;msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      showUndo(`\u2713 Updated ${txns.length} items`,async()=>{
+        for(const ps of prevStates){const{id,...fields}=ps;await sb(`transactions?id=eq.${id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify(fields)})}
+        onDone();
+      });
       onDone();
     }catch(e){errEl.textContent="Error: "+e.message;saveBtn.textContent="Apply Changes";saveBtn.disabled=false}
   }},"Apply Changes");
@@ -3508,12 +3561,16 @@ async function renderLedger(el){
     bbDel.textContent="Deleting...";bbDel.disabled=true;
     try{
       const ids=[...selected];
+      const delTxns=currentTxns.filter(t=>ids.includes(t.id)).map(t=>({...t}));
       await sb(`transactions?id=in.(${ids.join(",")})`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
       state.txnCount-=ids.length;
       document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
       selected.clear();updateBatchBar();
-      const msg=document.getElementById("ledgerOkMsg");
-      if(msg){msg.textContent=`Deleted ${ids.length} items`;msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
+      showUndo(`\u2713 Deleted ${ids.length} items`,async()=>{
+        await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(delTxns)});
+        state.txnCount+=delTxns.length;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        loadPage();
+      });
       loadPage();
     }catch(e){alert("Batch delete failed: "+e.message);bbDel.textContent="\uD83D\uDDD1 Delete";bbDel.disabled=false;bbDel.dataset.confirm="0"}
   }},"\uD83D\uDDD1 Delete");
@@ -3841,6 +3898,9 @@ async function init(){
     this.addEventListener("animationend",()=>this.classList.remove("spinning"),{once:true});
     renderContent();
   });
+  // Online/offline reactivity (FEA-23)
+  window.addEventListener('online',()=>{document.getElementById("offlineBanner")?.classList.add("hidden");renderTabs();if(state.tab==="entry"||state.tab==="export")renderContent()});
+  window.addEventListener('offline',()=>{renderTabs();if(state.tab==="entry"||state.tab==="export")renderContent()});
   renderContent();
 }
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
@@ -3901,6 +3961,20 @@ async function checkAuthAndInit() {
     currentSession = session;
     if (event === 'SIGNED_OUT') {
       showLogin();
+    }
+  });
+}
+
+// Register Service Worker (FEA-23)
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').then(reg=>console.log('SW registered, scope:',reg.scope)).catch(err=>console.warn('SW registration failed:',err));
+  navigator.serviceWorker.addEventListener('message',event=>{
+    if(event.data?.type==='SW_UPDATE_AVAILABLE'){
+      if(document.getElementById('updateBanner'))return;
+      const banner=document.createElement('div');banner.id='updateBanner';
+      banner.style.cssText='background:rgba(129,178,154,0.15);color:var(--g);text-align:center;padding:8px 12px;font-size:12px;border-bottom:1px solid rgba(129,178,154,0.2);cursor:pointer;font-weight:600';
+      banner.innerHTML='New version available \u2014 <u>Refresh</u>';banner.onclick=()=>location.reload();
+      const hdr=document.querySelector('.hdr');if(hdr)hdr.before(banner);
     }
   });
 }
