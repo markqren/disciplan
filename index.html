@@ -94,6 +94,7 @@ select.inp{cursor:pointer;appearance:auto}
 .batch-bar .bb-btn:hover{border-color:rgba(255,255,255,0.2);color:#fff}
 .batch-bar .bb-btn.bb-edit{border-color:rgba(129,178,154,0.3);color:var(--g)}
 .batch-bar .bb-btn.bb-link{border-color:rgba(74,111,165,0.3);color:var(--b)}
+.batch-bar .bb-btn.bb-copy{border-color:rgba(242,204,143,0.3);color:#F2CC8F}
 .batch-bar .bb-btn.bb-del{border-color:rgba(224,122,95,0.3);color:var(--r)}
 .batch-bar .bb-btn.bb-cancel{color:rgba(255,255,255,0.4)}
 .ldg-chk{width:16px;height:16px;accent-color:var(--g);cursor:pointer}
@@ -2204,6 +2205,21 @@ async function renderIS(el){
     row2.append(stackCard);
     body.append(row2);
 
+    // Budget vs Actual chart (single-year only)
+    const bgt=state.year!=="all"?getBudgetTargets(state.year):null;
+    if(bgt&&totI>0){
+      const budgetCard=h("div",{class:"cd"});
+      const bCats=PARENT_CATS.filter(c=>(bgt[c]||0)>0);
+      const bActual=bCats.map(c=>{const v=mKeys.reduce((s,mk)=>s+(months[mk]["_p_"+c]??months[mk][c]??0),0);return parseFloat((v/totI*100).toFixed(1))});
+      const bTarget=bCats.map(c=>bgt[c]||0);
+      budgetCard.innerHTML=`<h3>Budget vs Actual</h3><div class="chrt" style="height:${Math.max(200,bCats.length*32)}px"><canvas id="budgetChart"></canvas></div>`;
+      body.append(budgetCard);
+      setTimeout(()=>makeChart("budgetChart",{type:"bar",data:{labels:bCats.map(c=>c[0].toUpperCase()+c.slice(1)),datasets:[
+        {label:"Actual %",data:bActual,backgroundColor:bCats.map((c,i)=>bActual[i]>bTarget[i]?"rgba(224,122,95,0.7)":(CC[c]||"#666")+"B3"),borderRadius:3,barPercentage:0.6},
+        {label:"Target %",data:bTarget,backgroundColor:"rgba(255,255,255,0.08)",borderColor:"rgba(255,255,255,0.25)",borderWidth:1,borderRadius:3,barPercentage:0.6}
+      ]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+": "+ctx.parsed.x.toFixed(1)+"%"}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>v+"%"},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"rgba(255,255,255,0.6)",font:{size:11}},grid:{display:false}}}}}),150);
+    }
+
     setTimeout(()=>{
       makeChart("pieChart",{type:"doughnut",data:{labels:catTotals.map(c=>c.name),datasets:[{data:catTotals.map(c=>c.val),backgroundColor:catTotals.map(c=>CC[c.name]||"#666"),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:"50%",plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.4)",font:{size:10},padding:8}}}}});
 
@@ -2216,9 +2232,12 @@ async function renderIS(el){
     const now=new Date();const isCurrentYear=state.year===now.getFullYear();
     const completedMonths=isCurrentYear?now.getMonth():12;
     const activeMonths=Math.max(1,Math.min(mData.filter(m=>m.totE>0||m.inc>0).length,completedMonths));
+    const hasBgt=bgt&&totI>0;
     let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table class="is-tbl" style="table-layout:fixed"><colgroup><col style="width:110px"><col style="width:70px"><col style="width:70px">`;
+    if(hasBgt)thtml+=`<col style="width:48px"><col style="width:48px">`;
     for(let i=0;i<12;i++)thtml+=`<col class="is-mo">`;
     thtml+=`</colgroup><thead><tr><th>Category</th><th class="r" style="font-weight:700">Total</th><th class="r" style="font-weight:700">Avg</th>`;
+    if(hasBgt)thtml+=`<th class="r hide-m" style="font-weight:600;color:rgba(255,255,255,0.35)">Tgt</th><th class="r hide-m" style="font-weight:600;color:rgba(255,255,255,0.35)">\u0394</th>`;
     ML.forEach(m=>thtml+=`<th class="r hide-m">${m}</th>`);
     thtml+=`</tr></thead><tbody>`;
 
@@ -2248,6 +2267,7 @@ async function renderIS(el){
       }
       thtml+=`<td class="r m" style="font-weight:${r.par?700:500};color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.6)"}">${fmtT(Math.round(r.t))}</td>`;
       thtml+=`<td class="r m" style="color:rgba(255,255,255,0.4)">${fmtT(Math.round(avg))}</td>`;
+      if(hasBgt){const tgt=bgt[r.id]??null;if(tgt!=null&&tgt>0){const actPct=totI>0?r.t/totI*100:0;const delta=tgt-actPct;const dClr=delta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.3);font-size:10px">${tgt.toFixed(1)}%</td><td class="r m hide-m" style="color:${dClr};font-size:10px;font-weight:600">${delta>=0?"+":""}${delta.toFixed(1)}%</td>`}else{thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`}}
       r.m.forEach((v,mi)=>thtml+=`<td class="r m hide-m is-mo-cell" data-mi="${mi}" style="cursor:${Math.abs(v)>0.5?"pointer":"default"};color:${v<-0.5?"var(--g)":v>0.5?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.15)"}">${Math.abs(v)>0.5?fmtT(Math.round(v)):""}</td>`);
       thtml+=`</tr>`;
     }
@@ -2256,24 +2276,28 @@ async function renderIS(el){
     thtml+=`<tr class="is-mo-row" data-cat="_expenses" data-is-parent="false" data-months='${JSON.stringify(mData.map(m=>Math.round(m.totE)))}' style="border-top:2px solid rgba(255,255,255,0.1)"><td style="font-weight:700;color:var(--r)">Total Expenses<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:var(--r);font-weight:700">${fmtT(Math.round(totE))}</td>`;
     thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(totE/activeMonths))}</td>`;
+    if(hasBgt){const eTgt=bgt._expenses||0;const eAct=totI>0?totE/totI*100:0;const eDelta=eTgt-eAct;const eClr=eDelta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.3);font-size:10px">${eTgt.toFixed(1)}%</td><td class="r m hide-m" style="color:${eClr};font-size:10px;font-weight:600">${eDelta>=0?"+":""}${eDelta.toFixed(1)}%</td>`}
     mData.forEach((m,mi)=>thtml+=`<td class="r m hide-m is-mo-cell" data-mi="${mi}" style="cursor:${m.totE>0.5?"pointer":"default"};color:var(--r);font-weight:600">${fmtT(Math.round(m.totE))}</td>`);
     thtml+=`</tr>`;
 
     thtml+=`<tr class="is-mo-row" data-cat="income" data-is-parent="false" data-months='${JSON.stringify(mData.map(m=>Math.round(m.inc)))}'><td style="font-weight:700;color:var(--b)">Income<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:var(--b);font-weight:700">${fmtT(Math.round(totI))}</td>`;
     thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(totI/activeMonths))}</td>`;
+    if(hasBgt)thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`;
     mData.forEach((m,mi)=>thtml+=`<td class="r m hide-m is-mo-cell" data-mi="${mi}" style="cursor:${m.inc>0.5?"pointer":"default"};color:var(--b);font-weight:600">${fmtT(Math.round(m.inc))}</td>`);
     thtml+=`</tr>`;
 
     thtml+=`<tr class="is-mo-row" data-months='${JSON.stringify(mData.map(m=>Math.round(m.net)))}' style="border-top:1px solid rgba(255,255,255,0.08)"><td style="font-weight:700;color:var(--g)">Net Savings<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:var(--g);font-weight:700">${fmtT(Math.round(totI-totE))}</td>`;
     thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round((totI-totE)/activeMonths))}</td>`;
+    if(hasBgt)thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`;
     mData.forEach(m=>thtml+=`<td class="r m hide-m" style="color:var(--g);font-weight:600">${fmtT(Math.round(m.net))}</td>`);
     thtml+=`</tr>`;
 
     thtml+=`<tr class="is-mo-row" data-months='${JSON.stringify(mData.map(m=>m.inc>0?parseFloat((m.net/m.inc*100).toFixed(1)):null))}' data-month-fmt="pct"><td style="font-weight:700;color:#F2CC8F">Savings Rate<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
     thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
+    if(hasBgt){const sTgt=bgt._savings||0;const sAct=totI>0?(totI-totE)/totI*100:0;const sDelta=sAct-sTgt;const sClr=sDelta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.3);font-size:10px">${sTgt.toFixed(1)}%</td><td class="r m hide-m" style="color:${sClr};font-size:10px;font-weight:600">${sDelta>=0?"+":""}${sDelta.toFixed(1)}%</td>`}
     mData.forEach(m=>thtml+=`<td class="r m hide-m" style="color:#F2CC8F;font-weight:600;text-align:right">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
     thtml+=`</tr>`;
 
@@ -3470,6 +3494,13 @@ async function renderLedger(el){
   const bbCount=h("span",{class:"bb-count"});
   const bbEdit=h("button",{class:"bb-btn bb-edit",onClick:()=>openBatchEditModal(currentTxns.filter(t=>selected.has(t.id)),()=>{selected.clear();updateBatchBar();loadPage()})},"\u270F Edit");
   const bbLink=h("button",{class:"bb-btn bb-link",onClick:()=>doBatchLink(currentTxns.filter(t=>selected.has(t.id)),()=>{selected.clear();updateBatchBar();loadPage()})},"\uD83D\uDD17 Link");
+  const bbCopy=h("button",{class:"bb-btn bb-copy",onClick:async()=>{
+    const pMap={groceries:"Food",restaurant:"Food",rent:"Home",furniture:"Home",clothes:"Personal",tech:"Personal"};
+    const rows=currentTxns.filter(t=>selected.has(t.id));
+    const lines=["Date\tService Start\tService End\tDescription\tCategory\tOriginal Amount\tCurrency\tAmount USD\tPayment Type\tCredit\tTags\tDaily Cost"];
+    for(const t of rows){const cat=pMap[t.category_id]||(t.category_id?t.category_id[0].toUpperCase()+t.category_id.slice(1):"");lines.push([t.date,t.service_start,t.service_end,'"'+t.description.replace(/"/g,'""')+'"',cat,t.original_amount,t.currency,t.amount_usd,t.payment_type,t.credit||"",t.tag||"",t.daily_cost].join("\t"))}
+    try{await navigator.clipboard.writeText(lines.join("\n"));bbCopy.textContent="Copied!";setTimeout(()=>{bbCopy.textContent="\uD83D\uDCCB Copy"},1500)}catch(e){alert("Copy failed: "+e.message)}
+  }},"\uD83D\uDCCB Copy");
   let bbDelTimer=null;
   const bbDel=h("button",{class:"bb-btn bb-del",onClick:async()=>{
     if(bbDel.dataset.confirm!=="1"){bbDel.dataset.confirm="1";bbDel.textContent=`Confirm Delete (${selected.size})`;bbDelTimer=setTimeout(()=>{bbDel.dataset.confirm="0";bbDel.textContent="\uD83D\uDDD1 Delete"},3000);return}
@@ -3487,7 +3518,7 @@ async function renderLedger(el){
     }catch(e){alert("Batch delete failed: "+e.message);bbDel.textContent="\uD83D\uDDD1 Delete";bbDel.disabled=false;bbDel.dataset.confirm="0"}
   }},"\uD83D\uDDD1 Delete");
   const bbCancel=h("button",{class:"bb-btn bb-cancel",onClick:()=>exitSelectMode()},"\u2715 Cancel");
-  batchBar.append(bbCount,bbEdit,bbLink,bbDel,bbCancel);
+  batchBar.append(bbCount,bbEdit,bbLink,bbCopy,bbDel,bbCancel);
   document.body.append(batchBar);
 
   function exitSelectMode(){selectMode=false;selected.clear();updateBatchBar();document.querySelectorAll(".ldg-chk").forEach(c=>c.closest("th,td").style.display="none");selBtn.textContent="Select"}
