@@ -1,6 +1,8 @@
 .DS_Store
 *.swp
 data/
+node_modules/
+references/
 
 # Local Netlify folder
 .netlify

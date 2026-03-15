@@ -1,6 +1,44 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 14, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 15, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+
+---
+
+## 🚀 Releases
+
+### v0.6.0 — Mar 15, 2026
+
+**Cashback tracking, PWA, drilldowns, and entertainment subcategories.**
+
+#### Features
+- **FEA-14: Cashback & Rewards Tab** — New tab with KPI cards (total redeemed, annual fees, net CC gain, active cards), per-card summary table, stacked bar chart by year, and recent redemptions list. 208 historical redemptions imported. Cashback button in ledger edit creates linked income transaction + cashback record with undo support.
+- **FEA-23: Offline Caching / PWA** — Service Worker caches app shell with stale-while-revalidate strategy. `localStorage`-based API data caching with LRU eviction. PWA manifest enables Add to Home Screen. Offline mode messaging for Entry/Export tabs. "New version available" banner on SW update.
+- **FEA-56: Ledger Copy-Paste** — Copy button in batch action bar exports selected rows as TSV for pasting into spreadsheets.
+- **FEA-28: Monthly IS Drilldown** — Click any month x category cell to see top transactions sorted by accrual contribution. Supports parent categories, subcategories, Total Expenses, and Income. Click-through to ledger edit modal.
+- **FEA-55: Bilt CSV Import** — Bilt credit card CSV support with dual format detection (new + legacy headerless). Bilt-specific AI categorization hints.
+- **FEA-53: Import Edit Modal Linking** — "Link to Transaction" search UI in CSV import edit modal. Pre-link candidates to existing transactions before commit.
+- **FEA-03: Entertainment Subcategories** — Added `accommodation` and `games` as subcategories under Entertainment. LLM-assisted migration reclassified 351 of 1,299 entertainment transactions (167 accommodation, 184 games) via Claude Haiku with grouped human review.
+
+#### Fixes
+- Mobile IS: hide month columns, add tap-to-expand with chevrons
+
+---
+
+### v0.5.0 — Mar 14, 2026
+
+**Import linking, AMEX import, payslip improvements, batch ledger ops.**
+
+#### Features
+- **FEA-53: Transaction Linking in Import** — Link imported candidates to existing transactions during CSV import review.
+- **FEA-48: AMEX Rose Gold CSV Import** — AMEX bank profile with header auto-detection, `AMEX_CAT_MAP` category mapping, payment/credit row detection.
+- **FEA-50: 401K Company Match in Payslip** — Parses employer match lines, generates separate "401K Match" income transaction on Vanguard.
+- **FEA-49: Linked Group Visual Separation** — Horizontal dividers between different linked groups in ledger. Payslip auto-linking via `transaction_group_id`.
+- **FEA-47: Ledger Batch Selection & Operations** — Multi-select checkboxes with floating action bar. Batch Edit, Link, Delete with two-click confirmation.
+
+#### Fixes
+- **BUG-12:** Credits & Transfers total no longer offsets real liabilities in Balance Sheet.
+- **BUG-13:** Payslip duplicate detection now compares service dates, preventing false positives.
+- Hide ledger checkboxes behind Select button toggle.
 
 ---
 
@@ -8,9 +46,7 @@
 
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
-| FEA-03 | **Travel / Accommodation Category** | Feature | **High** | Hotels are currently lumped under Entertainment, which is misleading. Options: (a) add "accommodation" as a new subcategory under Entertainment, (b) create a top-level "Travel" category with subcategories (flights, hotels, activities). Either way, retroactively re-tag historical hotel transactions. Needs: update PARENT_CATS, SUB_MAP, CC color map, category dropdown, and batch-update existing transactions in Supabase. |
 | FEA-07 | **Handle "Investments" Category** | Feature | **Medium** | Some transactions are tagged as category "Investments" for unrealized gains. These need special treatment when the Investments tab is built—should not be double-counted as both income and portfolio value. Route into portfolio view instead of income statement. |
-| FEA-28 | **Monthly IS Drilldown to Top Ledger Items** | Feature | **High** | Clicking a specific month×category cell in the monthly Income Statement detail table opens a modal/overlay showing the largest individual ledger items (transactions) that contributed to that month's accrual total for that category. Should show the top 10-15 items sorted by accrual contribution (daily_cost × overlap days within that month), with description, original amount, service period, payment type, and accrual amount for that month. This gives quick visibility into what's driving a category spike without needing to switch to the Ledger tab and manually filter. The query should use the same accrual logic as the IS (daily_cost × days overlapping with the selected month). Clicking a row could optionally jump to that transaction in the Ledger tab with it pre-filtered. |
 | FEA-34 | **Multi-Currency: CAD as Source of Truth for TD Accounts** | Feature | **High** | TD-prefixed accounts (TD Chequing, TD Savings, TD TFSA, TD Visa, TD Debit) should treat CAD as the authoritative amount, with USD as a floating conversion — not the current approach where `amount_usd` was computed once at import using a fixed 0.73 rate. **Phased approach:** **Phase 1 — Configurable FX rate + Balance Sheet:** Add a `cad_usd_rate` setting (Supabase settings table or app constant, default 0.73). Update `get_ledger_balances()` RPC to return both native currency balance and USD-converted balance for TD accounts (native = CAD, converted at current rate). Balance Sheet displays USD but hover tooltip shows the real CAD balance. **Phase 2 — IS / Tags / Charts:** Accruals for TD transactions should use `original_amount` (CAD) converted at the current rate instead of stale `amount_usd`. `daily_cost` for CAD transactions recalculated dynamically or conversion applied at display time. **Phase 3 — Live FX:** Pull from a free FX API (e.g. exchangerate.host) instead of manual rate. **Database notes:** The existing `original_amount` and `currency` columns already store CAD values — the issue is that `amount_usd` was baked once and never updates. The one-time ledger adjustment for TD Chequing should be stored in CAD so it stays correct when the FX rate changes. |
 | FEA-29B | **Splitwise API Sync** | Feature | **Medium** | Splitwise has a free Self-Serve API (dev.splitwise.com) that supports OAuth2 and provides `getExpenses()` with date filters, plus `getFriends()` and `getGroups()`. Build a sync feature that: (1) authenticates with Splitwise via OAuth2 (register app at secure.splitwise.com/oauth_clients), (2) fetches expenses where the user owes or is owed money, (3) maps Splitwise expenses to Disciplan transactions — expenses you paid get the actual category + a Splitwise reimbursement credit for others' shares, expenses others paid show as your owed share under the "Splitwise" payment type, (4) maintains a "Splitwise" account in the balance sheet that tracks your net balance (what you're owed minus what you owe), which should stay in sync with your actual Splitwise balance. REST API called directly with fetch(). Rate limits are conservative so sync should be periodic (manual trigger or daily), not real-time. Supersedes FEA-16. **Depends on:** FEA-29A (done), FEA-38 (Working Capital reclassification). |
 
@@ -22,22 +58,20 @@
 |----|------|------|----------|---------|
 | FEA-09 | **Plaid Integration** | Feature | High | Auto-sync bank account balances via Plaid API. Needs backend endpoint (Supabase Edge Function) for token management. Auth prerequisite done (FEA-10). |
 | FEA-11 | **AI Daily Insights Agent** | Feature | Low | Claude API-powered agent/chatbot that surfaces insights from transaction data. Runs daily (push notification or email digest) and on-demand when prompted. Examples: spending pattern analysis, anomaly detection ("you spent 3x on restaurants this month"), trend summaries, tag comparisons ("Japan was 20% cheaper than szója boys per day"). Could live as a chat panel in the app or a standalone bot. |
-| ~~FEA-12~~ | ~~**Budgeting / Targets**~~ | ~~Feature~~ | ~~Medium~~ | ~~Moved to Completed~~ |
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
-| ~~FEA-14~~ | ~~**Cashback tracking**~~ | ~~Feature~~ | ~~Low~~ | ~~Moved to Completed~~ |
 | FEA-37 | **Rakuten Cashback Tracking via Email Import** | Feature | **Medium** | Track Rakuten cashback as a Working Capital float. Rakuten account already exists (`account_type = 'working_capital'`, created in FEA-38). Cashback accrues per-purchase but pays out quarterly ("Big Fat Check"). **Email Ingestion:** Forward Rakuten cashback-earned emails to the existing Postmark inbound address (FEA-39 pipeline). Add a Rakuten parser to the Edge Function that extracts: merchant name, cashback amount, original purchase amount, date. Creates a `pending_import` with `payment_type = 'Rakuten'`, `category = 'financial'`, `description = 'Rakuten - [Merchant]'`, `amount_usd = -cashback` (negative = credit, Rakuten owes Mark). **Auto-Linking to Original Purchase:** On import, attempt to match the cashback transaction to the original purchase using: merchant fuzzy match + date proximity (0–90 days) + amount plausibility (cashback < purchase). Uses `related_transaction_id` (already exists from FEA-41) to link bidirectionally. If no confident match is found (score below threshold), show a "Link to purchase" search UI in the review step — user searches the ledger by description/date/amount and selects the matching transaction. **Quarterly Payout Settlement:** When the Big Fat Check arrives, create a settlement pair: "Rakuten Payout" (positive on Rakuten, zeroing balance) + "Rakuten Payout Deposited" (negative on Chase Chequing, cash received). Same bill-paid pattern as credit cards. **Balance Sheet:** Rakuten line in Working Capital shows pending cashback owed at any time. **Retroactive Migration:** Move existing Rakuten transactions from `payment_type = 'Chase Chequing'` (e.g. "Rakuten - Chewy" = -$16.50) to `payment_type = 'Rakuten'`. Create settlement pairs for historical quarterly payouts so the balance nets correctly. **Dependencies:** FEA-38 (done — Rakuten account + Working Capital section), FEA-39/40 (done — email import pipeline), FEA-41 (done — `related_transaction_id` linking). |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
-| ~~FEA-23~~ | ~~**Offline Caching / PWA**~~ | ~~Feature~~ | ~~Medium~~ | ~~Moved to Completed~~ |
-| ~~FEA-54~~ | ~~**Undo Button**~~ | ~~Feature~~ | ~~Medium~~ | ~~Moved to Completed~~ |
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
 
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (71 items)</summary>
+<summary><strong>✅ Completed</strong> (73 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-03 | **Entertainment Subcategories (Accommodation, Games)** — Added `accommodation` and `games` as subcategories under Entertainment, following existing parent/child pattern. Updated SUB_MAP, CC color map (#D4726A, #C4625A), CATS_LIST, BUDGET_TARGETS, pMap (export), AI categorization prompt, AMEX_CAT_MAP (Travel-Lodging → accommodation). Created category rows in Supabase. LLM-assisted migration reclassified 351 of 1,299 entertainment transactions (167 accommodation, 184 games) via Claude Haiku batch classification with grouped human review. | Feature → Done | Mar 15 |
+| FEA-28 | **Monthly IS Drilldown to Top Ledger Items** — Clicking month×category cells in the IS detail table opens a modal showing top transactions sorted by accrual contribution (daily_cost × overlap days). Shows KPI cards, transaction table with click-through to ledger edit. Works on desktop and mobile. | Feature → Done | Mar 2025 |
 | FEA-14 | **Cashback & Rewards Tab** — New "Cashback" tab with KPI cards (total redeemed, annual fees, net CC gain, active cards), per-card summary table with color dots, stacked bar chart by year, and recent redemptions table. 208 historical redemptions imported from CSV. Cashback button in ledger edit modal creates dual-write: negative income transaction (linked) + cashback_redemptions record. Undo support for both. | Feature → Done | Mar 14 |
 | FEA-54 | **Global Undo Button** — Toast/snackbar with "Undo" button appears after every mutation (single/batch delete, single/batch edit, new entry, CSV/email/payslip import commits). Auto-dismisses after 10s. Only one undo at a time (latest replaces previous). Deletes re-POST the original rows with preserved IDs. Edits PATCH back previous field values. Import undos DELETE by `import_batch`. Slide-up animation, dismiss button, "Undoing..." loading state. | Feature → Done | Mar 14 |
 | FEA-23 | **Offline Caching / PWA** — Service Worker (`sw.js`) caches app shell (index.html, Chart.js, Supabase JS, PDF.js, Google Fonts) with stale-while-revalidate for HTML and cache-first for versioned CDN assets. Upgraded `sessionStorage` → `localStorage` for persistent API data caching with LRU eviction on quota exceeded. PWA manifest (`manifest.json`) with icons enables Add to Home Screen / install. Entry and Export tabs show "Offline Mode" message when disconnected; other tabs serve cached data. Online/offline events reactively update UI. "New version available — Refresh" banner on SW update detection. | Feature → Done | Mar 14 |
