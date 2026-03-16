@@ -92,10 +92,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (84 items)</summary>
+<summary><strong>✅ Completed</strong> (85 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-70 | **Balance Sheet KPI Reorder** — Reordered summary cards: Assets → Liabilities → Credits & Transfers → Net Worth (previously Net Worth was before Credits). | UI → Done | Mar 16 |
 | FEA-66 | **Import Link to Staged Candidates** — CSV import "Link to Transaction" search now includes staged candidates from the same batch. Split results with "Staged" badge. Staged-to-staged links resolved on commit via `linkToGroup()` with dedup. | Feature → Done | Mar 16 |
 | FEA-65 | **Tag Out-of-Window Flags** — Tag detail transaction rows flagged when service period falls outside tag window. Red dashed outline + tint for zero overlap (possible date error, previously hidden), orange dashed outline for partial overlap. Hover tooltips show service dates. | Feature → Done | Mar 16 |
 | FEA-64 | **Editable Tag Dates** — Click date range under tag card or in tag detail modal to inline-edit start/end dates. PATCHes `tags` table and re-renders with recalculated accrual totals. Escape to cancel, validates start ≤ end. | Feature → Done | Mar 16 |
