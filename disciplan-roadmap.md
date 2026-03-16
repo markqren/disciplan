@@ -1,10 +1,30 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 15, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 16, 2026 (2) | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
+
+### v0.7.0 — _Not yet deployed_
+
+**Portfolio grouping, import improvements, and reimbursement enhancements.**
+
+#### Features
+- **FEA-57: Manual Cashback Redemption Form** — "+ Add" button on Recent Redemptions section in Cashback tab. Inline collapsible form creates standalone `cashback_redemptions` records (no linked transaction). Fields: date, item, card (from CB_COLORS), type (Dollar Value/Points), dollar value, points redeemed + rate. Points mode auto-computes dollar value. Undo toast support.
+- **FEA-58: Ledger Tag Filter** — Tag dropdown in ledger filter bar (between Payment Type and Date Range). Populated from `tags` table. Filters via `&tag=eq.<name>` Supabase query. Resets with Clear button.
+- **FEA-59: Portfolio Institution Grouping** — Holdings section groups accounts by institution. Multi-account institutions (Charles Schwab, eTrade) render as expandable parent rows with aggregated Cost/Market/Gain/Return/Ann. totals and blue left border accent. Three-level drill-down: Institution → Account → Symbol/Lots. Single-account institutions remain flat.
+- **FEA-60: Editable Target Allocation** — Click any target percentage in the Asset Allocation legend to inline-edit. Number input replaces the label; Enter/blur commits, Escape cancels. Red warning if targets don't sum to 100%. Subtitle updates dynamically. In-memory only (resets on reload).
+- **FEA-61: Monthly Accrual Defaults for Imports** — Categories with "month" accrual type (rent, utilities) now default `service_start` to the 1st of the month and `service_end` to end of month during CSV/email import. All edit modals and category-change handlers updated. AI prompt expanded to append month/year to subscriptions, utilities, and gym memberships (e.g. "Trainability Gym (Jan 2026)").
+- **FEA-62: CC Bill Payment Auto-Linking** — CC payment Side A ("Bill Paid: Chase Sapphire") and Side B ("Chase Sapphire Bill Payment") transactions created during CSV import are now automatically linked via `transaction_group_id`. Uses existing `linkToGroup()` after batch insert.
+- **FEA-63: Reimbursement Form Improvements** — Person dropdown now only shows recently used reimbursement recipients (ordered by most recent), not Transfer credit names. Added "Manual" split option for entering any dollar amount directly, uncapped (can exceed original transaction amount).
+- **FEA-64: Editable Tag Dates** — Click the date range under any tag card title to inline-edit start/end dates with date pickers. Changes PATCH the `tags` table in Supabase and re-render the tag card with recalculated accrual totals. Same editing available in the tag detail modal. Escape to cancel, validation ensures start ≤ end.
+- **FEA-65: Tag Out-of-Window Flags** — Tag detail modal transaction rows are visually flagged when their service period falls outside the tag's date window. Two levels: red dashed outline + red tint for completely outside (zero overlap, $0 accrual — possible date error), orange dashed outline for partial overlap. Hover tooltip shows actual service dates. Zero-overlap transactions now included in the list instead of being silently hidden.
+
+#### Fixes
+- **BUG-14:** IS category column truncation — Widened fixed-layout category column from 110px to 140px so full names (e.g. "Entertainment") display without clipping.
+
+---
 
 ### v0.6.0 — Mar 15, 2026
 
@@ -66,10 +86,20 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (73 items)</summary>
+<summary><strong>✅ Completed</strong> (83 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-65 | **Tag Out-of-Window Flags** — Tag detail transaction rows flagged when service period falls outside tag window. Red dashed outline + tint for zero overlap (possible date error, previously hidden), orange dashed outline for partial overlap. Hover tooltips show service dates. | Feature → Done | Mar 16 |
+| FEA-64 | **Editable Tag Dates** — Click date range under tag card or in tag detail modal to inline-edit start/end dates. PATCHes `tags` table and re-renders with recalculated accrual totals. Escape to cancel, validates start ≤ end. | Feature → Done | Mar 16 |
+| BUG-14 | **IS Category Column Truncation** — Widened fixed-layout category column from 110px to 140px so full names display without clipping. | Bug → Done | Mar 16 |
+| FEA-63 | **Reimbursement Form Improvements** — Person dropdown shows only recent reimbursement recipients (MRU order), not Transfer credits. Added "Manual" split option for entering any dollar amount directly, uncapped. | Feature → Done | Mar 16 |
+| FEA-62 | **CC Bill Payment Auto-Linking** — CSV import auto-links CC payment Side A/B pairs via `transaction_group_id` using `linkToGroup()` after batch insert. | Feature → Done | Mar 16 |
+| FEA-61 | **Monthly Accrual Defaults for Imports** — "Month" accrual categories default service_start to 1st of month, service_end to end of month. AI prompt appends month/year to subscriptions, utilities, gym memberships. | Feature → Done | Mar 16 |
+| FEA-60 | **Editable Target Allocation** — Click target percentages in Portfolio Asset Allocation legend to inline-edit. Number input with Enter/blur commit, Escape cancel. Red warning if sum ≠ 100%. Subtitle updates dynamically. In-memory only. | Feature → Done | Mar 15 |
+| FEA-59 | **Portfolio Institution Grouping** — Holdings groups accounts by institution. Multi-account institutions (Charles Schwab, eTrade) render as expandable parent rows with aggregated totals and blue left border. Three-level expand: Institution → Account → Symbol/Lots. Single-account institutions stay flat. | Feature → Done | Mar 15 |
+| FEA-58 | **Ledger Tag Filter** — Tag dropdown in ledger filter bar between Payment Type and Date Range. Populated from `tags` table, filters via Supabase `tag=eq.` query. Included in Clear reset. | Feature → Done | Mar 15 |
+| FEA-57 | **Manual Cashback Redemption Form** — "+ Add" button on Recent Redemptions in Cashback tab. Inline form creates standalone `cashback_redemptions` records with date, item, card, type (Dollar Value/Points), amount, and optional points+rate fields. Undo toast support. | Feature → Done | Mar 15 |
 | FEA-03 | **Entertainment Subcategories (Accommodation, Games)** — Added `accommodation` and `games` as subcategories under Entertainment, following existing parent/child pattern. Updated SUB_MAP, CC color map (#D4726A, #C4625A), CATS_LIST, BUDGET_TARGETS, pMap (export), AI categorization prompt, AMEX_CAT_MAP (Travel-Lodging → accommodation). Created category rows in Supabase. LLM-assisted migration reclassified 351 of 1,299 entertainment transactions (167 accommodation, 184 games) via Claude Haiku batch classification with grouped human review. | Feature → Done | Mar 15 |
 | FEA-28 | **Monthly IS Drilldown to Top Ledger Items** — Clicking month×category cells in the IS detail table opens a modal showing top transactions sorted by accrual contribution (daily_cost × overlap days). Shows KPI cards, transaction table with click-through to ledger edit. Works on desktop and mobile. | Feature → Done | Mar 2025 |
 | FEA-14 | **Cashback & Rewards Tab** — New "Cashback" tab with KPI cards (total redeemed, annual fees, net CC gain, active cards), per-card summary table with color dots, stacked bar chart by year, and recent redemptions table. 208 historical redemptions imported from CSV. Cashback button in ledger edit modal creates dual-write: negative income transaction (linked) + cashback_redemptions record. Undo support for both. | Feature → Done | Mar 14 |
