@@ -2527,8 +2527,8 @@ async function renderBS(el){
     const stats=h("div",{class:"g4"});
     stats.append(statCard("🏦","total assets",fmtN(totA),"var(--b)"));
     stats.append(statCard("💳","total liabilities",fmtN(totL),"var(--r)"));
-    stats.append(statCard("💎","net worth",fmtN(nw),"var(--g)"));
     if(Math.abs(creditTotal)>=1)stats.append(statCard("🤝","credits & transfers",fmtN(creditTotal),"#9B59B6"));
+    stats.append(statCard("💎","net worth",fmtN(nw),"var(--g)"));
     body.append(stats);
 
     // Snapshot bar (for NW over time chart + manual snapshots)
