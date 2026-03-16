@@ -1223,7 +1223,7 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}},fmtD(c.date)));
 
     const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}});
-    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c.description||c._rawDescription)+(c._linkToTransactionId?" \uD83D\uDD17":"");
+    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descMain.textContent=descText;
     if(c._isCCPayment){const pairHint=h("span",{style:{color:"rgba(255,255,255,0.3)",fontSize:"11px"}}," \u2192 Chase Chequing");descMain.append(pairHint)}
@@ -1341,21 +1341,22 @@ function openImportEditModal(candidates,idx,reviewContainer){
   const linkBody=h("div");
   function renderImportLink(){
     linkBody.innerHTML="";
-    if(c._linkToTransactionId){
+    const hasLink=c._linkToTransactionId||c._linkToStagedIdx!=null;
+    if(hasLink){
       const info=c._linkDisplay||{};
-      const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:"rgba(74,111,165,0.12)",borderRadius:"4px",marginTop:"6px"}});
+      const isStaged=c._linkToStagedIdx!=null;
+      const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",background:isStaged?"rgba(242,204,143,0.12)":"rgba(74,111,165,0.12)",borderRadius:"4px",marginTop:"6px"}});
       const left=h("div");
-      left.innerHTML=`<div style="color:rgba(255,255,255,0.7)">${info.description||"Transaction #"+c._linkToTransactionId}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${info.date?fmtD(info.date):""} \u00b7 ${info.category_id||""} \u00b7 ${info.payment_type||""}</div>`;
+      left.innerHTML=`<div style="color:rgba(255,255,255,0.7)">${isStaged?`<span style="font-size:9px;background:rgba(242,204,143,0.25);color:#F2CC8F;padding:1px 5px;border-radius:3px;margin-right:4px">Staged</span>`:""} ${info.description||"Transaction #"+(c._linkToTransactionId||"staged")}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${info.date?fmtD(info.date):""} \u00b7 ${info.category_id||""} \u00b7 ${info.payment_type||""}</div>`;
       row.append(left);
       const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
       if(info.amount_usd!=null)right.append(h("span",{style:{fontFamily:"var(--mono)",color:info.amount_usd<0?"var(--g)":"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(info.amount_usd)));
       right.append(h("button",{class:"pg-btn",style:{fontSize:"9px",color:"rgba(224,122,95,0.7)",padding:"2px 6px"},onClick:()=>{
-        delete c._linkToTransactionId;delete c._linkToGroupId;delete c._linkDisplay;
+        delete c._linkToTransactionId;delete c._linkToGroupId;delete c._linkDisplay;delete c._linkToStagedIdx;
         renderImportLink();
       }},"Unlink"));
       row.append(right);
       linkBody.append(row);
-      // Allow linking another or changing
       const changeBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)",marginTop:"6px"},onClick:()=>{changeBtn.style.display="none";buildImportLinkSearch(linkBody)}},"\u2026 Change Link");
       linkBody.append(changeBtn);
     }else{
@@ -1369,24 +1370,45 @@ function openImportEditModal(candidates,idx,reviewContainer){
     const lsInput=h("input",{class:"inp",type:"text",placeholder:"Search description...",style:{flex:"1",fontSize:"11px",padding:"5px 8px"}});
     const lsBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"5px 10px"}},"Search");
     lsRow.append(lsInput,lsBtn);lsWrap.append(lsRow);
-    const lsResults=h("div",{style:{maxHeight:"200px",overflowY:"auto"}});lsWrap.append(lsResults);
+    const lsResults=h("div",{style:{maxHeight:"250px",overflowY:"auto"}});lsWrap.append(lsResults);
     async function doSearch(){
       const q=lsInput.value.trim();if(!q){lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>Type a description to search</div>";return}
       lsBtn.textContent="...";lsBtn.disabled=true;
       try{
-        const rows=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&order=date.desc&limit=20&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id`);
+        // Search staged candidates first
+        const ql=q.toLowerCase();
+        const staged=candidates.map((sc,si)=>({sc,si})).filter(({sc,si})=>si!==idx&&sc._status!=="skipped"&&sc._status!=="committed"&&(sc.description||sc._rawDescription||"").toLowerCase().includes(ql)).slice(0,10);
         lsResults.innerHTML="";
-        if(!rows.length){lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>No transactions found</div>";return}
-        rows.forEach(r=>{
-          const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
-            c._linkToTransactionId=r.id;c._linkToGroupId=r.transaction_group_id||null;
-            c._linkDisplay={description:r.description,date:r.date,amount_usd:r.amount_usd,category_id:r.category_id,payment_type:r.payment_type};
-            lsWrap.remove();renderImportLink();
-          }});
-          const inGroup=!!r.transaction_group_id;
-          row.innerHTML=`<div><div style="color:rgba(255,255,255,0.7)">${r.description}${inGroup?" <span style='font-size:9px;color:rgba(255,255,255,0.3)'>(in group)</span>":""}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(r.date)} \u00b7 ${r.category_id} \u00b7 ${r.payment_type||""}</div></div><div style="font-family:var(--mono);color:rgba(255,255,255,0.6);white-space:nowrap;margin-left:8px">${fmtF(r.amount_usd)}</div>`;
-          lsResults.append(row);
-        });
+        if(staged.length){
+          lsResults.append(h("div",{style:{fontSize:"9px",color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:"0.05em",padding:"4px 8px",borderBottom:"1px solid rgba(255,255,255,0.06)"}},"Staged in this import"));
+          staged.forEach(({sc,si})=>{
+            const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
+              delete c._linkToTransactionId;delete c._linkToGroupId;
+              c._linkToStagedIdx=si;
+              c._linkDisplay={description:sc.description||sc._rawDescription,date:sc.date,amount_usd:sc.amount_usd,category_id:sc.category_id,payment_type:sc.payment_type};
+              lsWrap.remove();renderImportLink();
+            }});
+            row.innerHTML=`<div><div style="color:rgba(255,255,255,0.7)"><span style="font-size:9px;background:rgba(242,204,143,0.25);color:#F2CC8F;padding:1px 5px;border-radius:3px;margin-right:4px">Staged</span>${sc.description||sc._rawDescription}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(sc.date)} \u00b7 ${sc.category_id||""} \u00b7 ${sc.payment_type||""}</div></div><div style="font-family:var(--mono);color:rgba(255,255,255,0.6);white-space:nowrap;margin-left:8px">${fmtF(sc.amount_usd)}</div>`;
+            lsResults.append(row);
+          });
+        }
+        // Then search DB
+        const rows=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&order=date.desc&limit=20&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id`);
+        if(rows.length){
+          if(staged.length)lsResults.append(h("div",{style:{fontSize:"9px",color:"rgba(255,255,255,0.3)",textTransform:"uppercase",letterSpacing:"0.05em",padding:"4px 8px",borderBottom:"1px solid rgba(255,255,255,0.06)",marginTop:"4px"}},"Existing transactions"));
+          rows.forEach(r=>{
+            const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
+              delete c._linkToStagedIdx;
+              c._linkToTransactionId=r.id;c._linkToGroupId=r.transaction_group_id||null;
+              c._linkDisplay={description:r.description,date:r.date,amount_usd:r.amount_usd,category_id:r.category_id,payment_type:r.payment_type};
+              lsWrap.remove();renderImportLink();
+            }});
+            const inGroup=!!r.transaction_group_id;
+            row.innerHTML=`<div><div style="color:rgba(255,255,255,0.7)">${r.description}${inGroup?" <span style='font-size:9px;color:rgba(255,255,255,0.3)'>(in group)</span>":""}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(r.date)} \u00b7 ${r.category_id} \u00b7 ${r.payment_type||""}</div></div><div style="font-family:var(--mono);color:rgba(255,255,255,0.6);white-space:nowrap;margin-left:8px">${fmtF(r.amount_usd)}</div>`;
+            lsResults.append(row);
+          });
+        }
+        if(!staged.length&&!rows.length)lsResults.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>No transactions found</div>";
       }catch(e){lsResults.innerHTML=`<div style='color:var(--r);padding:8px'>Error: ${e.message}</div>`}
       finally{lsBtn.textContent="Search";lsBtn.disabled=false}
     }
@@ -1482,7 +1504,7 @@ async function commitImport(candidates){
     const sideB=inserted[pair.sideBIdx];
     if(sideA?.id&&sideB?.id)await linkToGroup(sideA,sideB);
   }
-  // Apply pre-set links from import edit modal
+  // Apply pre-set links from import edit modal (DB links)
   for(let i=0;i<valid.length;i++){
     const c=valid[i];
     if(!c._linkToTransactionId)continue;
@@ -1492,6 +1514,20 @@ async function commitImport(candidates){
     if(!c._linkToGroupId){
       await sb(`transactions?id=eq.${c._linkToTransactionId}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
     }
+  }
+  // Apply staged-to-staged links
+  const stagedLinked=new Set();
+  for(let i=0;i<valid.length;i++){
+    const c=valid[i];
+    if(c._linkToStagedIdx==null)continue;
+    const linkedCand=candidates[c._linkToStagedIdx];
+    const linkedIdx=valid.indexOf(linkedCand);
+    if(linkedIdx===-1)continue;// linked candidate was skipped
+    const pairKey=[Math.min(i,linkedIdx),Math.max(i,linkedIdx)].join(",");
+    if(stagedLinked.has(pairKey))continue;// avoid double-linking A→B and B→A
+    stagedLinked.add(pairKey);
+    const insA=inserted[i],insB=inserted[linkedIdx];
+    if(insA?.id&&insB?.id)await linkToGroup(insA,insB);
   }
   valid.forEach(c=>c._status="committed");
   return{

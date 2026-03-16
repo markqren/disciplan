@@ -1,14 +1,15 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 16, 2026 (2) | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 16, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
 
-### v0.7.0 — _Not yet deployed_
+### v0.7.0 — Mar 16, 2026
+<sub>Deployed 2026-03-16 19:47 UTC</sub>
 
-**Portfolio grouping, import improvements, and reimbursement enhancements.**
+**Portfolio grouping, tags editing, import improvements, and reimbursement enhancements.**
 
 #### Features
 - **FEA-57: Manual Cashback Redemption Form** — "+ Add" button on Recent Redemptions section in Cashback tab. Inline collapsible form creates standalone `cashback_redemptions` records (no linked transaction). Fields: date, item, card (from CB_COLORS), type (Dollar Value/Points), dollar value, points redeemed + rate. Points mode auto-computes dollar value. Undo toast support.
@@ -20,6 +21,7 @@
 - **FEA-63: Reimbursement Form Improvements** — Person dropdown now only shows recently used reimbursement recipients (ordered by most recent), not Transfer credit names. Added "Manual" split option for entering any dollar amount directly, uncapped (can exceed original transaction amount).
 - **FEA-64: Editable Tag Dates** — Click the date range under any tag card title to inline-edit start/end dates with date pickers. Changes PATCH the `tags` table in Supabase and re-render the tag card with recalculated accrual totals. Same editing available in the tag detail modal. Escape to cancel, validation ensures start ≤ end.
 - **FEA-65: Tag Out-of-Window Flags** — Tag detail modal transaction rows are visually flagged when their service period falls outside the tag's date window. Two levels: red dashed outline + red tint for completely outside (zero overlap, $0 accrual — possible date error), orange dashed outline for partial overlap. Hover tooltip shows actual service dates. Zero-overlap transactions now included in the list instead of being silently hidden.
+- **FEA-66: Import Link to Staged Candidates** — CSV import "Link to Transaction" search now also shows staged (unsaved) candidates from the same import batch. Results split into "Staged in this import" and "Existing transactions" sections. Staged results display a yellow "Staged" badge. On commit, staged-to-staged links are resolved using `linkToGroup()` with deduplication to prevent double-linking.
 
 #### Fixes
 - **BUG-14:** IS category column truncation — Widened fixed-layout category column from 110px to 140px so full names (e.g. "Entertainment") display without clipping.
@@ -27,6 +29,7 @@
 ---
 
 ### v0.6.0 — Mar 15, 2026
+<sub>Deployed 2026-03-15</sub>
 
 **Cashback tracking, PWA, drilldowns, and entertainment subcategories.**
 
@@ -81,15 +84,17 @@
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
 | FEA-37 | **Rakuten Cashback Tracking via Email Import** | Feature | **Medium** | Track Rakuten cashback as a Working Capital float. Rakuten account already exists (`account_type = 'working_capital'`, created in FEA-38). Cashback accrues per-purchase but pays out quarterly ("Big Fat Check"). **Email Ingestion:** Forward Rakuten cashback-earned emails to the existing Postmark inbound address (FEA-39 pipeline). Add a Rakuten parser to the Edge Function that extracts: merchant name, cashback amount, original purchase amount, date. Creates a `pending_import` with `payment_type = 'Rakuten'`, `category = 'financial'`, `description = 'Rakuten - [Merchant]'`, `amount_usd = -cashback` (negative = credit, Rakuten owes Mark). **Auto-Linking to Original Purchase:** On import, attempt to match the cashback transaction to the original purchase using: merchant fuzzy match + date proximity (0–90 days) + amount plausibility (cashback < purchase). Uses `related_transaction_id` (already exists from FEA-41) to link bidirectionally. If no confident match is found (score below threshold), show a "Link to purchase" search UI in the review step — user searches the ledger by description/date/amount and selects the matching transaction. **Quarterly Payout Settlement:** When the Big Fat Check arrives, create a settlement pair: "Rakuten Payout" (positive on Rakuten, zeroing balance) + "Rakuten Payout Deposited" (negative on Chase Chequing, cash received). Same bill-paid pattern as credit cards. **Balance Sheet:** Rakuten line in Working Capital shows pending cashback owed at any time. **Retroactive Migration:** Move existing Rakuten transactions from `payment_type = 'Chase Chequing'` (e.g. "Rakuten - Chewy" = -$16.50) to `payment_type = 'Rakuten'`. Create settlement pairs for historical quarterly payouts so the balance nets correctly. **Dependencies:** FEA-38 (done — Rakuten account + Working Capital section), FEA-39/40 (done — email import pipeline), FEA-41 (done — `related_transaction_id` linking). |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
+| FEA-66 | **Linked Transaction Aggregation in Ledger** | Feature | Medium | Linked transactions (same `transaction_group_id`) should collapse into a single parent row in the ledger showing the **net amount** (sum of all members). Click to expand and reveal individual child transactions. **Smart label:** AI-powered summary label for the collapsed row — e.g. "Whole Foods x6" for multiple grocery runs, "Uber x3" for ride groups, "Pinterest Payroll (Jan 15–31)" for payslip bundles. Generated via Claude API call on group contents (description patterns, counts, merchants). **Service period:** The parent row's service window is the **union** (min service_start, max service_end) of all child transactions. **Display:** Collapsed row shows net amount, union service period, smart label, and a expand chevron + child count badge. Expanded state shows indented child rows with individual amounts. Net amount uses existing accrual math (sum of `daily_cost × overlap_days` across members). **Parent row fields:** Date = most recent transaction date. Category = most dominant (highest count) category, with an asterisk or indicator if the group spans multiple categories. Same logic for payment type and tag — show the dominant value with a mixed-indicator when not uniform. Builds on FEA-46 (linked transaction viewer) and FEA-49 (visual separation). |
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
 
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (83 items)</summary>
+<summary><strong>✅ Completed</strong> (84 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-66 | **Import Link to Staged Candidates** — CSV import "Link to Transaction" search now includes staged candidates from the same batch. Split results with "Staged" badge. Staged-to-staged links resolved on commit via `linkToGroup()` with dedup. | Feature → Done | Mar 16 |
 | FEA-65 | **Tag Out-of-Window Flags** — Tag detail transaction rows flagged when service period falls outside tag window. Red dashed outline + tint for zero overlap (possible date error, previously hidden), orange dashed outline for partial overlap. Hover tooltips show service dates. | Feature → Done | Mar 16 |
 | FEA-64 | **Editable Tag Dates** — Click date range under tag card or in tag detail modal to inline-edit start/end dates. PATCHes `tags` table and re-renders with recalculated accrual totals. Escape to cancel, validates start ≤ end. | Feature → Done | Mar 16 |
 | BUG-14 | **IS Category Column Truncation** — Widened fixed-layout category column from 110px to 140px so full names display without clipping. | Bug → Done | Mar 16 |
