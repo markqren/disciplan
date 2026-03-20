@@ -3174,19 +3174,25 @@ async function renderTags(el){
         dateEl.innerHTML=`<input type="date" class="td-start" value="${tag.start_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px"> – <input type="date" class="td-end" value="${tag.end_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px">`;
         dateEl.style.cursor="default";
         const startIn=dateEl.querySelector(".td-start"),endIn=dateEl.querySelector(".td-end");
+        let saving=false;
         const save=async()=>{
+          if(saving)return;
           const ns=startIn.value,ne=endIn.value;
           if(!ns||!ne||ns>ne){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";return}
           if(ns===tag.start_date&&ne===tag.end_date){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";return}
+          saving=true;
           try{
             await sb(`tags?name=eq.${encodeURIComponent(tName)}`,{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({start_date:ns,end_date:ne})});
             renderTags(el);
-          }catch(err){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";alert("Failed to save: "+err.message)}
+          }catch(err){saving=false;dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";alert("Failed to save: "+err.message)}
         };
-        startIn.addEventListener("change",save);
-        endIn.addEventListener("change",save);
-        startIn.addEventListener("keydown",e=>{if(e.key==="Escape"){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer"}});
-        endIn.addEventListener("keydown",e=>{if(e.key==="Escape"){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer"}});
+        const cancel=()=>{if(!saving){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer"}};
+        // Save on blur only when focus leaves both inputs
+        const blurSave=()=>{setTimeout(()=>{if(!dateEl.contains(document.activeElement))save()},150)};
+        startIn.addEventListener("blur",blurSave);
+        endIn.addEventListener("blur",blurSave);
+        startIn.addEventListener("keydown",e=>{if(e.key==="Escape")cancel();if(e.key==="Enter"){e.preventDefault();endIn.focus()}});
+        endIn.addEventListener("keydown",e=>{if(e.key==="Escape")cancel();if(e.key==="Enter"){e.preventDefault();save()}});
         startIn.focus();
       });
     });
@@ -3274,24 +3280,28 @@ async function showTagDetail(tag){
       txtEl.innerHTML=`<input type="date" class="tmd-s" value="${tag.start_date}" style="font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:2px 4px;width:125px"> – <input type="date" class="tmd-e" value="${tag.end_date}" style="font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:2px 4px;width:125px">`;
       mdEl.style.cursor="default";
       const sI=txtEl.querySelector(".tmd-s"),eI=txtEl.querySelector(".tmd-e");
+      let saving=false;
       const doSave=async()=>{
+        if(saving)return;
         const ns=sI.value,ne=eI.value;
         if(!ns||!ne||ns>ne){txtEl.innerHTML=origText;mdEl.style.cursor="pointer";return}
         if(ns===tag.start_date&&ne===tag.end_date){txtEl.innerHTML=origText;mdEl.style.cursor="pointer";return}
+        saving=true;
         try{
           await sb(`tags?name=eq.${encodeURIComponent(tag.name)}`,{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({start_date:ns,end_date:ne})});
           bg.remove();
           tag.start_date=ns;tag.end_date=ne;
           showTagDetail(tag);
-          // Also refresh underlying tag cards
           const contentEl=document.getElementById("content");
           if(contentEl)renderTags(contentEl);
-        }catch(err){txtEl.innerHTML=origText;mdEl.style.cursor="pointer";alert("Failed to save: "+err.message)}
+        }catch(err){saving=false;txtEl.innerHTML=origText;mdEl.style.cursor="pointer";alert("Failed to save: "+err.message)}
       };
-      sI.addEventListener("change",doSave);
-      eI.addEventListener("change",doSave);
-      sI.addEventListener("keydown",e=>{if(e.key==="Escape"){txtEl.innerHTML=origText;mdEl.style.cursor="pointer"}});
-      eI.addEventListener("keydown",e=>{if(e.key==="Escape"){txtEl.innerHTML=origText;mdEl.style.cursor="pointer"}});
+      const doCancel=()=>{if(!saving){txtEl.innerHTML=origText;mdEl.style.cursor="pointer"}};
+      const blurSave=()=>{setTimeout(()=>{if(!txtEl.contains(document.activeElement))doSave()},150)};
+      sI.addEventListener("blur",blurSave);
+      eI.addEventListener("blur",blurSave);
+      sI.addEventListener("keydown",e=>{if(e.key==="Escape")doCancel();if(e.key==="Enter"){e.preventDefault();eI.focus()}});
+      eI.addEventListener("keydown",e=>{if(e.key==="Escape")doCancel();if(e.key==="Enter"){e.preventDefault();doSave()}});
       sI.focus();
     });
   }
