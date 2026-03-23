@@ -2521,10 +2521,43 @@ async function renderIS(el){
 
     // Editable budget targets — click Tgt cell to inline-edit
     if(hasBgt){
+      function updateTgtCell(key){
+        const td=tblCard.querySelector(`.bgt-tgt[data-bgt-key="${key}"]`);
+        if(!td)return;
+        const nv=bgt[key]||0;
+        td.textContent=nv.toFixed(1)+"%";
+        const deltaTd=td.nextElementSibling;
+        if(deltaTd&&deltaTd.classList.contains("bgt-delta")){
+          let actPct=0;
+          if(key==="_expenses")actPct=totI>0?totE/totI*100:0;
+          else if(key==="_savings")actPct=totI>0?(totI-totE)/totI*100:0;
+          else{const r=allRows.find(r=>r.id===key);actPct=r&&totI>0?r.t/totI*100:0}
+          const delta=key==="_savings"?actPct-nv:nv-actPct;
+          deltaTd.style.color=delta>=0?"var(--g)":"var(--r)";
+          deltaTd.textContent=(delta>=0?"+":"")+delta.toFixed(1)+"%";
+        }
+      }
+      function recomputeAll(editedKey){
+        // If a subcategory was edited, recompute its parent
+        const parentEntry=Object.entries(SUB_MAP).find(([,ch])=>ch.includes(editedKey));
+        if(parentEntry){
+          const[par,children]=parentEntry;
+          bgt[par]=Math.round(children.reduce((s,c)=>s+(bgt[c]||0),0)*10)/10;
+          updateTgtCell(par);
+        }
+        // Sum parent category targets into _expenses, derive _savings
+        bgt._expenses=Math.round(PARENT_CATS.reduce((s,c)=>s+(bgt[c]||0),0)*10)/10;
+        bgt._savings=Math.round((100-bgt._expenses)*10)/10;
+        updateTgtCell("_expenses");
+        updateTgtCell("_savings");
+      }
+      const autoKeys=new Set(["_expenses","_savings",...Object.keys(SUB_MAP)]);
       tblCard.querySelectorAll(".bgt-tgt").forEach(td=>{
+        const key=td.dataset.bgtKey;
+        // Auto-computed keys: _expenses, _savings, and parents with subcategories
+        if(autoKeys.has(key)){td.style.cursor="default";td.title="Auto-calculated from sub-targets";return}
         td.addEventListener("click",e=>{
           e.stopPropagation();
-          const key=td.dataset.bgtKey;
           const cur=bgt[key]||0;
           const origText=td.textContent;
           const inp=document.createElement("input");
@@ -2538,18 +2571,16 @@ async function renderIS(el){
             // Recompute delta in the adjacent cell
             const deltaTd=td.nextElementSibling;
             if(deltaTd&&deltaTd.classList.contains("bgt-delta")){
-              const row=td.closest("tr");
-              const catId=key;
-              let actPct=0;
-              if(catId==="_expenses")actPct=totI>0?totE/totI*100:0;
-              else if(catId==="_savings")actPct=totI>0?(totI-totE)/totI*100:0;
-              else{const r=allRows.find(r=>r.id===catId);actPct=r&&totI>0?r.t/totI*100:0}
-              const delta=catId==="_savings"?actPct-nv:nv-actPct;
+              const r=allRows.find(r=>r.id===key);
+              const actPct=r&&totI>0?r.t/totI*100:0;
+              const delta=nv-actPct;
               const dClr=delta>=0?"var(--g)":"var(--r)";
               deltaTd.style.color=dClr;
               deltaTd.textContent=(delta>=0?"+":"")+delta.toFixed(1)+"%";
             }
             td.textContent=nv.toFixed(1)+"%";
+            // Auto-recompute parent → _expenses → _savings
+            recomputeAll(key);
           };
           inp.addEventListener("blur",commit);
           inp.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();inp.blur()}else if(ev.key==="Escape"){td.textContent=origText}});
