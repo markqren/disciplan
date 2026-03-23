@@ -238,7 +238,7 @@ async function fetchLiveFX(){
   }catch(e){/* silent fallback to defaults */}
 }
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
-const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},chase_checking:{detect:hd=>hd.includes("Posting Date")&&hd.includes("Details")&&hd.includes("Balance"),columns:{date:"Posting Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"Type"},transformAmount:a=>Math.abs(a),skipTypes:[],currency:"USD",isCheckingAccount:true,detectBillPay:row=>{const d=row.Description||"",t=row.Type||"";if(t==="LOAN_PMT")return"Chase Card Payment";if(/CHASE CREDIT CRD AUTOPAY/i.test(d))return"Chase Card Autopay";if(/AMERICAN EXPRESS ACH PMT/i.test(d))return"AMEX Payment";if(/APPLECARD GSBANK/i.test(d))return"Apple Card Payment";if(/WF Credit Card.*AUTO PAY/i.test(d))return"Capital One Payment";if(/WELLS FARGO CARD B(ILT|PP)/i.test(d))return"Bilt Card Payment";return null},detectPayroll:row=>/PINTEREST.*PAYROLL|ORIG CO NAME:PINTEREST/i.test(row.Description||"")},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&hd.includes("Category")&&hd.includes("Extended Details"),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")},bilt:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Posted Date")&&!hd.includes("Memo")&&!hd.includes("Post Date"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/payment/i.test(row.Description||"")},bilt_legacy:{detect:hd=>hd.some(h=>/^\d{2}\/\d{2}\/\d{4}$/.test(h))&&hd.includes("*"),reparse:text=>parseCSV("Date,Amount,Flag,Empty,Description\n"+text),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>-a,skipTypes:[],currency:"USD",detectPayment:row=>/AUTOMATIC PAYMENT/i.test(row.Description||"")}};
+const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},chase_checking:{detect:hd=>hd.includes("Posting Date")&&hd.includes("Details")&&hd.includes("Balance"),columns:{date:"Posting Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"Type"},transformAmount:a=>Math.abs(a),skipTypes:[],currency:"USD",isCheckingAccount:true,detectBillPay:row=>{const d=row.Description||"",t=row.Type||"";if(t==="LOAN_PMT")return"Chase Card Payment";if(/CHASE CREDIT CRD AUTOPAY/i.test(d))return"Chase Card Autopay";if(/AMERICAN EXPRESS ACH PMT/i.test(d))return"AMEX Payment";if(/APPLECARD GSBANK/i.test(d))return"Apple Card Payment";if(/WF Credit Card.*AUTO PAY/i.test(d))return"Capital One Payment";if(/WELLS FARGO CARD B(ILT|PP)/i.test(d))return"Bilt Card Payment";return null},detectPayroll:row=>/PINTEREST.*PAYROLL|ORIG CO NAME:PINTEREST/i.test(row.Description||"")},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&(hd.includes("Category")||hd.includes("Extended Details")),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")},bilt:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Posted Date")&&!hd.includes("Memo")&&!hd.includes("Post Date"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/payment/i.test(row.Description||"")},bilt_legacy:{detect:hd=>hd.some(h=>/^\d{2}\/\d{2}\/\d{4}$/.test(h))&&hd.includes("*"),reparse:text=>parseCSV("Date,Amount,Flag,Empty,Description\n"+text),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>-a,skipTypes:[],currency:"USD",detectPayment:row=>/AUTOMATIC PAYMENT/i.test(row.Description||"")}};
 const PAYSLIP_PROFILES={pinterest:{detect:t=>t.includes("Pinterest, Inc.")&&t.includes("Pay Period Begin"),company:"Pinterest",incomeItems:["Regular Salary Pay","Connectivity Reimbursement","GTL","Wellness Reimbursement","Home Office Setup Stipend","Sign on Bonus"],rsuIndicators:["RSU Gain"],postTaxExclude:["401(k) After-tax Deferral","RSU Gain Offset"],benefitEarnings:["GTL"]}};
 const CC_PAY_NAMES={"Chase Sapphire":["Bill Paid: Chase Sapphire","Chase Sapphire Bill Payment"],"Chase United":["Bill Paid: Chase United","Chase United Bill Payment"],"Chase Freedom":["Bill Paid: Chase Freedom","Chase Freedom Bill Payment"],"Chase Aeroplan":["Bill Paid: Chase Aeroplan","Chase Aeroplan Bill Payment"],"AMEX Rose Gold":["Bill Paid: AMEX Rose Gold","Amex Rose Gold Bill Payment"],"Bilt":["Bill Paid: Bilt","Bilt Card Payment"],"Apple":["Bill Paid: Apple","Apple Bill Payment"],"Venmo Credit":["Bill Paid: Venmo","Venmo Bill Payment"],"Capital One":["Bill Paid: Capital One","Capital One Bill Payment"],"Uber":["Bill Paid: Uber","Uber Bill Payment"]};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
@@ -294,6 +294,35 @@ function setApiKey(key){localStorage.setItem("anthropic_api_key",key)}
 function clearApiKey(){localStorage.removeItem("anthropic_api_key")}
 function getAIModel(){return localStorage.getItem("ai_model")||"claude-haiku-4-5-20251001"}
 function setAIModel(m){localStorage.setItem("ai_model",m)}
+
+function generateGroupLabel(members){
+  if(!members.length)return"Linked group";
+  const descs=members.map(m=>m.description);
+  const roots=descs.map(d=>d.split(/\s+/).slice(0,3).join(" ").replace(/\d{1,2}\/\d{1,2}|\d{4}|#\d+/g,"").trim());
+  const freq={};roots.forEach(r=>{const k=r.toLowerCase();freq[k]=(freq[k]||0)+1});
+  const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+  const top=sorted[0];
+  if(top[1]===members.length)return`${descs[0].split(/\s+/).slice(0,3).join(" ")} x${members.length}`;
+  if(top[1]>members.length/2)return`${roots[descs.findIndex(d=>d.toLowerCase().startsWith(top[0]))].split(/\s+/).slice(0,3).join(" ")} x${top[1]} +${members.length-top[1]} other`;
+  return`${members.length} linked transactions`;
+}
+
+async function aiGroupLabels(groups){
+  const apiKey=getApiKey();if(!apiKey)return{};
+  const result={};
+  const uncached=groups.filter(g=>{const c=sessionStorage.getItem(`grp_label_${g.gid}`);if(c){result[g.gid]=c;return false}return true});
+  if(!uncached.length)return result;
+  const prompt=`Generate short summary labels (under 40 chars) for these transaction groups. Examples: "Whole Foods x6", "Pinterest Payroll Jan 15-31", "Japan Trip Restaurants x4", "Rent + Utilities Feb".\n\nGroups:\n${uncached.map(g=>`Group ${g.gid}: ${g.members.map(m=>`${m.description} ($${m.amount_usd}, ${m.date})`).join("; ")}`).join("\n")}\n\nReturn ONLY a JSON object mapping group ID to label string.`;
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:getAIModel(),max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+    if(!r.ok)return result;
+    const data=await r.json();const txt=data.content?.[0]?.text||"";
+    const m=txt.match(/\{[\s\S]*\}/);if(!m)return result;
+    const labels=JSON.parse(m[0]);
+    for(const[gid,label]of Object.entries(labels)){sessionStorage.setItem(`grp_label_${gid}`,label);result[gid]=label}
+    return result;
+  }catch(e){console.warn("AI group labels failed:",e);return result}
+}
 
 function normalizeMerchant(desc){
   return desc.replace(/\s*\([^)]*\)\s*$/,"").replace(/\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}.*$/i,"").replace(/^(SQ \*|TST\*|CLIP MX\*|TCB\*)/i,"").trim().toLowerCase().split(/\s+/).slice(0,2).join(" ");
@@ -799,7 +828,7 @@ function generatePayslipTransactions(pages,enteredDate){
 // STATE
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0};
+let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set()};
 
 
 // Ensure a tag exists in the tags table; prompt user to create if new
@@ -2381,7 +2410,7 @@ async function renderIS(el){
     stats.append(statCard("📊","expenses",fmtN(totE),"var(--r)"));
     stats.append(statCard("✨","net savings",fmtN(totI-totE),"var(--g)"));
     stats.append(statCard("📈","savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
-    stats.append(statCard("📊","unrealized G/L",fmtN(totInv),"#264653"));
+    stats.append(statCard("📊","unrealized G/L",(totInv>0?"+":"")+fmtN(totInv),totInv>=0?"var(--g)":"var(--r)"));
     body.append(stats);
 
     // Cash flow chart
@@ -3638,6 +3667,17 @@ function openLedgerEditModal(txn,onSaved){
         is_subscription:mSubChk.checked,
         credit:mPt.value==="Transfer"?mCredit.getValue():""
       })});
+      // Prompt to update linked transactions' service dates
+      const datesChanged=mSs.value!==txn.service_start||mSe.value!==txn.service_end;
+      if(datesChanged&&txn.transaction_group_id){
+        const others=await sb(`transactions?transaction_group_id=eq.${txn.transaction_group_id}&id=neq.${txn.id}&select=id,description,amount_usd,service_start,service_end,service_days,daily_cost`);
+        if(others.length&&confirm(`Update service dates for ${others.length} other linked transaction${others.length>1?"s":""}?\n\n${others.map(o=>o.description+" ("+fmtF(o.amount_usd)+")").join("\n")}\n\n→ ${mSs.value} to ${mSe.value}`)){
+          for(const o of others){
+            const oDc=Math.round(o.amount_usd/sdays*1e6)/1e6;
+            await sb(`transactions?id=eq.${o.id}`,{method:"PATCH",body:JSON.stringify({service_start:mSs.value,service_end:mSe.value,service_days:sdays,daily_cost:oDc})});
+          }
+        }
+      }
       bg.remove();
       showUndo("\u2713 Edited: "+txn.description,async()=>{
         await sb(`transactions?id=eq.${txn.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify(prev)});
@@ -4030,7 +4070,8 @@ function openLedgerEditModal(txn,onSaved){
       members.forEach(m=>{
         netTotal+=m.amount_usd;
         const isThis=m.id===txn.id;
-        const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",borderRadius:"4px",marginBottom:"2px",...(isThis?{background:"rgba(74,111,165,0.12)"}:{})}});
+        const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",borderRadius:"4px",marginBottom:"2px",cursor:isThis?"default":"pointer",...(isThis?{background:"rgba(74,111,165,0.12)"}:{})},
+          ...(isThis?{}:{onClick:async()=>{const full=await sb(`transactions?id=eq.${m.id}&select=*`);if(full.length){bg.remove();openLedgerEditModal(full[0],onSaved)}}})});
         const left=h("div");
         left.innerHTML=`<div style="color:rgba(255,255,255,${isThis?0.9:0.7})">${m.description}${isThis?" <span style='font-size:9px;color:var(--b)'>&larr; this</span>":""}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(m.date)} · ${m.category_id} · ${m.payment_type||""}</div>`;
         row.append(left);
@@ -4466,6 +4507,32 @@ async function renderLedger(el){
     }
     // Count group sizes for display
     const groupCounts={};txns.forEach(t=>{if(t.transaction_group_id){groupCounts[t.transaction_group_id]=(groupCounts[t.transaction_group_id]||0)+1}});
+    // Build group summaries for collapse/expand
+    const groupMembers={};
+    txns.forEach(t=>{if(t.transaction_group_id){const gid=t.transaction_group_id;if(!groupMembers[gid])groupMembers[gid]=[];groupMembers[gid].push(t)}});
+    const groupSummaries={};
+    for(const[gid,members]of Object.entries(groupMembers)){
+      if(members.length<2)continue;
+      const net=members.reduce((s,m)=>s+m.amount_usd,0);
+      const dates=members.map(m=>m.date).sort();
+      const sStarts=members.map(m=>m.service_start).filter(Boolean).sort();
+      const sEnds=members.map(m=>m.service_end).filter(Boolean).sort();
+      const catF={};members.forEach(m=>{catF[m.category_id]=(catF[m.category_id]||0)+1});
+      const catS=Object.entries(catF).sort((a,b)=>b[1]-a[1]);
+      const ptF={};members.forEach(m=>{if(m.payment_type)ptF[m.payment_type]=(ptF[m.payment_type]||0)+1});
+      const ptS=Object.entries(ptF).sort((a,b)=>b[1]-a[1]);
+      const tagF={};members.forEach(m=>{if(m.tag)tagF[m.tag]=(tagF[m.tag]||0)+1});
+      const tagS=Object.entries(tagF).sort((a,b)=>b[1]-a[1]);
+      groupSummaries[gid]={net,dateMax:dates[dates.length-1],
+        serviceStart:sStarts[0]||dates[0],serviceEnd:sEnds[sEnds.length-1]||dates[dates.length-1],
+        dominantCat:catS[0][0],mixedCat:catS.length>1,
+        dominantPt:ptS.length?ptS[0][0]:"",mixedPt:ptS.length>1,
+        dominantTag:tagS.length?tagS[0][0]:"",
+        label:generateGroupLabel(members),memberCount:members.length};
+    }
+    // Fire-and-forget AI labels
+    const grpsForAI=Object.entries(groupMembers).filter(([,m])=>m.length>=2).map(([gid,members])=>({gid,members:members.map(m=>({description:m.description,amount_usd:m.amount_usd,category_id:m.category_id,date:m.date}))}));
+    if(grpsForAI.length)aiGroupLabels(grpsForAI).then(labels=>{for(const[gid,label]of Object.entries(labels)){if(label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=label}}});
     // Subscription filter (client-side)
     if(f.subsOnly&&subMerchants.size){const before=txns.length;for(let i=txns.length-1;i>=0;i--){if(!subMerchants.has(normalizeMerchant(txns[i].description)))txns.splice(i,1)}}
     const nav=document.getElementById("pgNav");
@@ -4487,28 +4554,95 @@ async function renderLedger(el){
     currentTxns=txns;
     const tbody=document.createElement("tbody");
     let prevGroupId=null;
-    txns.forEach(t=>{
+    const renderedGroups=new Set();
+    function renderNormalRow(t,indent){
       const isLinked=!!t.transaction_group_id;
       const gSize=isLinked?groupCounts[t.transaction_group_id]:0;
-      const tr=h("tr",{style:{cursor:"pointer",...(isLinked?{borderLeft:"3px solid var(--b)"}:{}),
-        ...(isLinked&&prevGroupId&&prevGroupId!==t.transaction_group_id?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})}
+      const tr=h("tr",{style:{cursor:"pointer",
+        ...(indent?{borderLeft:"3px solid rgba(74,111,165,0.3)",background:"rgba(74,111,165,0.02)"}:isLinked?{borderLeft:"3px solid var(--b)"}:{}),
+        ...(isLinked&&!indent&&prevGroupId&&prevGroupId!==t.transaction_group_id?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})}
       ,onClick:()=>openLedgerEditModal(t,loadPage)});
-      prevGroupId=t.transaction_group_id||null;
+      if(!indent)prevGroupId=t.transaction_group_id||null;
       const chk=h("input",{type:"checkbox",class:"ldg-chk",onClick:e=>e.stopPropagation(),onChange:e=>{if(e.target.checked)selected.add(t.id);else selected.delete(t.id);updateBatchBar()}});
       tr.append(h("td",{style:{padding:"9px 4px",...(selectMode?{}:{display:"none"})}},[chk]));
-      tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(t.date)));
-      const descTd=h("td",{style:{color:"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
-      if(isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
+      tr.append(h("td",{class:"m",style:{color:indent?"rgba(255,255,255,0.45)":"rgba(255,255,255,0.55)",whiteSpace:"nowrap",...(indent?{paddingLeft:"16px"}:{})}},fmtD(t.date)));
+      const descTd=h("td",{style:{color:indent?"rgba(255,255,255,0.65)":"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",...(indent?{paddingLeft:"20px"}:{})}});
+      if(!indent&&isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
       if(subMerchants.size&&subMerchants.has(normalizeMerchant(t.description)))descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"rgba(129,178,154,0.6)"},title:"Recurring subscription"},"\uD83D\uDD04"));
       hilite(t.description,descTd);
       tr.append(descTd);
-      const catTd=h("td");const catBadge=h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+"22",color:CC[t.category_id]||"#888"}});hilite(t.category_id,catBadge);catTd.append(catBadge);tr.append(catTd);
-      const amtTd=h("td",{class:"r m",style:{color:t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}});if(t.currency&&t.currency!=="USD"&&t.original_amount!=null){const fxLabel=(t.currency==="CAD"?"CA$":t.currency+" ")+new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(t.original_amount));amtTd.append(h("span",{style:{color:"rgba(255,255,255,0.28)",fontSize:"11px",marginRight:"6px",fontFamily:"var(--mono)"}},fxLabel))}const amtStr=fmtF(t.amount_usd);if(hq&&amtStr.replace(/[,$]/g,"").includes(hq))hilite(amtStr,amtTd);else amtTd.append(document.createTextNode(amtStr));tr.append(amtTd);
-      const ptTd=h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}});hilite(t.payment_type||"",ptTd);tr.append(ptTd);
-      const spTd=h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});spTd.append(document.createTextNode(fmtD(t.service_start)+"\u2013"+fmtD(t.service_end)));if(t.service_days>1)spTd.append(h("span",{style:{marginLeft:"3px",color:"rgba(255,255,255,0.2)"}},`(${t.service_days}d)`));tr.append(spTd);
-      tr.append(h("td",{class:"r m hide-m",style:{color:"var(--g)"}},fmtF(t.daily_cost)));
+      const catTd=h("td");const catBadge=h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+(indent?"15":"22"),color:(CC[t.category_id]||"#888")+(indent?"aa":"")}});hilite(t.category_id,catBadge);catTd.append(catBadge);tr.append(catTd);
+      const amtTd=h("td",{class:"r m",style:{color:t.amount_usd<0?"var(--g)":indent?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.75)"}});if(t.currency&&t.currency!=="USD"&&t.original_amount!=null){const fxLabel=(t.currency==="CAD"?"CA$":t.currency+" ")+new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(t.original_amount));amtTd.append(h("span",{style:{color:"rgba(255,255,255,0.28)",fontSize:"11px",marginRight:"6px",fontFamily:"var(--mono)"}},fxLabel))}const amtStr=fmtF(t.amount_usd);if(hq&&amtStr.replace(/[,$]/g,"").includes(hq))hilite(amtStr,amtTd);else amtTd.append(document.createTextNode(amtStr));tr.append(amtTd);
+      const ptTd=h("td",{class:"hide-m",style:{color:indent?"rgba(255,255,255,0.3)":"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}});hilite(t.payment_type||"",ptTd);tr.append(ptTd);
+      const spTd=h("td",{class:"m hide-m",style:{color:indent?"rgba(255,255,255,0.3)":"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});spTd.append(document.createTextNode(fmtD(t.service_start)+"\u2013"+fmtD(t.service_end)));if(t.service_days>1)spTd.append(h("span",{style:{marginLeft:"3px",color:"rgba(255,255,255,0.2)"}},`(${t.service_days}d)`));tr.append(spTd);
+      tr.append(h("td",{class:"r m hide-m",style:{color:indent?"rgba(255,255,255,0.35)":"var(--g)"}},fmtF(t.daily_cost)));
       const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});if(t.tag){const tagSpan=h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px",cursor:"pointer"},onClick:e=>{e.stopPropagation();state.tagDetail=t.tag;state.tab="tags";history.replaceState(null,null,"#tags");renderTabs();renderContent()}});hilite(t.tag,tagSpan);tagSpan.addEventListener("mouseenter",()=>tagSpan.style.background="rgba(74,111,165,0.2)");tagSpan.addEventListener("mouseleave",()=>tagSpan.style.background="rgba(255,255,255,0.06)");tagTd.append(tagSpan)}tr.append(tagTd);
-      tbody.append(tr);
+      return tr;
+    }
+    txns.forEach(t=>{
+      const isLinked=!!t.transaction_group_id;
+      const gid=t.transaction_group_id;
+      const gSize=isLinked?groupCounts[gid]:0;
+      const summary=gid?groupSummaries[gid]:null;
+      const isExpanded=state.expandedGroups.has(gid);
+      // Group with 2+ members: render summary + child rows
+      if(isLinked&&gSize>=2&&summary&&!renderedGroups.has(gid)){
+        renderedGroups.add(gid);
+        // Summary row
+        const str=h("tr",{class:"grp-summary",style:{cursor:"pointer",borderLeft:"3px solid var(--b)",background:"rgba(74,111,165,0.04)",
+          ...(prevGroupId&&prevGroupId!==gid?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})},
+          onClick:()=>{
+            if(state.expandedGroups.has(gid))state.expandedGroups.delete(gid);else state.expandedGroups.add(gid);
+            document.querySelectorAll(`[data-grp-child="${gid}"]`).forEach(r=>{r.style.display=state.expandedGroups.has(gid)?"table-row":"none"});
+            const ch=document.querySelector(`[data-grp-chev="${gid}"]`);if(ch)ch.style.transform=state.expandedGroups.has(gid)?"rotate(90deg)":"";
+          }});
+        prevGroupId=gid;
+        // Checkbox (selects all members)
+        const chk=h("input",{type:"checkbox",class:"ldg-chk",onClick:e=>e.stopPropagation(),onChange:e=>{
+          const members=groupMembers[gid]||[];
+          members.forEach(m=>{if(e.target.checked)selected.add(m.id);else selected.delete(m.id)});
+          document.querySelectorAll(`[data-grp-child="${gid}"] .ldg-chk`).forEach(c=>{c.checked=e.target.checked});
+          updateBatchBar();
+        }});
+        str.append(h("td",{style:{padding:"9px 4px",...(selectMode?{}:{display:"none"})}},[chk]));
+        str.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(summary.dateMax)));
+        // Description: chevron + badge + label
+        const descTd=h("td",{style:{color:"rgba(255,255,255,0.9)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+        descTd.append(h("span",{style:{display:"inline-block",fontSize:"10px",marginRight:"4px",transition:"transform 0.15s",transform:isExpanded?"rotate(90deg)":""},"data-grp-chev":gid},"\u25B6"));
+        descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"var(--b)"}},`\uD83D\uDD17${summary.memberCount}`));
+        descTd.append(h("span",{"data-grp-label":gid},sessionStorage.getItem(`grp_label_${gid}`)||summary.label));
+        str.append(descTd);
+        // Category
+        const catTd=h("td");const catBadge=h("span",{class:"badge",style:{background:(CC[summary.dominantCat]||"#666")+"22",color:CC[summary.dominantCat]||"#888"}},summary.dominantCat);
+        if(summary.mixedCat)catBadge.append(h("span",{style:{marginLeft:"3px",fontSize:"9px",color:"rgba(255,255,255,0.3)"}},"+"));
+        catTd.append(catBadge);str.append(catTd);
+        // Net amount
+        str.append(h("td",{class:"r m",style:{color:summary.net<0?"var(--g)":"rgba(255,255,255,0.75)",fontWeight:"600"}},fmtF(Math.round(summary.net*100)/100)));
+        // Payment type
+        str.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px",whiteSpace:"nowrap"}},summary.dominantPt+(summary.mixedPt?" +":"")));
+        // Service period (union)
+        const spTd=h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});
+        spTd.append(document.createTextNode(fmtD(summary.serviceStart)+"\u2013"+fmtD(summary.serviceEnd)));str.append(spTd);
+        // Daily cost (not meaningful for group)
+        str.append(h("td",{class:"r m hide-m",style:{color:"rgba(255,255,255,0.25)"}},"\u2014"));
+        // Tag
+        const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});
+        if(summary.dominantTag)tagTd.append(h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px"}},summary.dominantTag));
+        str.append(tagTd);
+        tbody.append(str);
+        // Child rows
+        const members=groupMembers[gid]||[];
+        members.forEach(m=>{
+          const childTr=renderNormalRow(m,true);
+          childTr.setAttribute("data-grp-child",gid);
+          childTr.style.display=isExpanded?"table-row":"none";
+          tbody.append(childTr);
+        });
+      } else if(!isLinked||gSize<2){
+        // Normal ungrouped row
+        tbody.append(renderNormalRow(t,false));
+      }
+      // Skip individual group members that were already rendered as children
     });
     tbl.append(tbody);wrap.append(tbl);
     const body=document.getElementById("ledgerBody");body.innerHTML="";body.append(wrap);
@@ -4792,7 +4926,7 @@ async function renderCrossYear(el){
     stats.append(statCard("📊","total expenses",fmtN(totE),"var(--r)"));
     stats.append(statCard("✨","total saved",fmtN(totI-totE),"var(--g)"));
     stats.append(statCard("📈","avg savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
-    stats.append(statCard("📊","unrealized G/L",fmtN(totInv),"#264653"));
+    stats.append(statCard("📊","unrealized G/L",(totInv>0?"+":"")+fmtN(totInv),totInv>=0?"var(--g)":"var(--r)"));
     body.append(stats);
 
     const chartCard=h("div",{class:"cd"});
