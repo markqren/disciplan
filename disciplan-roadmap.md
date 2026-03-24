@@ -7,7 +7,7 @@
 ## 🚀 Releases
 
 ### v0.9.0 — Mar 23, 2026
-<sub>Not yet deployed</sub>
+<sub>Deployed 2026-03-23</sub>
 
 **Linked transaction aggregation, budget auto-sum fix, and UI polish.**
 
