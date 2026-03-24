@@ -2160,7 +2160,7 @@ async function commitEmailImports(candidates){
   }));
   const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
   for(const t of uniqueTags)await ensureTagExists(t);
-  await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
+  const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   const now=new Date().toISOString();
   for(const c of valid){
     await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"committed",committed_at:now})});
@@ -2174,6 +2174,9 @@ async function commitEmailImports(candidates){
   // Trigger reimbursement auto-linking for newly committed Venmo reimbursements
   const newReimb=valid.filter(c=>c.amount_usd<0&&c.payment_type==="Venmo");
   if(newReimb.length)setTimeout(()=>scanForReimbursementLinks().catch(e=>console.error("Post-commit link scan:",e)),1000);
+  // Auto-link Rakuten cashback to parent purchases and create cashback_redemptions
+  const rakutenCB=valid.filter(c=>c._parsedData?.type==="cashback_earned"&&c._parsedData?.store_name);
+  if(rakutenCB.length&&created?.length)setTimeout(()=>linkRakutenCashback(rakutenCB,valid,created).catch(e=>console.error("Rakuten cashback link:",e)),1000);
   return{
     count:valid.length,
     imported:valid,
@@ -2184,6 +2187,40 @@ async function commitEmailImports(candidates){
   };
 }
 
+async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
+  for(const c of rakutenCandidates){
+    const idx=allValid.indexOf(c);
+    const newTxn=createdTxns[idx];
+    if(!newTxn?.id)continue;
+    const store=c._parsedData.store_name;
+    const searchDate=c._parsedData.order_date||c.date;
+    const from=new Date(new Date(searchDate).getTime()-30*864e5).toISOString().slice(0,10);
+    const to=new Date(new Date(searchDate).getTime()+30*864e5).toISOString().slice(0,10);
+    try{
+      const matches=await sb(`transactions?description=ilike.*${encodeURIComponent(store)}*&date=gte.${from}&date=lte.${to}&amount_usd=gt.0&order=date.desc&limit=5`);
+      if(matches.length){
+        const parent=matches[0];
+        await linkToGroup(parent,{id:newTxn.id,transaction_group_id:newTxn.transaction_group_id||null});
+        const dv=Math.abs(c.amount_usd);
+        await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+          date:c.date,item:c.description,payment_type:parent.payment_type,
+          cashback_type:"Cash",redemption_amount:dv,redemption_rate:1,
+          dollar_value:dv,transaction_id:newTxn.id
+        })});
+        console.log(`Rakuten: linked "${c.description}" to "${parent.description}" + created cashback record`);
+      }else{
+        console.log(`Rakuten: no parent found for "${store}" around ${searchDate}`);
+        // Still create cashback_redemptions even without parent link
+        const dv=Math.abs(c.amount_usd);
+        await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+          date:c.date,item:c.description,payment_type:"Rakuten",
+          cashback_type:"Cash",redemption_amount:dv,redemption_rate:1,
+          dollar_value:dv,transaction_id:newTxn.id
+        })});
+      }
+    }catch(e){console.error(`Rakuten link error for "${store}":`,e)}
+  }
+}
 
 async function commitPayslipImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");

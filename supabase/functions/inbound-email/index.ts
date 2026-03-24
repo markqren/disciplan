@@ -344,12 +344,8 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
   // If no store name extracted, use forwarding note or just "Rakuten"
   let merchantName = storeName || "Unknown Store";
 
-  // Apply forwarding note context for better description
-  if (forwardingNote?.descriptionHint) {
-    // The user's forwarding note is the best source of context
-    // e.g., "Rakuten cash back for Vrbo Cozumel trip" → extract "Vrbo" as the merchant
-    merchantName = forwardingNote.descriptionHint;
-  }
+  // Don't override merchantName with raw forwarding note — it's too unstructured.
+  // The AI forwarding note interpreter will handle this and return a clean description.
 
   const description = `Rakuten - ${merchantName}`;
 
@@ -676,8 +672,12 @@ function buildCandidate(
   const parsedData = (base.parsed_data as Record<string, unknown>) || {};
   if (forwardingNote?.raw) parsedData.forwarding_note = forwardingNote.raw;
 
-  // Use AI description if provided (it's usually better formatted)
-  const finalDescription = ai_description || (base.description as string) || emailMeta.email_subject;
+  // For Rakuten: AI forwarding note interpreter returns clean "Rakuten - {Store}" → prefer it.
+  // But fall back to parser description (not email subject) if AI didn't run or failed.
+  // For others: AI description is usually better formatted.
+  const finalDescription = (source === "rakuten")
+    ? (ai_description || (base.description as string))
+    : (ai_description || (base.description as string) || emailMeta.email_subject);
 
   return {
     source,
