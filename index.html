@@ -86,6 +86,7 @@ select.inp{cursor:pointer;appearance:auto}
 .pf-alloc-bar{height:6px;background:rgba(255,255,255,0.04);border-radius:3px;overflow:hidden}
 .pf-perf-row{display:flex;justify-content:space-between;font-size:11px;padding:2px 0}
 .pf-foot{margin-top:24px;padding:12px 0;border-top:1px solid rgba(255,255,255,0.04);font-size:11px;color:rgba(255,255,255,0.2);display:flex;justify-content:space-between}
+.pf-del-lot:hover{color:var(--r)!important}
 @media(max-width:700px){.pf-kpi{grid-template-columns:repeat(2,1fr)}.pf-acct-hdr,.pf-inst-hdr{grid-template-columns:1fr auto auto}}
 .ref-btn{background:0;border:0;color:rgba(255,255,255,0.3);font-size:14px;cursor:pointer;padding:2px 4px;margin-left:6px;transition:color 0.15s}
 .ref-btn:hover{color:rgba(255,255,255,0.7)}
@@ -3115,7 +3116,7 @@ async function renderPortfolio(el){
 
     // ── Holdings Card ──
     const holdCard=h("div",{class:"cd"});
-    holdCard.innerHTML=`<h3>Holdings</h3><div id="pfHoldings"></div>`;
+    holdCard.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><h3>Holdings</h3><button id="pfAddHoldBtn" class="btn" style="font-size:11px;padding:4px 12px">+ Add Holdings</button></div><div id="pfAddHoldForm" style="display:none"></div><div id="pfHoldings"></div>`;
     body.append(holdCard);
 
     function renderHoldings(){
@@ -3165,19 +3166,23 @@ async function renderPortfolio(el){
           o+=`<td class="r m" style="color:${pCol(r)};font-weight:600;padding:8px 0">${fPct(r)}</td>`;
           o+=`<td class="r m hide-m" style="color:${pCol(sd.annReturn)};padding:8px 0">${fPct(sd.annReturn)}</td></tr>`;
           if(isSE){
-            for(const lot of activeLots){
+            for(let li=0;li<activeLots.length;li++){
+              const lot=activeLots[li];
               const lg=lot.market_value-lot.cost_basis,lr=lot.cost_basis>0?(lg/lot.cost_basis)*100:0;
               const lc=lg>=0?"rgba(129,178,154,0.6)":"rgba(224,122,95,0.6)";
-              o+=`<tr style="background:rgba(74,111,165,0.04)">`;
+              const lotKey=`${lk}|${li}`;
+              o+=`<tr style="background:rgba(74,111,165,0.04)" data-lot-row="${lotKey}">`;
               o+=`<td style="padding:5px 0 5px 28px;font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${fmtD(lot.lot_date)}</td>`;
-              o+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${lot.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td>`;
-              o+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">$${lot.price_exec.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
+              o+=`<td class="r hide-m" data-lot-field="shares" data-lot-key="${lotKey}" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35);cursor:pointer" title="Click to edit">${lot.shares.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td>`;
+              o+=`<td class="r hide-m" data-lot-field="price_exec" data-lot-key="${lotKey}" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35);cursor:pointer" title="Click to edit">$${lot.price_exec.toLocaleString("en-US",{minimumFractionDigits:2})}</td>`;
               o+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:rgba(255,255,255,0.35)">${fmtT(Math.round(lot.cost_basis))}</td>`;
               o+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:${lc}">${fmtT(Math.round(lot.market_value))}</td>`;
               o+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${lc}">${fmtT(Math.round(lg))}</td>`;
               o+=`<td class="r" style="font-family:var(--mono);font-size:11px;color:${lc}">${fPct(lr)}</td>`;
-              o+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;color:${lot.ann_return>=0?"rgba(129,178,154,0.6)":"rgba(224,122,95,0.6)"}">${lot.ann_return!=null?fPct(lot.ann_return):"—"}</td></tr>`;
+              o+=`<td class="r hide-m" style="font-family:var(--mono);font-size:11px;position:relative"><span style="color:${lot.ann_return>=0?"rgba(129,178,154,0.6)":"rgba(224,122,95,0.6)"}">${lot.ann_return!=null?fPct(lot.ann_return):"—"}</span> <span class="pf-del-lot" data-lot-key="${lotKey}" title="Delete lot" style="cursor:pointer;color:rgba(255,255,255,0.15);font-size:13px;margin-left:6px">✕</span></td></tr>`;
             }
+            // + Add Lot row
+            o+=`<tr data-add-lot="${lk}" style="cursor:pointer"><td colspan="8" style="padding:5px 0 5px 28px;font-size:11px;color:rgba(74,111,165,0.5)">+ Add Lot</td></tr>`;
             if(soldLots.length){
               o+=`<tr><td colspan="8" style="padding:6px 0 2px 28px;font-size:9px;color:rgba(255,255,255,0.2);text-transform:uppercase;letter-spacing:0.08em">Sold</td></tr>`;
               for(const lot of soldLots){
@@ -3276,8 +3281,159 @@ async function renderPortfolio(el){
           renderHoldings();
         });
       });
+
+      // Inline lot editing (shares / price_exec)
+      hEl.querySelectorAll("[data-lot-field]").forEach(td=>{
+        td.addEventListener("click",e=>{
+          e.stopPropagation();
+          if(td.querySelector("input"))return;
+          const field=td.dataset.lotField;
+          const [acctId,sym,liStr]=td.dataset.lotKey.split("|");
+          const li=parseInt(liStr);
+          const sLots=(lotMap[`${acctId}|${sym}`]||[]).filter(l=>!l.sell_date);
+          const lot=sLots[li];if(!lot)return;
+          const oldVal=field==="shares"?lot.shares:lot.price_exec;
+          const inp=document.createElement("input");
+          inp.type="number";inp.step="any";inp.value=oldVal;
+          inp.style.cssText="width:70px;background:rgba(255,255,255,0.08);border:1px solid rgba(74,111,165,0.5);border-radius:3px;color:#e8e8e4;font-family:var(--mono);font-size:11px;text-align:right;padding:2px 4px;outline:none";
+          td.textContent="";td.append(inp);inp.focus();inp.select();
+          const commit=async()=>{
+            const nv=parseFloat(inp.value);
+            if(isNaN(nv)||nv===oldVal){renderHoldings();return}
+            const newShares=field==="shares"?nv:lot.shares;
+            const newPrice=field==="price_exec"?nv:lot.price_exec;
+            const newCost=Math.round(newShares*newPrice*100)/100;
+            const filter=lot.id?`investment_lots?id=eq.${lot.id}`:`investment_lots?account_id=eq.${encodeURIComponent(acctId)}&symbol=eq.${encodeURIComponent(sym)}&lot_date=eq.${lot.lot_date}&shares=eq.${lot.shares}&price_exec=eq.${lot.price_exec}`;
+            try{
+              await sb(filter,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({shares:newShares,price_exec:newPrice,cost_basis:newCost})});
+              lot.shares=newShares;lot.price_exec=newPrice;lot.cost_basis=newCost;
+              const si=symInfo[sym]||{};const price=parseFloat(si.latest_price||0);
+              lot.market_value=price>0?newShares*price:newCost;
+              renderPortfolio(el);
+            }catch(err){alert("Error saving: "+err.message);renderHoldings()}
+          };
+          inp.addEventListener("blur",commit);
+          inp.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();commit()}if(ev.key==="Escape"){inp.removeEventListener("blur",commit);renderHoldings()}});
+        });
+      });
+
+      // Delete lot (two-click confirm)
+      hEl.querySelectorAll(".pf-del-lot").forEach(btn=>{
+        btn.addEventListener("click",e=>{
+          e.stopPropagation();
+          if(btn.dataset.confirm){
+            // Second click — delete
+            const [acctId,sym,liStr]=btn.dataset.lotKey.split("|");
+            const li=parseInt(liStr);
+            const sLots=(lotMap[`${acctId}|${sym}`]||[]).filter(l=>!l.sell_date);
+            const lot=sLots[li];if(!lot)return;
+            const filter=lot.id?`investment_lots?id=eq.${lot.id}`:`investment_lots?account_id=eq.${encodeURIComponent(acctId)}&symbol=eq.${encodeURIComponent(sym)}&lot_date=eq.${lot.lot_date}&shares=eq.${lot.shares}&price_exec=eq.${lot.price_exec}`;
+            sb(filter,{method:"DELETE"}).then(()=>renderPortfolio(el)).catch(err=>alert("Delete failed: "+err.message));
+          }else{
+            btn.dataset.confirm="1";btn.style.color="var(--r)";btn.textContent="Del?";
+            setTimeout(()=>{if(btn.isConnected){delete btn.dataset.confirm;btn.style.color="rgba(255,255,255,0.15)";btn.textContent="✕"}},3000);
+          }
+        });
+      });
+
+      // Add Lot inline form
+      hEl.querySelectorAll("tr[data-add-lot]").forEach(row=>{
+        row.addEventListener("click",e=>{
+          e.stopPropagation();
+          const [acctId,sym]=row.dataset.addLot.split("|");
+          const today=new Date().toISOString().slice(0,10);
+          row.innerHTML=`<td colspan="8" style="padding:6px 0 6px 28px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="date" class="pf-al-date inp" value="${today}" style="width:120px;font-size:11px"><input type="number" class="pf-al-shares inp" placeholder="Shares" step="any" style="width:80px;font-size:11px"><input type="number" class="pf-al-price inp" placeholder="Price" step="any" style="width:80px;font-size:11px"><button class="pf-al-save btn" style="font-size:11px;padding:3px 10px">Save</button><button class="pf-al-cancel btn" style="font-size:11px;padding:3px 8px;background:rgba(255,255,255,0.06)">Cancel</button></div></td>`;
+          row.querySelector(".pf-al-shares").focus();
+          row.querySelector(".pf-al-cancel").addEventListener("click",ev=>{ev.stopPropagation();renderHoldings()});
+          row.querySelector(".pf-al-save").addEventListener("click",async ev=>{
+            ev.stopPropagation();
+            const dt=row.querySelector(".pf-al-date").value;
+            const sh=parseFloat(row.querySelector(".pf-al-shares").value);
+            const pr=parseFloat(row.querySelector(".pf-al-price").value);
+            if(!dt||isNaN(sh)||isNaN(pr)||sh<=0||pr<=0){alert("Fill all fields");return}
+            const cb=Math.round(sh*pr*100)/100;
+            try{
+              await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:sym,lot_date:dt,shares:sh,price_exec:pr,cost_basis:cb})});
+              renderPortfolio(el);
+            }catch(err){alert("Error: "+err.message)}
+          });
+        });
+      });
     }
     renderHoldings();
+
+    // ── Add Holdings Form ──
+    const addHoldBtn=document.getElementById("pfAddHoldBtn");
+    const addHoldForm=document.getElementById("pfAddHoldForm");
+    if(addHoldBtn&&addHoldForm){
+      addHoldBtn.addEventListener("click",()=>{
+        const isOpen=addHoldForm.style.display!=="none";
+        if(isOpen){addHoldForm.style.display="none";addHoldBtn.textContent="+ Add Holdings";return}
+        const acctOpts=accounts.map(a=>`<option value="${a.id}">${a.label} (${a.institution})</option>`).join("");
+        const symList=symbols.map(s=>s.symbol);
+        const acTypeOpts=Object.entries(PF_ATL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("");
+        const acOpts=Object.entries(PF_ACM).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join("");
+        const today=new Date().toISOString().slice(0,10);
+        addHoldForm.innerHTML=`<div style="border:1px solid rgba(74,111,165,0.2);border-radius:8px;padding:14px;margin:12px 0;background:rgba(74,111,165,0.04)">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Account</label><select id="pfAhAcct" class="inp" style="font-size:12px;min-width:140px"><option value="">Select…</option>${acctOpts}<option value="__new__">New Account…</option></select></div>
+            <div id="pfAhNewAcct" style="display:none"><div style="display:flex;gap:6px;flex-wrap:wrap"><div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Label</label><input id="pfAhAcctLabel" class="inp" style="font-size:12px;width:110px" placeholder="e.g. Schwab"></div><div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Institution</label><input id="pfAhAcctInst" class="inp" style="font-size:12px;width:110px" placeholder="e.g. Charles Schwab"></div><div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Type</label><select id="pfAhAcctType" class="inp" style="font-size:12px">${acTypeOpts}</select></div></div></div>
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Symbol</label><input id="pfAhSym" class="inp" list="pfAhSymList" style="font-size:12px;width:90px" placeholder="e.g. VOO"><datalist id="pfAhSymList">${symList.map(s=>`<option value="${s}">`).join("")}</datalist></div>
+            <div id="pfAhNewSym" style="display:none"><div style="display:flex;gap:6px;flex-wrap:wrap"><div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Name</label><input id="pfAhSymName" class="inp" style="font-size:12px;width:130px" placeholder="e.g. Vanguard S&P 500"></div><div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Asset Class</label><select id="pfAhSymAc" class="inp" style="font-size:12px">${acOpts}</select></div></div></div>
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Date</label><input id="pfAhDate" type="date" class="inp" style="font-size:12px;width:120px" value="${today}"></div>
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Shares</label><input id="pfAhShares" type="number" class="inp" step="any" style="font-size:12px;width:80px"></div>
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Price</label><input id="pfAhPrice" type="number" class="inp" step="any" style="font-size:12px;width:80px"></div>
+            <div style="display:flex;gap:6px;align-items:end;padding-bottom:1px"><button id="pfAhSave" class="btn" style="font-size:11px;padding:5px 14px">Save</button><button id="pfAhCancel" class="btn" style="font-size:11px;padding:5px 10px;background:rgba(255,255,255,0.06)">Cancel</button></div>
+          </div>
+        </div>`;
+        addHoldForm.style.display="block";
+        addHoldBtn.textContent="Cancel";
+
+        // Show/hide new account fields
+        const acctSel=document.getElementById("pfAhAcct");
+        acctSel.addEventListener("change",()=>{document.getElementById("pfAhNewAcct").style.display=acctSel.value==="__new__"?"block":"none"});
+
+        // Show/hide new symbol fields
+        const symInp=document.getElementById("pfAhSym");
+        symInp.addEventListener("input",()=>{
+          const isNew=symInp.value.trim()&&!symList.includes(symInp.value.trim().toUpperCase());
+          document.getElementById("pfAhNewSym").style.display=isNew?"block":"none";
+        });
+
+        document.getElementById("pfAhCancel").addEventListener("click",()=>{addHoldForm.style.display="none";addHoldBtn.textContent="+ Add Holdings"});
+
+        document.getElementById("pfAhSave").addEventListener("click",async()=>{
+          let acctId=acctSel.value;
+          const symVal=(symInp.value||"").trim().toUpperCase();
+          const dt=document.getElementById("pfAhDate").value;
+          const sh=parseFloat(document.getElementById("pfAhShares").value);
+          const pr=parseFloat(document.getElementById("pfAhPrice").value);
+          if(!acctId||!symVal||!dt||isNaN(sh)||isNaN(pr)||sh<=0||pr<=0){alert("Fill all required fields");return}
+          try{
+            // Create new account if needed
+            if(acctId==="__new__"){
+              const label=document.getElementById("pfAhAcctLabel").value.trim();
+              const inst=document.getElementById("pfAhAcctInst").value.trim();
+              const atype=document.getElementById("pfAhAcctType").value;
+              if(!label||!inst){alert("Fill account label and institution");return}
+              const newAcct=await sb("investment_accounts",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id:label.toLowerCase().replace(/\s+/g,"_"),label,institution:inst,account_type:atype})});
+              acctId=Array.isArray(newAcct)?newAcct[0].id:newAcct.id;
+            }
+            // Create new symbol if needed
+            if(!symList.includes(symVal)){
+              const sname=document.getElementById("pfAhSymName").value.trim();
+              const sac=document.getElementById("pfAhSymAc").value;
+              if(!sname){alert("Fill symbol name");return}
+              await sb("investment_symbols",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({symbol:symVal,name:sname,asset_class:sac,latest_price:pr})});
+            }
+            const cb=Math.round(sh*pr*100)/100;
+            await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:symVal,lot_date:dt,shares:sh,price_exec:pr,cost_basis:cb})});
+            addHoldForm.style.display="none";addHoldBtn.textContent="+ Add Holdings";
+            renderPortfolio(el);
+          }catch(err){alert("Error: "+err.message)}
+        });
+      });
+    }
 
     // ── Footer ──
     const foot=h("div",{class:"pf-foot"});
