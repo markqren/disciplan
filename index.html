@@ -217,7 +217,19 @@ const BUDGET_TARGETS={
   2024:{entertainment:7,accommodation:0,games:0,food:6,groceries:1,restaurant:5,home:19,rent:18,furniture:1,health:4,personal:3,clothes:1.5,tech:1.5,transportation:5,utilities:2,financial:0,other:1,_expenses:47,_savings:53},
   2025:{entertainment:7,accommodation:0,games:0,food:6,groceries:1,restaurant:5,home:19,rent:18,furniture:1,health:4,personal:3,clothes:1.5,tech:1.5,transportation:5,utilities:2,financial:0,other:1,_expenses:47,_savings:53}
 };
-function getBudgetTargets(year){return BUDGET_TARGETS[year]||BUDGET_TARGETS[2025]}
+function getBudgetTargets(year){
+  const base=BUDGET_TARGETS[year]||BUDGET_TARGETS[2025];
+  const saved=localStorage.getItem("budgetTargets_"+year);
+  if(saved)try{return{...base,...JSON.parse(saved)}}catch(e){}
+  return{...base};
+}
+function saveBudgetTargets(year,bgt){
+  const base=BUDGET_TARGETS[year]||BUDGET_TARGETS[2025];
+  const diff={};
+  for(const k of Object.keys(bgt)){if(bgt[k]!==base[k])diff[k]=bgt[k]}
+  if(Object.keys(diff).length)localStorage.setItem("budgetTargets_"+year,JSON.stringify(diff));
+  else localStorage.removeItem("budgetTargets_"+year);
+}
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];
 // Cashback (FEA-14)
@@ -297,14 +309,19 @@ function setAIModel(m){localStorage.setItem("ai_model",m)}
 
 function generateGroupLabel(members){
   if(!members.length)return"Linked group";
+  // Prefer the primary (non-reimbursement/adjustment) transaction's description
+  const secondary=/^(reimburs|cashback|reimb|bill paid|payment)/i;
+  const primary=members.find(m=>!secondary.test(m.description)&&m.amount_usd>0)||members.find(m=>!secondary.test(m.description))||members[0];
+  if(members.length===2)return primary.description;
+  // For 3+ members, check if descriptions are similar
   const descs=members.map(m=>m.description);
   const roots=descs.map(d=>d.split(/\s+/).slice(0,3).join(" ").replace(/\d{1,2}\/\d{1,2}|\d{4}|#\d+/g,"").trim());
   const freq={};roots.forEach(r=>{const k=r.toLowerCase();freq[k]=(freq[k]||0)+1});
   const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]);
   const top=sorted[0];
-  if(top[1]===members.length)return`${descs[0].split(/\s+/).slice(0,3).join(" ")} x${members.length}`;
-  if(top[1]>members.length/2)return`${roots[descs.findIndex(d=>d.toLowerCase().startsWith(top[0]))].split(/\s+/).slice(0,3).join(" ")} x${top[1]} +${members.length-top[1]} other`;
-  return`${members.length} linked transactions`;
+  if(top[1]===members.length)return`${primary.description} x${members.length}`;
+  if(top[1]>members.length/2)return`${primary.description} +${members.length-1}`;
+  return primary.description+` +${members.length-1}`;
 }
 
 async function aiGroupLabels(groups){
@@ -2201,20 +2218,31 @@ async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
       if(matches.length){
         const parent=matches[0];
         await linkToGroup(parent,{id:newTxn.id,transaction_group_id:newTxn.transaction_group_id||null});
+        // Update category and service dates to match parent purchase
+        const patch={};
+        if(parent.category_id)patch.category_id=parent.category_id;
+        if(parent.service_start)patch.service_start=parent.service_start;
+        if(parent.service_end)patch.service_end=parent.service_end;
+        if(parent.service_start&&parent.service_end){
+          const sd=Math.max(1,Math.round((new Date(parent.service_end)-new Date(parent.service_start))/864e5)+1);
+          patch.service_days=sd;
+          patch.daily_cost=Math.round(c.amount_usd/sd*1e6)/1e6;
+        }
+        if(Object.keys(patch).length)await sb(`transactions?id=eq.${newTxn.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify(patch)});
         const dv=Math.abs(c.amount_usd);
         await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
-          date:c.date,item:c.description,payment_type:parent.payment_type,
-          cashback_type:"Cash",redemption_amount:dv,redemption_rate:1,
+          date:c.date,item:c.description,payment_type:"Rakuten",
+          cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
           dollar_value:dv,transaction_id:newTxn.id
         })});
-        console.log(`Rakuten: linked "${c.description}" to "${parent.description}" + created cashback record`);
+        console.log(`Rakuten: linked "${c.description}" to "${parent.description}" (cat: ${parent.category_id}) + created cashback record`);
       }else{
         console.log(`Rakuten: no parent found for "${store}" around ${searchDate}`);
         // Still create cashback_redemptions even without parent link
         const dv=Math.abs(c.amount_usd);
         await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
           date:c.date,item:c.description,payment_type:"Rakuten",
-          cashback_type:"Cash",redemption_amount:dv,redemption_rate:1,
+          cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
           dollar_value:dv,transaction_id:newTxn.id
         })});
       }
@@ -2447,7 +2475,7 @@ async function renderIS(el){
     stats.append(statCard("📊","expenses",fmtN(totE),"var(--r)"));
     stats.append(statCard("✨","net savings",fmtN(totI-totE),"var(--g)"));
     stats.append(statCard("📈","savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
-    stats.append(statCard("📊","unrealized G/L",(totInv>0?"+":"")+fmtN(totInv),totInv>=0?"var(--g)":"var(--r)"));
+    stats.append(statCard("📊","unrealized G/L",(totInv<0?"+":totInv>0?"-":"")+fmtN(totInv),totInv<=0?"var(--g)":"var(--r)"));
     body.append(stats);
 
     // Cash flow chart
@@ -2525,7 +2553,8 @@ async function renderIS(el){
     }
 
     for(const r of allRows){
-      const avg=r.t/activeMonths;
+      const completedTotal=r.m.slice(0,completedMonths).reduce((s,v)=>s+v,0);
+      const avg=completedMonths>0?completedTotal/completedMonths:0;
       const mj=JSON.stringify(r.m.map(v=>Math.round(v)));
       if(r.par){
         const hasSubs=SUB_MAP[r.id]&&allRows.some(x=>!x.par&&SUB_MAP[r.id].includes(x.id));
@@ -2541,31 +2570,35 @@ async function renderIS(el){
       thtml+=`</tr>`;
     }
 
-    // Totals rows
+    // Totals rows (averages use completed months only)
+    const cE=mData.slice(0,completedMonths).reduce((s,m)=>s+m.totE,0);
+    const cI=mData.slice(0,completedMonths).reduce((s,m)=>s+m.inc,0);
+    const cN=cI-cE;
+    const cM=Math.max(1,completedMonths);
     thtml+=`<tr class="is-mo-row" data-cat="_expenses" data-is-parent="false" data-months='${JSON.stringify(mData.map(m=>Math.round(m.totE)))}' style="border-top:2px solid rgba(255,255,255,0.1)"><td style="font-weight:700;color:var(--r)">Total Expenses<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:var(--r);font-weight:700">${fmtT(Math.round(totE))}</td>`;
-    thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(totE/activeMonths))}</td>`;
+    thtml+=`<td class="r m" style="color:var(--r);font-weight:600">${fmtT(Math.round(cE/cM))}</td>`;
     mData.forEach((m,mi)=>thtml+=`<td class="r m hide-m is-mo-cell" data-mi="${mi}" style="cursor:${m.totE>0.5?"pointer":"default"};color:var(--r);font-weight:600">${fmtT(Math.round(m.totE))}</td>`);
     if(hasBgt){const eTgt=bgt._expenses||0;const eAct=totI>0?totE/totI*100:0;const eDelta=eTgt-eAct;const eClr=eDelta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m bgt-tgt" data-bgt-key="_expenses" style="color:rgba(255,255,255,0.3);font-size:10px;cursor:pointer" title="Click to edit target">${eTgt.toFixed(1)}%</td><td class="r m hide-m bgt-delta" style="color:${eClr};font-size:10px;font-weight:600">${eDelta>=0?"+":""}${eDelta.toFixed(1)}%</td>`}
     thtml+=`</tr>`;
 
     thtml+=`<tr class="is-mo-row" data-cat="income" data-is-parent="false" data-months='${JSON.stringify(mData.map(m=>Math.round(m.inc)))}'><td style="font-weight:700;color:var(--b)">Income<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:var(--b);font-weight:700">${fmtT(Math.round(totI))}</td>`;
-    thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(totI/activeMonths))}</td>`;
+    thtml+=`<td class="r m" style="color:var(--b);font-weight:600">${fmtT(Math.round(cI/cM))}</td>`;
     mData.forEach((m,mi)=>thtml+=`<td class="r m hide-m is-mo-cell" data-mi="${mi}" style="cursor:${m.inc>0.5?"pointer":"default"};color:var(--b);font-weight:600">${fmtT(Math.round(m.inc))}</td>`);
     if(hasBgt)thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`;
     thtml+=`</tr>`;
 
     thtml+=`<tr class="is-mo-row" data-months='${JSON.stringify(mData.map(m=>Math.round(m.net)))}' style="border-top:1px solid rgba(255,255,255,0.08)"><td style="font-weight:700;color:var(--g)">Net Savings<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:var(--g);font-weight:700">${fmtT(Math.round(totI-totE))}</td>`;
-    thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round((totI-totE)/activeMonths))}</td>`;
+    thtml+=`<td class="r m" style="color:var(--g);font-weight:600">${fmtT(Math.round(cN/cM))}</td>`;
     mData.forEach(m=>thtml+=`<td class="r m hide-m" style="color:var(--g);font-weight:600">${fmtT(Math.round(m.net))}</td>`);
     if(hasBgt)thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`;
     thtml+=`</tr>`;
 
     thtml+=`<tr class="is-mo-row" data-months='${JSON.stringify(mData.map(m=>m.inc>0?parseFloat((m.net/m.inc*100).toFixed(1)):null))}' data-month-fmt="pct"><td style="font-weight:700;color:#F2CC8F">Savings Rate<span class="is-mob-chev">▸</span></td>`;
-    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
-    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—"}</td>`;
+    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700;text-align:right">${cI>0?((cN/cI)*100).toFixed(1)+"%":"—"}</td>`;
+    thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${cI>0?((cN/cI)*100).toFixed(1)+"%":"—"}</td>`;
     mData.forEach(m=>thtml+=`<td class="r m hide-m" style="color:#F2CC8F;font-weight:600;text-align:right">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
     if(hasBgt){const sTgt=bgt._savings||0;const sAct=totI>0?(totI-totE)/totI*100:0;const sDelta=sAct-sTgt;const sClr=sDelta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m bgt-tgt" data-bgt-key="_savings" style="color:rgba(255,255,255,0.3);font-size:10px;cursor:pointer" title="Click to edit target">${sTgt.toFixed(1)}%</td><td class="r m hide-m bgt-delta" style="color:${sClr};font-size:10px;font-weight:600">${sDelta>=0?"+":""}${sDelta.toFixed(1)}%</td>`}
     thtml+=`</tr>`;
@@ -2647,6 +2680,7 @@ async function renderIS(el){
             td.textContent=nv.toFixed(1)+"%";
             // Auto-recompute parent → _expenses → _savings
             recomputeAll(key);
+            saveBudgetTargets(state.year,bgt);
           };
           inp.addEventListener("blur",commit);
           inp.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();inp.blur()}else if(ev.key==="Escape"){td.textContent=origText}});
@@ -3370,7 +3404,34 @@ async function showTagDetail(tag){
     const noOverlap=accrual===0&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end&&(t.service_end<tag.start_date||t.service_start>tag.end_date);
     if(Math.abs(accrual)>=0.01||noOverlap)txnAccruals.push({...t,_accrual:accrual,_oDays:oDays,_noOverlap:noOverlap});
   }
-  txnAccruals.sort((a,b)=>Math.abs(b._accrual)-Math.abs(a._accrual));
+  // Group by transaction_group_id, sort groups by |net accrual|
+  const tagGrps=new Map();
+  for(const t of txnAccruals){
+    const gid=t.transaction_group_id||("_s"+t.id);
+    if(!tagGrps.has(gid))tagGrps.set(gid,{items:[],net:0});
+    const g=tagGrps.get(gid);g.items.push(t);g.net+=t._accrual;
+  }
+  const sortedGrps=[...tagGrps.values()].sort((a,b)=>Math.abs(b.net)-Math.abs(a.net));
+  txnAccruals.length=0;
+  for(const g of sortedGrps){g.items.sort((a,b)=>Math.abs(b._accrual)-Math.abs(a._accrual));txnAccruals.push(...g.items)}
+  // Build group summaries for linked transactions
+  const tagGroupMembers={};
+  txnAccruals.forEach(t=>{if(t.transaction_group_id){const gid=t.transaction_group_id;if(!tagGroupMembers[gid])tagGroupMembers[gid]=[];tagGroupMembers[gid].push(t)}});
+  const tagGroupSummaries={};
+  for(const[gid,members]of Object.entries(tagGroupMembers)){
+    if(members.length<2)continue;
+    const netAmt=members.reduce((s,m)=>s+m.amount_usd,0);
+    const netAccrual=members.reduce((s,m)=>s+m._accrual,0);
+    const dates=members.map(m=>m.date).sort();
+    const catF={};members.forEach(m=>{catF[m.category_id]=(catF[m.category_id]||0)+1});
+    const catS=Object.entries(catF).sort((a,b)=>b[1]-a[1]);
+    const hasNoOverlap=members.some(m=>m._noOverlap);
+    const hasPartial=members.some(m=>!m._noOverlap&&tag.start_date&&tag.end_date&&m.service_start&&m.service_end&&(m.service_start<tag.start_date||m.service_end>tag.end_date));
+    tagGroupSummaries[gid]={netAmt,netAccrual,dateMax:dates[dates.length-1],
+      dominantCat:catS[0][0],mixedCat:catS.length>1,
+      label:generateGroupLabel(members),memberCount:members.length,
+      hasNoOverlap,hasPartial};
+  }
   const days=tag.start_date&&tag.end_date?Math.max(1,Math.floor((new Date(tag.end_date)-new Date(tag.start_date))/864e5)+1):0;
   const mx=Math.max(...Object.values(cats).map(v=>Math.abs(v)),1);
 
@@ -3395,11 +3456,34 @@ async function showTagDetail(tag){
   if(txnAccruals.length){
     mhtml+=`<div style="margin-top:20px;border-top:1px solid rgba(255,255,255,0.06);padding-top:14px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">${txnAccruals.length} Transactions</div>`;
     mhtml+=`<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:4px 6px">Date</th><th style="text-align:left;padding:4px 6px">Description</th><th style="text-align:left;padding:4px 6px" class="hide-m">Category</th><th style="text-align:right;padding:4px 6px">Amount</th><th style="text-align:right;padding:4px 6px" class="hide-m">Accrual</th><th style="text-align:right;padding:4px 6px" class="hide-m">Days</th></tr></thead><tbody>`;
+    const renderedTagGroups=new Set();
     txnAccruals.forEach(t=>{
+      const gid=t.transaction_group_id;
+      const gMembers=gid?tagGroupMembers[gid]:null;
+      const gSummary=gid?tagGroupSummaries[gid]:null;
+      // Linked group with 2+ members: render summary + hidden children
+      if(gid&&gMembers&&gMembers.length>=2&&gSummary&&!renderedTagGroups.has(gid)){
+        renderedTagGroups.add(gid);
+        const sNeg=gSummary.netAccrual<0;
+        const owStyle=gSummary.hasNoOverlap?"outline:1px dashed rgba(255,70,70,0.5);outline-offset:-1px;background:rgba(255,70,70,0.06);":gSummary.hasPartial?"outline:1px dashed rgba(255,165,0,0.35);outline-offset:-1px;":"";
+        mhtml+=`<tr class="tag-grp-row" data-tag-gid="${gid}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);border-left:3px solid var(--b);background:rgba(74,111,165,0.04);${owStyle}"><td style="padding:5px 6px;color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(gSummary.dateMax)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.9);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="tag-grp-chev" data-tag-grp-chev="${gid}" style="display:inline-block;font-size:10px;margin-right:4px;transition:transform 0.15s">&#9654;</span><span style="font-size:10px;margin-right:4px;color:var(--b)">\uD83D\uDD17${gSummary.memberCount}</span>${gSummary.label}</td><td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[gSummary.dominantCat]||"#666")}22;color:${CC[gSummary.dominantCat]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${gSummary.dominantCat}${gSummary.mixedCat?`<span style="margin-left:3px;font-size:9px;color:rgba(255,255,255,0.3)">+</span>`:""}</span></td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${sNeg?"var(--g)":"rgba(255,255,255,0.75)"};font-weight:600">${fmtF(Math.round(gSummary.netAmt*100)/100)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${sNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(Math.round(gSummary.netAccrual*100)/100)}</td><td style="padding:5px 6px" class="hide-m"></td></tr>`;
+        // Child rows (hidden by default)
+        gMembers.forEach(m=>{
+          const mNeg=m._accrual<0;
+          const partialOverlap=!m._noOverlap&&tag.start_date&&tag.end_date&&m.service_start&&m.service_end&&(m.service_start<tag.start_date||m.service_end>tag.end_date);
+          const mOwStyle=m._noOverlap?"outline:1px dashed rgba(255,70,70,0.5);outline-offset:-1px;background:rgba(255,70,70,0.06);":partialOverlap?"outline:1px dashed rgba(255,165,0,0.35);outline-offset:-1px;":"";
+          const mOwTip=m._noOverlap?` title="⚠ Service period ${fmtD(m.service_start)}\u2013${fmtD(m.service_end)} is completely outside tag window"`:partialOverlap?` title="Service period ${fmtD(m.service_start)}\u2013${fmtD(m.service_end)} extends outside tag window"`:""
+          mhtml+=`<tr class="tag-txn-row tag-grp-child" data-tid="${m.id}" data-tag-grp-child="${gid}" style="display:none;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);border-left:3px solid rgba(74,111,165,0.3);${mOwStyle}"${mOwTip}><td style="padding:5px 6px;padding-left:12px;color:rgba(255,255,255,0.3);white-space:nowrap">${fmtD(m.date)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.5);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.description}</td><td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[m.category_id]||"#666")}22;color:${CC[m.category_id]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${m.category_id}</span></td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.4)">${m.currency&&m.currency!=="USD"&&m.original_amount!=null?`<span style="color:rgba(255,255,255,0.2);font-size:10px;margin-right:5px">${m.currency==="CAD"?"CA$":m.currency+" "}${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(m.original_amount))}</span>`:""}${fmtF(m.amount_usd)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${mNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(m._accrual)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.25)" class="hide-m">${m._oDays||""}</td></tr>`;
+        });
+        return;// skip individual members processed above
+      }
+      // Skip members already rendered as children
+      if(gid&&gMembers&&gMembers.length>=2&&renderedTagGroups.has(gid))return;
+      // Normal ungrouped row
       const isNeg=t._accrual<0;
       const partialOverlap=!t._noOverlap&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end&&(t.service_start<tag.start_date||t.service_end>tag.end_date);
       const owStyle=t._noOverlap?"outline:1px dashed rgba(255,70,70,0.5);outline-offset:-1px;background:rgba(255,70,70,0.06);":partialOverlap?"outline:1px dashed rgba(255,165,0,0.35);outline-offset:-1px;":"";
-      const owTip=t._noOverlap?` title="⚠ Service period ${fmtD(t.service_start)}–${fmtD(t.service_end)} is completely outside tag window — possible date error"`:partialOverlap?` title="Service period ${fmtD(t.service_start)}–${fmtD(t.service_end)} extends outside tag window"`:""
+      const owTip=t._noOverlap?` title="⚠ Service period ${fmtD(t.service_start)}\u2013${fmtD(t.service_end)} is completely outside tag window — possible date error"`:partialOverlap?` title="Service period ${fmtD(t.service_start)}\u2013${fmtD(t.service_end)} extends outside tag window"`:""
       mhtml+=`<tr class="tag-txn-row" data-tid="${t.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);${owStyle}"${owTip}><td style="padding:5px 6px;color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.date)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.7);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td><td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[t.category_id]||"#666")}22;color:${CC[t.category_id]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${t.category_id}</span></td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.5)">${t.currency&&t.currency!=="USD"&&t.original_amount!=null?`<span style="color:rgba(255,255,255,0.28);font-size:10px;margin-right:5px">${t.currency==="CAD"?"CA$":t.currency+" "}${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(t.original_amount))}</span>`:""}${fmtF(t.amount_usd)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${isNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(t._accrual)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.3)" class="hide-m">${t._oDays||""}</td></tr>`;
     });
     mhtml+=`</tbody></table></div></div>`;
@@ -3407,15 +3491,30 @@ async function showTagDetail(tag){
 
   const modal=h("div",{class:"modal",style:{maxWidth:"700px"}});
   modal.innerHTML=mhtml;
-  // Attach click handlers for transaction rows
-  modal.querySelectorAll(".tag-txn-row").forEach(row=>{
+  // Expand/collapse for linked transaction groups
+  const expandedTagGroups=new Set();
+  modal.querySelectorAll(".tag-grp-row").forEach(row=>{
     row.addEventListener("click",()=>{
+      const gid=row.dataset.tagGid;
+      if(expandedTagGroups.has(gid)){expandedTagGroups.delete(gid)}else{expandedTagGroups.add(gid)}
+      const exp=expandedTagGroups.has(gid);
+      modal.querySelectorAll(`[data-tag-grp-child="${gid}"]`).forEach(r=>{r.style.display=exp?"table-row":"none"});
+      const ch=modal.querySelector(`[data-tag-grp-chev="${gid}"]`);if(ch)ch.style.transform=exp?"rotate(90deg)":"";
+    });
+    row.addEventListener("mouseenter",()=>row.style.background="rgba(74,111,165,0.08)");
+    row.addEventListener("mouseleave",()=>row.style.background="rgba(74,111,165,0.04)");
+  });
+  // Attach click handlers for transaction rows (individual + child rows)
+  modal.querySelectorAll(".tag-txn-row").forEach(row=>{
+    row.addEventListener("click",e=>{
+      e.stopPropagation();
       const tid=parseInt(row.dataset.tid);
       const txn=txnAccruals.find(t=>t.id===tid);
       if(txn){bg.remove();openLedgerEditModal(txn,()=>showTagDetail(tag))}
     });
-    row.addEventListener("mouseenter",()=>row.style.background="rgba(255,255,255,0.04)");
-    row.addEventListener("mouseleave",()=>row.style.background="transparent");
+    const isChild=row.classList.contains("tag-grp-child");
+    row.addEventListener("mouseenter",()=>row.style.background=isChild?"rgba(74,111,165,0.06)":"rgba(255,255,255,0.04)");
+    row.addEventListener("mouseleave",()=>row.style.background=isChild?"transparent":"transparent");
   });
   // Modal date editing
   const mdEl=modal.querySelector(".tag-modal-dates");
@@ -4565,6 +4664,7 @@ async function renderLedger(el){
         dominantCat:catS[0][0],mixedCat:catS.length>1,
         dominantPt:ptS.length?ptS[0][0]:"",mixedPt:ptS.length>1,
         dominantTag:tagS.length?tagS[0][0]:"",
+        netDailyCost:members.reduce((s,m)=>s+(m.daily_cost||0),0),
         label:generateGroupLabel(members),memberCount:members.length};
     }
     // Fire-and-forget AI labels
@@ -4661,7 +4761,7 @@ async function renderLedger(el){
         const spTd=h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap"}});
         spTd.append(document.createTextNode(fmtD(summary.serviceStart)+"\u2013"+fmtD(summary.serviceEnd)));str.append(spTd);
         // Daily cost (not meaningful for group)
-        str.append(h("td",{class:"r m hide-m",style:{color:"rgba(255,255,255,0.25)"}},"\u2014"));
+        str.append(h("td",{class:"r m hide-m",style:{color:"var(--g)"}},fmtF(Math.round(summary.netDailyCost*1e6)/1e6)));
         // Tag
         const tagTd=h("td",{style:{color:"rgba(255,255,255,0.35)",fontSize:"11px"}});
         if(summary.dominantTag)tagTd.append(h("span",{style:{background:"rgba(255,255,255,0.06)",padding:"2px 7px",borderRadius:"4px"}},summary.dominantTag));
@@ -4803,7 +4903,13 @@ async function renderCashback(el){
       rhtml+='<td style="color:rgba(255,255,255,0.8);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.item+'</td>';
       rhtml+='<td class="hide-m"><span class="badge" style="background:'+color+'22;color:'+color+'">'+r.payment_type+'</span></td>';
       rhtml+='<td class="hide-m" style="color:rgba(255,255,255,0.4)">'+r.cashback_type+'</td>';
-      rhtml+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+      if(r.cashback_type==="Points"&&r.redemption_rate){
+        const cpp=Math.round(r.redemption_rate*10000)/100;
+        const pts=Math.round(r.redemption_amount).toLocaleString();
+        rhtml+='<td class="r m" style="color:var(--g);white-space:nowrap"><span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400;margin-right:8px">'+pts+' pts \u00b7 '+cpp.toFixed(2)+'\u00a2/pt</span>'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+      }else{
+        rhtml+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+      }
     }
     rhtml+='</tbody></table></div>';
     if(rows.length>showCount)rhtml+='<div style="text-align:center;padding:8px;font-size:11px;color:rgba(255,255,255,0.3)">Showing '+showCount+' of '+rows.length+' redemptions</div>';
@@ -4963,7 +5069,7 @@ async function renderCrossYear(el){
     stats.append(statCard("📊","total expenses",fmtN(totE),"var(--r)"));
     stats.append(statCard("✨","total saved",fmtN(totI-totE),"var(--g)"));
     stats.append(statCard("📈","avg savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
-    stats.append(statCard("📊","unrealized G/L",(totInv>0?"+":"")+fmtN(totInv),totInv>=0?"var(--g)":"var(--r)"));
+    stats.append(statCard("📊","unrealized G/L",(totInv<0?"+":totInv>0?"-":"")+fmtN(totInv),totInv<=0?"var(--g)":"var(--r)"));
     body.append(stats);
 
     const chartCard=h("div",{class:"cd"});

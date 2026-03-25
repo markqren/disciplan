@@ -130,13 +130,13 @@ interface ParsedEmail {
 }
 
 interface EmailParser {
-  detect: (from: string, subject: string) => boolean;
+  detect: (from: string, subject: string, text: string, html: string) => boolean;
   parse: (email: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }) => ParsedEmail;
 }
 
 const EMAIL_PARSERS: Record<string, EmailParser> = {
   venmo: {
-    detect: (from, subject) =>
+    detect: (from, subject, _text, _html) =>
       from.toLowerCase().includes("venmo.com") ||
       /You paid .+\$[\d,.]+/.test(subject) ||
       /paid your \$[\d,.]+/.test(subject) ||
@@ -145,11 +145,16 @@ const EMAIL_PARSERS: Record<string, EmailParser> = {
     parse: parseVenmoEmail,
   },
   rakuten: {
-    detect: (from, subject) =>
-      from.toLowerCase().includes("rakuten.com") ||
-      from.toLowerCase().includes("ebates.com") ||
-      (subject.toLowerCase().includes("cash back") && subject.toLowerCase().includes("rakuten")) ||
-      (subject.toLowerCase().includes("cashback") && from.toLowerCase().includes("rakuten")),
+    detect: (from, subject, text, html) => {
+      const f = from.toLowerCase();
+      const s = subject.toLowerCase();
+      const body = (text + html).toLowerCase();
+      return f.includes("rakuten.com") || f.includes("ebates.com") ||
+        (s.includes("cash back") && s.includes("rakuten")) ||
+        // Forwarded emails: check body for original Rakuten sender
+        (s.includes("cash back") && body.includes("rakuten.com")) ||
+        body.includes("messages.rakuten.com");
+    },
     parse: parseRakutenEmail,
   },
   // Future parsers: chase_alert, subscription, etc.
@@ -305,23 +310,36 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
   let orderDate: string | null = null;
   let orderId: string | null = null;
 
-  // Try text body first
-  const bodyToSearch = text || html || "";
+  // Search both text AND html — forwarded Rakuten emails have useless text bodies
+  // (zero-width spaces) but structured data in HTML table cells
+  const bodyToSearch = (text || "") + "\n" + (html || "");
 
-  // Amount: look for prominent dollar amount (usually the first/biggest one)
-  // In Rakuten cashback emails, the cashback amount is displayed prominently
-  const amtMatch = bodyToSearch.match(/\$([0-9]+(?:\.[0-9]{2})?)/);
-  if (amtMatch) {
-    cashbackAmount = parseFloat(amtMatch[1]);
+  // Strip HTML tags for cleaner regex matching on HTML content
+  const stripped = bodyToSearch.replace(/<[^>]+>/g, " ").replace(/&\w+;/g, " ");
+
+  // Amount: In the HTML, the cashback amount appears in a table cell right before
+  // "Order number". Match the dollar amount closest to order data, not nav links like "Earn $50".
+  // HTML structure: <td>$14.83</td> ... <td>Order number</td>
+  // After stripping: "  $14.83   Order number  9731724334"
+  const amtNearOrder = stripped.match(/\$([0-9]+(?:\.[0-9]{2})?)\s+Order number/i);
+  if (amtNearOrder) {
+    cashbackAmount = parseFloat(amtNearOrder[1]);
+  } else {
+    // Fallback: find dollar amount with cents (excludes round numbers like "$50")
+    const amtWithCents = stripped.match(/\$([0-9]+\.[0-9]{2})/);
+    if (amtWithCents) {
+      cashbackAmount = parseFloat(amtWithCents[1]);
+    }
   }
 
-  // Order number
-  const orderMatch = bodyToSearch.match(/Order number\s*\n?\s*([a-f0-9-]+)/i) ||
-                     bodyToSearch.match(/Order number\s*([a-f0-9-]+)/i);
+  // Order number: in HTML as "Order number</td>...<td>9731724334</td>"
+  // After stripping: "Order number  9731724334"
+  const orderMatch = stripped.match(/Order number\s+([a-f0-9-]+)/i);
   if (orderMatch) orderId = orderMatch[1];
 
-  // Order date: "Online order date2/11/26" or "Online order date 2/11/26"
-  const dateMatch = bodyToSearch.match(/order date\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
+  // Order date: "Online order date</td>...<td>3/13/26</td>"
+  // After stripping: "Online order date  3/13/26"
+  const dateMatch = stripped.match(/order date\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/i);
   if (dateMatch) {
     const parts = dateMatch[1].split("/");
     if (parts.length === 3) {
@@ -330,10 +348,15 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
     }
   }
 
-  // Try to extract store name from subject or body
+  // Try to extract store name from subject
   // Subject patterns: "You've earned Cash Back at Vrbo" or "Cash Back from Vrbo"
   const storeSubjMatch = subject.match(/(?:earned|from|at)\s+(?:Cash\s*Back\s+(?:at|from)\s+)?(.+?)(?:\s*[!.]|$)/i);
   if (storeSubjMatch) storeName = storeSubjMatch[1].trim();
+
+  // Use forwarding note as store name hint (user types "Sixt" when forwarding)
+  if (!storeName && forwardingNote?.descriptionHint) {
+    storeName = forwardingNote.descriptionHint;
+  }
 
   // The cashback amount is NEGATIVE because it's money owed to Mark (a credit)
   // Following the Rakuten Working Capital pattern from FEA-37:
@@ -764,7 +787,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const parseErrors: string[] = [];
 
   for (const [name, parser] of Object.entries(EMAIL_PARSERS)) {
-    if (parser.detect(fromAddr || "", subject || "")) {
+    if (parser.detect(fromAddr || "", subject || "", textBody || "", htmlBody || "")) {
       source = name;
       try {
         parsed = parser.parse({

@@ -1,24 +1,36 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 23, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 25, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
 
+### v1.0.0 — Mar 25, 2026
+
+**Tag detail modal linked transaction grouping.**
+
+#### Features
+- **FEA-75: Tag Detail Linked Transaction Grouping** — Tag detail modal now collapses linked transactions (same `transaction_group_id`) into expandable summary rows, matching the ledger's grouping behavior. Summary rows show net amount (bold), net accrual, dominant category badge (with `+` for mixed), 🔗 badge with member count, and `generateGroupLabel()` label. Click chevron to expand indented child rows with blue left border. Groups sorted by |net accrual|. Overlap styling (red/orange dashed outline) inherited from worst child status. Child row clicks open edit modal. KPIs and category bars unchanged (computed from individual accruals).
+
+---
+
 ### v0.9.0 — Mar 23, 2026
-<sub>Deployed 2026-03-23</sub>
+<sub>Deployed 2026-03-24</sub>
 
 **Linked transaction aggregation, budget auto-sum fix, and UI polish.**
 
 #### Features
-- **FEA-37: Rakuten Cashback Email Import** — Rakuten parser in Edge Function extracts store name, cashback amount, and order date from forwarded emails. Parser description ("Rakuten - {Store}") is protected from AI override. On commit, auto-links cashback to the parent purchase transaction via fuzzy store name match (±30 days) and creates a `cashback_redemptions` record so it appears in the Cashback tab. If no parent match is found, the cashback record is still created with `payment_type: "Rakuten"`.
+- **FEA-37: Rakuten Cashback Email Import** — Rakuten parser in Edge Function extracts cashback amount and order date from forwarded emails (detects Rakuten via email body for forwarded messages). Store name provided via forwarding note. Parser description ("Rakuten - {Store}") is protected from AI override. On commit, auto-links cashback to the parent purchase transaction via fuzzy store name match (±30 days), inherits parent's category and service dates, and creates a `cashback_redemptions` record (card: "Rakuten") so it appears in the Cashback tab.
 - **FEA-69: Linked Transaction Aggregation in Ledger** — Linked transactions (same `transaction_group_id`) collapse into a single summary row by default showing net amount, dominant category/payment/tag, and union service period. Click chevron to expand and reveal indented child rows. AI-powered smart labels via Claude API (cached in sessionStorage) with heuristic fallback. Group checkbox selects all members. Clicking a linked transaction in the edit modal opens that transaction directly. Changing service dates on a linked transaction prompts to update all other linked transactions.
 
 #### UI
 - **UI-02: Unrealized G/L Sign + Color** — IS KPI card for Unrealized G/L now shows `+$84K` (green) for gains and `($84K)` (red) for losses, instead of static teal color.
+- **UI-03: Cashback Points Redemption Rate** — Points redemptions in the Cashback tab now show points count and cents-per-point rate inline to the left of the dollar value (e.g., `14,060 pts · 1.63¢/pt  $229.18`).
+- **UI-04: IS Average Uses Completed Months Only** — Monthly Detail table averages now sum only completed months (e.g., Jan+Feb in March) and divide by that count, instead of including the current partial month.
 
 #### Fixes
+- **BUG-17:** Rakuten email import fixes — Detection now checks email body (not just `from` address) for forwarded emails. Amount extraction skips nav link text ("Earn $50") and finds the actual cashback amount near order data. Auto-linking inherits parent transaction's category and service dates. Cashback redemption record uses card "Rakuten" and correct `cashback_type` ("Dollar Value").
 - **BUG-16:** Budget target auto-sum — Total Expenses target now auto-sums from parent category targets. Parent categories with subcategories (food, home, entertainment, personal) auto-sum from their children. Savings Rate target = 100% − Total Expenses target. These rows are no longer manually editable.
 
 ---
@@ -110,6 +122,7 @@
 
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
+| FEA-76 | **Editable Group Summary with AI Learning** | Feature | **High** | Clicking a linked group summary row (not the chevron) opens a Group Detail Modal showing all member transactions and editable fields for the summary-level description, category, payment type, and tag. Manual edits persist in a new `group_overrides` Supabase table (created) and override auto-computed values. AI group labels incorporate past manual corrections as few-shot examples, improving over time. Chevron retains expand/collapse behavior. Reset button reverts to auto-computed values. **Status:** DB table created, plan finalized, implementation in progress. |
 | FEA-29B | **Splitwise API Sync** | Feature | **Medium** | Splitwise has a free Self-Serve API (dev.splitwise.com) that supports OAuth2 and provides `getExpenses()` with date filters, plus `getFriends()` and `getGroups()`. Build a sync feature that: (1) authenticates with Splitwise via OAuth2 (register app at secure.splitwise.com/oauth_clients), (2) fetches expenses where the user owes or is owed money, (3) maps Splitwise expenses to Disciplan transactions — expenses you paid get the actual category + a Splitwise reimbursement credit for others' shares, expenses others paid show as your owed share under the "Splitwise" payment type, (4) maintains a "Splitwise" account in the balance sheet that tracks your net balance (what you're owed minus what you owe), which should stay in sync with your actual Splitwise balance. REST API called directly with fetch(). Rate limits are conservative so sync should be periodic (manual trigger or daily), not real-time. Supersedes FEA-16. **Depends on:** FEA-29A (done), FEA-38 (Working Capital reclassification). |
 
 ---
@@ -125,16 +138,21 @@
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
 | FEA-72 | **Subscription History Drilldown** | Feature | Medium | Clicking a subscription transaction (🔄 badge in ledger, or row in IS Subscriptions card) opens a modal showing all historical transactions for that merchant. Uses `normalizeMerchant()` to match — e.g. clicking any "Spotify + Apple iCloud (Feb 2026)" groups all normalized-matching transactions. **KPIs:** total spend (sum `amount_usd`), occurrence count, monthly average (`total / months between first and last`), first/last date. **Table:** all matching transactions sorted by date desc, showing date, description, amount, payment type. Click-through to ledger edit modal. **Multi-service edge case:** Bundled descriptions like "Spotify + Apple iCloud" appear in both the Spotify and iCloud history lists — full `amount_usd` counted in each (no splitting). This is acceptable since it reflects what was actually paid per billing event. **Depends on:** FEA-67 (subscription detection), FEA-71 (manual subscription flag). |
 | UI-01 | **IS Unrealized G/L Card + Ledger Filter Compaction** | UI | **High** | Investment as standalone 5th KPI card ("Unrealized G/L") in IS, separate from expenses/savings rate. `.g5` grid for 5-column stats. Detail table row with per-month drilldown. Cross-year G/L column. Remove "Show Inv" toggle. Ledger filter buttons condensed to emoji-only with tooltips. |
+| FEA-73 | **Income Tax Tracking in IS** | Feature | Medium | Collapsible section in the Income Statement tab showing income tax payments over time. Per-year view: bar chart of monthly tax payments (federal, state, etc.) with running YTD total. Cross-year "All" view: annual tax totals as bar chart with effective tax rate overlay (taxes paid / gross income %). Drilldown table showing individual tax transactions. Uses existing transaction data — filter by category or description pattern to identify tax payments. Could also show estimated vs actual comparisons if tax estimates are tracked. |
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
+| FEA-76 | **Portfolio Lot Management** | Feature | **High** | Manual add/edit of investment lot data in the Portfolio tab. Three capabilities: (1) **Inline lot editing** — click shares or price cells in expanded lot rows to edit in-place (like allocation target inline editing). Cost basis auto-recomputes (`shares × price`), market value recalculates from `latest_price`. PATCHes `investment_lots`. (2) **Add lot within symbol** — "+ Add Lot" row at bottom of expanded lot list, pre-filled with that symbol. Inline form: date, shares, price. POSTs to `investment_lots`. (3) **Add new symbol/account** — "+ Add Holdings" button at top of Holdings card. Free-text symbol input with autocomplete from existing `investment_symbols`. Account dropdown from `investment_accounts` with "New Account" option (label, institution, account_type). Creates `investment_symbols` row if new, then lot row. All computed fields (market value, gain, return %, ann. return) recalculate automatically. **Phase 2:** CSV lot import from brokerage exports (Schwab format sample in `references/portfolio_update_sample/`). **Depends on:** FEA-25 (live prices) recommended but not required. |
 
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (95 items)</summary>
+<summary><strong>✅ Completed</strong> (98 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
-| FEA-37 | **Rakuten Cashback Email Import** — Rakuten parser in Edge Function extracts store name, cashback amount, order date from forwarded emails. Protects parser description from AI override. On commit, auto-links cashback to parent purchase transaction (fuzzy match by store name ±30 days) and creates `cashback_redemptions` record. Shows in Cashback tab. | Feature → Done | Mar 23 |
+| FEA-75 | **Tag Detail Linked Transaction Grouping** — Tag detail modal collapses linked transactions into expandable summary rows (net amount/accrual, dominant category, 🔗 badge, group label). Chevron expands indented child rows. Groups sorted by |net accrual|. Overlap styling inherited from worst child. | Feature → Done | Mar 25 |
+| UI-04 | **IS Average Uses Completed Months Only** — Monthly Detail averages sum only completed months and divide by that count, excluding the current partial month. Applies to categories, totals, income, net savings, and savings rate. | UI → Done | Mar 23 |
+| UI-03 | **Cashback Points Redemption Rate** — Points redemptions show pts count and ¢/pt rate inline to the left of the dollar value in the Recent Redemptions table. | UI → Done | Mar 23 |
+| FEA-37 | **Rakuten Cashback Email Import** — Rakuten parser in Edge Function extracts cashback amount and order date from forwarded emails (detects via email body). Store name from forwarding note. On commit, auto-links to parent purchase (fuzzy store match ±30 days), inherits category + service dates, creates `cashback_redemptions` record (card: Rakuten). | Feature → Done | Mar 24 |
 | FEA-69 | **Linked Transaction Aggregation in Ledger** — Linked groups collapse into summary rows (net amount, dominant fields, union service period, AI smart labels). Click to expand child rows. Edit modal links open target transaction directly. Service date changes prompt to update all linked members. | Feature → Done | Mar 23 |
 | UI-02 | **Unrealized G/L Sign + Color** — IS KPI card shows +$X (green) for gains, ($X) (red) for losses instead of static teal. | UI → Done | Mar 23 |
 | BUG-16 | **Budget Target Auto-Sum** — Total Expenses auto-sums from parent category targets. Parents with subcategories auto-sum from children. Savings Rate = 100% − expenses. No longer manually editable. | Bug → Done | Mar 23 |
