@@ -56,6 +56,9 @@
 
 ---
 
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v0.7.0)</summary>
+
 ### v0.7.0 — Mar 16, 2026
 <sub>Deployed 2026-03-16 19:47 UTC</sub>
 
@@ -77,9 +80,6 @@
 - **BUG-14:** IS category column truncation — Widened fixed-layout category column from 110px to 140px so full names (e.g. "Entertainment") display without clipping.
 
 ---
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v0.6.0)</summary>
 
 ### v0.6.0 — Mar 15, 2026
 <sub>Deployed 2026-03-15</sub>
