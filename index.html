@@ -329,7 +329,24 @@ async function aiGroupLabels(groups){
   const result={};
   const uncached=groups.filter(g=>{const c=sessionStorage.getItem(`grp_label_${g.gid}`);if(c){result[g.gid]=c;return false}return true});
   if(!uncached.length)return result;
-  const prompt=`Generate short summary labels (under 40 chars) for these transaction groups. Examples: "Whole Foods x6", "Pinterest Payroll Jan 15-31", "Japan Trip Restaurants x4", "Rent + Utilities Feb".\n\nGroups:\n${uncached.map(g=>`Group ${g.gid}: ${g.members.map(m=>`${m.description} ($${m.amount_usd}, ${m.date})`).join("; ")}`).join("\n")}\n\nReturn ONLY a JSON object mapping group ID to label string.`;
+  // Fetch past manual corrections as few-shot examples (cached per session)
+  let examples="";
+  try{
+    let exCache=sessionStorage.getItem("grp_label_examples");
+    if(!exCache){
+      const ovs=await sb("group_overrides?label=not.is.null&order=updated_at.desc&limit=10&select=group_id,label");
+      if(ovs.length){
+        const exGids=ovs.map(o=>o.group_id);
+        const exTxns=await sb(`transactions?transaction_group_id=in.(${exGids.join(",")})&select=transaction_group_id,description,amount_usd,date&order=date`);
+        const exGroups={};exTxns.forEach(t=>{const g=t.transaction_group_id;if(!exGroups[g])exGroups[g]=[];exGroups[g].push(t)});
+        const lines=ovs.filter(o=>exGroups[o.group_id]?.length).map(o=>`${exGroups[o.group_id].map(t=>`${t.description} ($${t.amount_usd})`).join("; ")} => "${o.label}"`);
+        exCache=lines.join("\n");
+        sessionStorage.setItem("grp_label_examples",exCache);
+      }else{exCache="";sessionStorage.setItem("grp_label_examples","")}
+    }
+    if(exCache)examples=`\n\nHere are examples of preferred labels from past corrections:\n${exCache}\n`;
+  }catch(e){console.warn("Failed to fetch label examples:",e)}
+  const prompt=`Generate short summary labels (under 40 chars) for these transaction groups. Examples: "Whole Foods x6", "Pinterest Payroll Jan 15-31", "Japan Trip Restaurants x4", "Rent + Utilities Feb".${examples}\n\nGroups:\n${uncached.map(g=>`Group ${g.gid}: ${g.members.map(m=>`${m.description} ($${m.amount_usd}, ${m.date})`).join("; ")}`).join("\n")}\n\nReturn ONLY a JSON object mapping group ID to label string.`;
   try{
     const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:getAIModel(),max_tokens:1000,messages:[{role:"user",content:prompt}]})});
     if(!r.ok)return result;
@@ -3688,6 +3705,85 @@ function showSnapshotForm(accounts, lastDate, onSave, liveBals){
 // LEDGER
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
+function openGroupEditModal(gid,members,summary,override,onSaved){
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"560px"}});
+  // Header
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
+  const hdrLeft=h("div");
+  hdrLeft.append(h("h3",{style:{margin:"0"}},`Linked Group \uD83D\uDD17${members.length}`));
+  hdrLeft.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"4px"}},`Group ID: ${gid}`));
+  hdr.append(hdrLeft,h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
+  modal.append(hdr);
+  // Editable fields
+  function gRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
+  function gField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
+  const autoLabel=sessionStorage.getItem(`grp_label_${gid}`)||summary.label;
+  const gLabel=h("input",{class:"inp",type:"text",value:override?.label||"",placeholder:autoLabel});
+  const gCat=h("select",{class:"inp"});
+  gCat.append(h("option",{value:""},"Auto (dominant)"));
+  CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===(override?.category_id||""))o.selected=true;gCat.append(o)});
+  const gPt=h("select",{class:"inp"});
+  gPt.append(h("option",{value:""},"Auto (dominant)"));
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===(override?.payment_type||""))o.selected=true;gPt.append(o)});
+  const gTag=h("input",{class:"inp",type:"text",value:override?.tag||"",placeholder:summary.dominantTag||""});
+  modal.append(gRow(gField("Group Label",gLabel)));
+  modal.append(gRow(gField("Category",gCat),gField("Payment Type",gPt)));
+  modal.append(gRow(gField("Tag",gTag)));
+  // Net summary KPIs
+  const kpiRow=h("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:"12px",marginBottom:"16px",padding:"10px",background:"rgba(74,111,165,0.06)",borderRadius:"6px"}});
+  kpiRow.append(h("div",{style:{textAlign:"center"}},[h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)"}},"Net Amount"),h("div",{style:{fontSize:"16px",fontWeight:"700",color:summary.net<0?"var(--g)":"#fff",fontFamily:"var(--mono)"}},fmtF(Math.round(summary.net*100)/100))]));
+  kpiRow.append(h("div",{style:{textAlign:"center"}},[h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)"}},"Daily Cost"),h("div",{style:{fontSize:"16px",fontWeight:"700",color:"var(--g)",fontFamily:"var(--mono)"}},fmtF(Math.round(summary.netDailyCost*1e6)/1e6)+"/d")]));
+  kpiRow.append(h("div",{style:{textAlign:"center"}},[h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)"}},"Service Period"),h("div",{style:{fontSize:"13px",fontWeight:"600",color:"rgba(255,255,255,0.6)"}},fmtD(summary.serviceStart)+"\u2013"+fmtD(summary.serviceEnd))]));
+  modal.append(kpiRow);
+  // Member table
+  modal.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"8px"}},"Transactions"));
+  const mtbl=h("table",{style:{width:"100%",fontSize:"12px"}});
+  mtbl.innerHTML=`<thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Description</th><th style="text-align:left">Category</th><th style="text-align:right">Amount</th><th style="text-align:left" class="hide-m">Payment</th></tr></thead>`;
+  const mtbody=document.createElement("tbody");
+  members.forEach(m=>{
+    const tr=h("tr",{style:{cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)"},onClick:()=>{bg.remove();openLedgerEditModal(m,onSaved)}});
+    tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.5)",whiteSpace:"nowrap",padding:"6px 4px"}},fmtD(m.date)));
+    tr.append(h("td",{style:{color:"rgba(255,255,255,0.75)",maxWidth:"180px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"6px 4px"}},m.description||""));
+    const catTd=h("td",{style:{padding:"6px 4px"}});catTd.append(h("span",{class:"badge",style:{background:(CC[m.category_id]||"#666")+"22",color:CC[m.category_id]||"#888"}},m.category_id));tr.append(catTd);
+    tr.append(h("td",{class:"r m",style:{color:m.amount_usd<0?"var(--g)":"rgba(255,255,255,0.7)",padding:"6px 4px"}},fmtF(m.amount_usd)));
+    tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.35)",fontSize:"11px",padding:"6px 4px"}},m.payment_type||""));
+    tr.addEventListener("mouseenter",()=>tr.style.background="rgba(74,111,165,0.08)");
+    tr.addEventListener("mouseleave",()=>tr.style.background="");
+    mtbody.append(tr);
+  });
+  mtbl.append(mtbody);modal.append(h("div",{style:{maxHeight:"200px",overflowY:"auto",marginBottom:"16px"}},[mtbl]));
+  // Buttons
+  const btnRow=h("div",{style:{display:"flex",gap:"10px",justifyContent:"flex-end"}});
+  const resetBtn=h("button",{class:"pg-btn",style:{background:"rgba(224,122,95,0.15)",color:"#E07A5F"},onClick:async()=>{
+    if(!override&&!gLabel.value&&!gCat.value&&!gPt.value&&!gTag.value){bg.remove();return}
+    await sb(`group_overrides?group_id=eq.${gid}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});
+    sessionStorage.removeItem(`grp_label_${gid}`);
+    sessionStorage.removeItem("grp_label_examples");
+    bg.remove();if(onSaved)onSaved();
+  }},"Reset to Auto");
+  const saveBtn=h("button",{class:"pg-btn",style:{background:"var(--b)",color:"#fff"},onClick:async()=>{
+    const body={group_id:parseInt(gid),updated_at:new Date().toISOString()};
+    if(gLabel.value.trim())body.label=gLabel.value.trim();else body.label=null;
+    if(gCat.value)body.category_id=gCat.value;else body.category_id=null;
+    if(gPt.value)body.payment_type=gPt.value;else body.payment_type=null;
+    if(gTag.value.trim())body.tag=gTag.value.trim();else body.tag=null;
+    // Only save if at least one field is set
+    const hasAny=body.label||body.category_id||body.payment_type||body.tag;
+    if(!hasAny){
+      await sb(`group_overrides?group_id=eq.${gid}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});
+    }else{
+      await sb("group_overrides",{method:"POST",headers:{"Prefer":"return=minimal,resolution=merge-duplicates"},body:JSON.stringify(body)});
+    }
+    // Update DOM immediately
+    if(body.label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=body.label;sessionStorage.setItem(`grp_label_${gid}`,body.label)}
+    sessionStorage.removeItem("grp_label_examples");
+    bg.remove();if(onSaved)onSaved();
+  }},"Save");
+  btnRow.append(resetBtn,saveBtn);modal.append(btnRow);
+  bg.append(modal);document.body.append(bg);
+}
+
 function openLedgerEditModal(txn,onSaved){
   let seManual=false;
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
@@ -4646,6 +4742,10 @@ async function renderLedger(el){
     // Build group summaries for collapse/expand
     const groupMembers={};
     txns.forEach(t=>{if(t.transaction_group_id){const gid=t.transaction_group_id;if(!groupMembers[gid])groupMembers[gid]=[];groupMembers[gid].push(t)}});
+    // Fetch group overrides
+    const grpGids=Object.keys(groupMembers).filter(gid=>groupMembers[gid].length>=2);
+    const grpOverrides=grpGids.length?await sb(`group_overrides?group_id=in.(${grpGids.join(",")})&select=*`):[];
+    const overrideMap={};grpOverrides.forEach(o=>{overrideMap[o.group_id]=o});
     const groupSummaries={};
     for(const[gid,members]of Object.entries(groupMembers)){
       if(members.length<2)continue;
@@ -4659,16 +4759,18 @@ async function renderLedger(el){
       const ptS=Object.entries(ptF).sort((a,b)=>b[1]-a[1]);
       const tagF={};members.forEach(m=>{if(m.tag)tagF[m.tag]=(tagF[m.tag]||0)+1});
       const tagS=Object.entries(tagF).sort((a,b)=>b[1]-a[1]);
+      const ov=overrideMap[gid];
       groupSummaries[gid]={net,dateMax:dates[dates.length-1],
         serviceStart:sStarts[0]||dates[0],serviceEnd:sEnds[sEnds.length-1]||dates[dates.length-1],
-        dominantCat:catS[0][0],mixedCat:catS.length>1,
-        dominantPt:ptS.length?ptS[0][0]:"",mixedPt:ptS.length>1,
-        dominantTag:tagS.length?tagS[0][0]:"",
+        dominantCat:ov?.category_id||catS[0][0],mixedCat:ov?.category_id?false:catS.length>1,
+        dominantPt:ov?.payment_type||(ptS.length?ptS[0][0]:""),mixedPt:ov?.payment_type?false:ptS.length>1,
+        dominantTag:ov?.tag||(tagS.length?tagS[0][0]:""),
         netDailyCost:members.reduce((s,m)=>s+(m.daily_cost||0),0),
-        label:generateGroupLabel(members),memberCount:members.length};
+        label:ov?.label||generateGroupLabel(members),memberCount:members.length,
+        hasOverride:!!ov};
     }
-    // Fire-and-forget AI labels
-    const grpsForAI=Object.entries(groupMembers).filter(([,m])=>m.length>=2).map(([gid,members])=>({gid,members:members.map(m=>({description:m.description,amount_usd:m.amount_usd,category_id:m.category_id,date:m.date}))}));
+    // Fire-and-forget AI labels (skip groups with manual label overrides)
+    const grpsForAI=Object.entries(groupMembers).filter(([gid,m])=>m.length>=2&&!overrideMap[gid]?.label).map(([gid,members])=>({gid,members:members.map(m=>({description:m.description,amount_usd:m.amount_usd,category_id:m.category_id,date:m.date}))}));
     if(grpsForAI.length)aiGroupLabels(grpsForAI).then(labels=>{for(const[gid,label]of Object.entries(labels)){if(label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=label}}});
     // Subscription filter (client-side)
     if(f.subsOnly&&subMerchants.size){const before=txns.length;for(let i=txns.length-1;i>=0;i--){if(!subMerchants.has(normalizeMerchant(txns[i].description)))txns.splice(i,1)}}
@@ -4728,11 +4830,7 @@ async function renderLedger(el){
         // Summary row
         const str=h("tr",{class:"grp-summary",style:{cursor:"pointer",borderLeft:"3px solid var(--b)",background:"rgba(74,111,165,0.04)",
           ...(prevGroupId&&prevGroupId!==gid?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})},
-          onClick:()=>{
-            if(state.expandedGroups.has(gid))state.expandedGroups.delete(gid);else state.expandedGroups.add(gid);
-            document.querySelectorAll(`[data-grp-child="${gid}"]`).forEach(r=>{r.style.display=state.expandedGroups.has(gid)?"table-row":"none"});
-            const ch=document.querySelector(`[data-grp-chev="${gid}"]`);if(ch)ch.style.transform=state.expandedGroups.has(gid)?"rotate(90deg)":"";
-          }});
+          onClick:()=>openGroupEditModal(gid,groupMembers[gid]||[],summary,overrideMap[gid],loadPage)});
         prevGroupId=gid;
         // Checkbox (selects all members)
         const chk=h("input",{type:"checkbox",class:"ldg-chk",onClick:e=>e.stopPropagation(),onChange:e=>{
@@ -4745,7 +4843,12 @@ async function renderLedger(el){
         str.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},fmtD(summary.dateMax)));
         // Description: chevron + badge + label
         const descTd=h("td",{style:{color:"rgba(255,255,255,0.9)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
-        descTd.append(h("span",{style:{display:"inline-block",fontSize:"10px",marginRight:"4px",transition:"transform 0.15s",transform:isExpanded?"rotate(90deg)":""},"data-grp-chev":gid},"\u25B6"));
+        descTd.append(h("span",{style:{display:"inline-block",fontSize:"10px",marginRight:"4px",transition:"transform 0.15s",transform:isExpanded?"rotate(90deg)":"",cursor:"pointer",padding:"2px"},"data-grp-chev":gid,onClick:e=>{
+          e.stopPropagation();
+          if(state.expandedGroups.has(gid))state.expandedGroups.delete(gid);else state.expandedGroups.add(gid);
+          document.querySelectorAll(`[data-grp-child="${gid}"]`).forEach(r=>{r.style.display=state.expandedGroups.has(gid)?"table-row":"none"});
+          const ch=document.querySelector(`[data-grp-chev="${gid}"]`);if(ch)ch.style.transform=state.expandedGroups.has(gid)?"rotate(90deg)":"";
+        }},"\u25B6"));
         descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"var(--b)"}},`\uD83D\uDD17${summary.memberCount}`));
         descTd.append(h("span",{"data-grp-label":gid},sessionStorage.getItem(`grp_label_${gid}`)||summary.label));
         str.append(descTd);
