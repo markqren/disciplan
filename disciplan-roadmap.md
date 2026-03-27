@@ -6,7 +6,8 @@
 
 ## 🚀 Releases
 
-### v1.1.0 — Pending
+### v1.1.0 — Mar 27, 2026
+<sub>Deployed 2026-03-27</sub>
 
 **IS drilldown grouping, auto-link confirmation, market prices, portfolio polish.**
 
