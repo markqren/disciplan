@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#0a0a14">
 <link rel="manifest" href="/manifest.json">
 <link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💵</text></svg>">
 <title>The Disciplan</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
@@ -2359,23 +2360,73 @@ async function scanForReimbursementLinks(){
         expenses.splice(expenses.indexOf(bestMatch),1);
       }
     }
-    for(const link of links){
-      const expDate=link.expense.date,expSS=link.expense.service_start||expDate,expSE=link.expense.service_end||expDate;
-      const reimbSD=Math.round((new Date(expSE)-new Date(expSS))/864e5)+1;
-      const reimbDC=link.reimbursement.amount_usd/reimbSD;
-      const groupId=link.expense.transaction_group_id||Math.min(link.expense.id,link.reimbursement.id);
-      await sb(`transactions?id=eq.${link.reimbursement.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
-        transaction_group_id:groupId,
-        date:expDate,service_start:expSS,service_end:expSE,
-        service_days:reimbSD,daily_cost:reimbDC,
-        ...(link.reimbursement.category_id==="other"?{category_id:link.expense.category_id}:{})
-      })});
-      if(!link.expense.transaction_group_id){
-        await sb(`transactions?id=eq.${link.expense.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:groupId})});
-      }
-    }
-    if(links.length>0)console.log(`Auto-linked ${links.length} reimbursement(s)`);
+    if(links.length>0)showLinkConfirmModal(links);
   }catch(e){console.error("Link scan error:",e)}
+}
+
+async function applyReimbursementLinks(links){
+  for(const link of links){
+    const expDate=link.expense.date,expSS=link.expense.service_start||expDate,expSE=link.expense.service_end||expDate;
+    const reimbSD=Math.round((new Date(expSE)-new Date(expSS))/864e5)+1;
+    const reimbDC=link.reimbursement.amount_usd/reimbSD;
+    const groupId=link.expense.transaction_group_id||Math.min(link.expense.id,link.reimbursement.id);
+    await sb(`transactions?id=eq.${link.reimbursement.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
+      transaction_group_id:groupId,
+      date:expDate,service_start:expSS,service_end:expSE,
+      service_days:reimbSD,daily_cost:reimbDC,
+      ...(link.reimbursement.category_id==="other"?{category_id:link.expense.category_id}:{})
+    })});
+    if(!link.expense.transaction_group_id){
+      await sb(`transactions?id=eq.${link.expense.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:groupId})});
+    }
+  }
+  console.log(`Linked ${links.length} reimbursement(s)`);
+}
+
+function showLinkConfirmModal(links){
+  const bg=h("div",{class:"modal-bg"});
+  const modal=h("div",{class:"modal",style:{maxWidth:"560px"}});
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px"}});
+  const hdrText=h("div",{});
+  hdrText.append(h("h3",{style:{margin:"0",fontSize:"18px"}},"Confirm Auto-Links"));
+  hdrText.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"4px"}},`${links.length} suggested link${links.length>1?"s":""} — review before applying`));
+  hdr.append(hdrText);
+  const closeBtn=h("button",{style:{background:"rgba(255,255,255,0.06)",border:"none",borderRadius:"8px",width:"32px",height:"32px",cursor:"pointer",color:"rgba(255,255,255,0.5)",fontSize:"16px"},onClick:()=>bg.remove()},"✕");
+  hdr.append(closeBtn);
+  modal.append(hdr);
+  const checkboxes=[];
+  links.forEach((link,i)=>{
+    const row=h("div",{style:{background:"rgba(255,255,255,0.04)",borderRadius:"8px",padding:"12px 14px",marginBottom:"8px",display:"flex",gap:"12px",alignItems:"flex-start"}});
+    const chk=h("input",{type:"checkbox",checked:true,style:{marginTop:"3px",flexShrink:"0"}});
+    checkboxes.push(chk);
+    const info=h("div",{style:{flex:"1",fontSize:"13px"}});
+    const reimbColor=link.reimbursement.amount_usd<0?"#81B29A":"rgba(255,255,255,0.7)";
+    const expRow=h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:"4px"}});
+    expRow.append(h("span",{style:{color:"rgba(255,255,255,0.7)"}},link.expense.description));
+    expRow.append(h("span",{style:{fontFamily:"var(--mono)",color:"rgba(255,255,255,0.5)"}},fmtF(link.expense.amount_usd)));
+    const reimbRow=h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:"6px"}});
+    reimbRow.append(h("span",{style:{color:reimbColor}},link.reimbursement.description));
+    reimbRow.append(h("span",{style:{fontFamily:"var(--mono)",color:reimbColor}},fmtF(link.reimbursement.amount_usd)));
+    const meta=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)"}},`${fmtD(link.expense.date)} · ${link.expense.payment_type||""} · score ${link.score}`);
+    info.append(expRow,reimbRow,meta);
+    row.append(chk,info);
+    modal.append(row);
+  });
+  const errEl=h("div",{style:{color:"var(--r)",fontSize:"11px",minHeight:"16px",marginBottom:"4px"}});
+  modal.append(errEl);
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"8px"}});
+  const confirmBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
+    const selected=links.filter((_,i)=>checkboxes[i].checked);
+    if(!selected.length){bg.remove();return}
+    confirmBtn.textContent="Linking...";confirmBtn.disabled=true;
+    try{await applyReimbursementLinks(selected);bg.remove()}
+    catch(e){errEl.textContent="Failed: "+e.message;confirmBtn.textContent="Link Selected";confirmBtn.disabled=false}
+  }},"Link Selected");
+  const skipBtn=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Skip All");
+  btnRow.append(confirmBtn,skipBtn);
+  modal.append(btnRow);
+  bg.append(modal);
+  document.body.append(bg);
 }
 
 async function linkToGroup(txnA,txnB){
@@ -3114,9 +3165,66 @@ async function renderPortfolio(el){
       if(sumEl){let sh="";displayAccts.forEach(a=>{sh+=`<div class="pf-perf-row"><span style="color:rgba(255,255,255,0.45)">${a.label}</span><div style="display:flex;gap:12px"><span style="font-family:var(--mono);color:${pCol(a.pctReturn)}">${fPct(a.pctReturn)}</span><span style="font-family:var(--mono);min-width:50px;text-align:right;color:${pCol(a.annReturn)}">${fPct(a.annReturn)}</span></div></div>`});sumEl.innerHTML=sh}
     },100);
 
+
+    // ── Market Prices Card ──
+    const pricesCard=h("div",{class:"cd"});
+    const activeSymKeys=new Set();
+    acctData.forEach(a=>a.holdings.filter(hd=>!hd.sold&&hd.shares>0).forEach(hd=>activeSymKeys.add(hd.symbol)));
+    const activePriceSyms=symbols.filter(s=>activeSymKeys.has(s.symbol));
+
+    function renderPricesCard(){
+      if(activePriceSyms.length===0){pricesCard.innerHTML=`<h3 style="margin-bottom:8px">Market Prices</h3><p style="font-size:12px;color:rgba(255,255,255,0.3)">No active holdings.</p>`;return}
+      let ph=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h3>Market Prices</h3><span style="font-size:11px;color:rgba(255,255,255,0.3)">Click price to edit</span></div>`;
+      ph+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:4px 0 8px">Symbol</th><th style="text-align:left;padding:4px 8px 8px">Name</th><th style="text-align:left;padding:4px 8px 8px">Asset Class</th><th style="text-align:right;padding:4px 0 8px">Price</th><th style="text-align:right;padding:4px 0 8px 12px">As Of</th></tr></thead><tbody>`;
+      activePriceSyms.forEach(s=>{
+        const ac=PF_ACM[s.asset_class]||{label:s.asset_class||"—",color:"#9B8EA0"};
+        const price=parseFloat(s.latest_price||0);
+        const priceStr=price>0?`$${price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:`<span style="color:rgba(255,255,255,0.25)">—</span>`;
+        const asOf=s.price_as_of?s.price_as_of.slice(0,10):`<span style="color:rgba(255,255,255,0.2)">—</span>`;
+        ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:9px 0;font-family:var(--mono);font-weight:600;color:rgba(255,255,255,0.9)">${s.symbol}</td><td style="padding:9px 8px;color:rgba(255,255,255,0.45);font-size:11px">${s.name||"—"}</td><td style="padding:9px 8px"><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${ac.color}22;color:${ac.color};border:1px solid ${ac.color}44">${ac.label}</span></td><td style="padding:9px 0;text-align:right;font-family:var(--mono);cursor:pointer" data-price-sym="${s.symbol}">${priceStr}</td><td style="padding:9px 0 9px 12px;text-align:right;font-size:11px;color:rgba(255,255,255,0.35)">${asOf}</td></tr>`;
+      });
+      ph+=`</tbody></table>`;
+      pricesCard.innerHTML=ph;
+
+      // Inline price + date editing
+      pricesCard.querySelectorAll("[data-price-sym]").forEach(td=>{
+        td.addEventListener("click",e=>{
+          e.stopPropagation();
+          if(td.querySelector("input"))return;
+          const sym=td.dataset.priceSym;
+          const symObj=activePriceSyms.find(s=>s.symbol===sym);if(!symObj)return;
+          const oldPrice=parseFloat(symObj.latest_price||0);
+          const today=new Date().toISOString().slice(0,10);
+          const oldAsOf=symObj.price_as_of?symObj.price_as_of.slice(0,10):today;
+          td.innerHTML=`<div style="display:flex;gap:4px;justify-content:flex-end;align-items:center"><input type="number" step="0.01" value="${oldPrice||""}" placeholder="Price" style="width:72px;background:rgba(255,255,255,0.08);border:1px solid rgba(74,111,165,0.5);border-radius:3px;color:#e8e8e4;font-family:var(--mono);font-size:11px;text-align:right;padding:2px 4px;outline:none" id="pfPrIn_${sym}"><input type="date" value="${oldAsOf}" style="width:108px;background:rgba(255,255,255,0.08);border:1px solid rgba(74,111,165,0.5);border-radius:3px;color:#e8e8e4;font-size:11px;padding:2px 4px;outline:none" id="pfDtIn_${sym}"></div>`;
+          const pi=document.getElementById(`pfPrIn_${sym}`);
+          const di=document.getElementById(`pfDtIn_${sym}`);
+          pi.focus();pi.select();
+          const commit=async()=>{
+            const nv=parseFloat(pi.value);
+            const nd=di.value;
+            if(isNaN(nv)||nv<=0){renderPricesCard();return}
+            if(nv===oldPrice&&nd===oldAsOf){renderPricesCard();return}
+            try{
+              await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:nv,price_as_of:nd})});
+              symObj.latest_price=nv;symObj.price_as_of=nd;
+              renderPortfolio(el);
+            }catch(err){alert("Error saving price: "+err.message);renderPricesCard()}
+          };
+          const onBlur=()=>{setTimeout(()=>{if(!td.contains(document.activeElement))commit()},200)};
+          pi.addEventListener("blur",onBlur);
+          di.addEventListener("blur",onBlur);
+          pi.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();commit()}if(ev.key==="Escape"){renderPricesCard()}});
+          di.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();commit()}if(ev.key==="Escape"){renderPricesCard()}});
+        });
+      });
+    }
+    renderPricesCard();
+    body.append(pricesCard);
+
     // ── Holdings Card ──
     const holdCard=h("div",{class:"cd"});
-    holdCard.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><h3>Holdings</h3><button id="pfAddHoldBtn" class="btn" style="font-size:11px;padding:4px 12px">+ Add Holdings</button></div><div id="pfAddHoldForm" style="display:none"></div><div id="pfHoldings"></div>`;
+    holdCard.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><h3>Holdings</h3><button id="pfAddHoldBtn" class="btn" style="font-size:11px;padding:4px 12px;width:auto">+ Add Holdings</button></div><div id="pfAddHoldForm" style="display:none"></div><div id="pfHoldings"></div>`;
     body.append(holdCard);
 
     function renderHoldings(){
@@ -3775,11 +3883,38 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
   mhtml+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px">`;
   [["Total Accrued",fmtF(total),"var(--r)"],["Transactions",txnAccruals.length,"var(--b)"],["Per Day",daysInMonth>0?fmtF(total/daysInMonth):"—","var(--g)"]].forEach(([l,v,c])=>mhtml+=`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`);
   mhtml+=`</div>`;
+  // Build group summaries for parent row rendering
+  const isSummaries=new Map();
+  for(const g of sorted){
+    if(g.items.length<2)continue;
+    const gid=g.items[0].transaction_group_id;if(!gid)continue;
+    const netAmt=g.items.reduce((s,t)=>s+t.amount_usd,0);
+    const catCounts={};g.items.forEach(t=>{catCounts[t.category_id]=(catCounts[t.category_id]||0)+1});
+    const dominantCat=Object.entries(catCounts).sort((a,b)=>b[1]-a[1])[0][0];
+    const mixedCat=Object.keys(catCounts).length>1;
+    const dateMax=g.items.reduce((mx,t)=>t.date>mx?t.date:mx,"");
+    isSummaries.set(gid,{netAmt,netAccrual:g.net,dominantCat,mixedCat,dateMax,memberCount:g.items.length,label:generateGroupLabel(g.items),items:g.items});
+  }
+
   if(txnAccruals.length){
     const showCat=categoryId==="_expenses"||(isParent&&SUB_MAP[categoryId]);
+    const renderedIS=new Set();
     mhtml+=`<div style="margin-top:4px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">${txnAccruals.length} Transactions</div>`;
     mhtml+=`<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:4px 6px">Date</th><th style="text-align:left;padding:4px 6px">Description</th>${showCat?`<th style="text-align:left;padding:4px 6px" class="hide-m">Category</th>`:""}<th style="text-align:right;padding:4px 6px">Amount</th><th style="text-align:right;padding:4px 6px" class="hide-m">Accrual</th><th style="text-align:right;padding:4px 6px" class="hide-m">Days</th></tr></thead><tbody>`;
     txnAccruals.forEach(t=>{
+      const gid=t.transaction_group_id;
+      const gSummary=gid?isSummaries.get(gid):null;
+      if(gSummary&&!renderedIS.has(gid)){
+        renderedIS.add(gid);
+        const sNeg=gSummary.netAccrual<0;
+        mhtml+=`<tr class="is-grp-row" data-is-gid="${gid}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);border-left:3px solid var(--b);background:rgba(74,111,165,0.04)"><td style="padding:5px 6px;color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(gSummary.dateMax)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.9);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span class="is-grp-chev" data-is-grp-chev="${gid}" style="display:inline-block;font-size:10px;margin-right:4px;transition:transform 0.15s">&#9654;</span><span style="font-size:10px;margin-right:4px;color:var(--b)">🔗${gSummary.memberCount}</span>${gSummary.label}</td>${showCat?`<td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[gSummary.dominantCat]||"#666")}22;color:${CC[gSummary.dominantCat]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${gSummary.dominantCat}${gSummary.mixedCat?`<span style="margin-left:3px;font-size:9px;color:rgba(255,255,255,0.3)">+</span>`:""}</span></td>`:""}<td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${sNeg?"var(--g)":"rgba(255,255,255,0.75)"};font-weight:600">${fmtF(Math.round(gSummary.netAmt*100)/100)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${sNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(Math.round(gSummary.netAccrual*100)/100)}</td><td style="padding:5px 6px" class="hide-m"></td></tr>`;
+        gSummary.items.forEach(m=>{
+          const mNeg=m._accrual<0;
+          mhtml+=`<tr class="is-drill-row is-grp-child" data-tid="${m.id}" data-is-grp-child="${gid}" style="display:none;cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03);border-left:3px solid rgba(74,111,165,0.3)"><td style="padding:5px 6px;padding-left:12px;color:rgba(255,255,255,0.3);white-space:nowrap">${fmtD(m.date)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.5);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.description}</td>${showCat?`<td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[m.category_id]||"#666")}22;color:${CC[m.category_id]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${m.category_id}</span></td>`:""}<td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.4)">${fmtF(m.amount_usd)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${mNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(m._accrual)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.25)" class="hide-m">${m._oDays||""}</td></tr>`;
+        });
+        return;
+      }
+      if(gSummary&&renderedIS.has(gid))return;
       const isNeg=t._accrual<0;
       mhtml+=`<tr class="is-drill-row" data-tid="${t.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03)"><td style="padding:5px 6px;color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.date)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.7);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>${showCat?`<td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[t.category_id]||"#666")}22;color:${CC[t.category_id]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${t.category_id}</span></td>`:""}<td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.5)">${fmtF(t.amount_usd)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${isNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(t._accrual)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.3)" class="hide-m">${t._oDays||""}</td></tr>`;
     });
@@ -3789,17 +3924,31 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
   }
   const modal=h("div",{class:"modal",style:{maxWidth:"700px"}});
   modal.innerHTML=mhtml;
-  modal.querySelectorAll(".is-drill-row").forEach(row=>{
+  // Expand/collapse for linked groups
+  const expandedISGroups=new Set();
+  modal.querySelectorAll(".is-grp-row").forEach(row=>{
     row.addEventListener("click",()=>{
+      const gid=row.dataset.isGid;
+      if(expandedISGroups.has(gid)){expandedISGroups.delete(gid)}else{expandedISGroups.add(gid)}
+      const exp=expandedISGroups.has(gid);
+      modal.querySelectorAll(`[data-is-grp-child="${gid}"]`).forEach(r=>{r.style.display=exp?"table-row":"none"});
+      const ch=modal.querySelector(`[data-is-grp-chev="${gid}"]`);if(ch)ch.style.transform=exp?"rotate(90deg)":"";
+    });
+    row.addEventListener("mouseenter",()=>row.style.background="rgba(74,111,165,0.08)");
+    row.addEventListener("mouseleave",()=>row.style.background="rgba(74,111,165,0.04)");
+  });
+  modal.querySelectorAll(".is-drill-row").forEach(row=>{
+    row.addEventListener("click",e=>{
+      e.stopPropagation();
       const tid=parseInt(row.dataset.tid);
       const txn=txnAccruals.find(t=>t.id===tid);
       if(txn){bg.remove();openLedgerEditModal(txn,()=>showISDrilldown(categoryId,isParent,monthIndex,year))}
     });
-    row.addEventListener("mouseenter",()=>row.style.background="rgba(255,255,255,0.04)");
+    const isChild=row.classList.contains("is-grp-child");
+    row.addEventListener("mouseenter",()=>row.style.background=isChild?"rgba(74,111,165,0.06)":"rgba(255,255,255,0.04)");
     row.addEventListener("mouseleave",()=>row.style.background="transparent");
   });
-  bg.append(modal);
-  document.body.append(bg);
+
 }
 
 

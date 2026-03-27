@@ -1,12 +1,30 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 25, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 27, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
 
+### v1.1.0 — Pending
+
+**IS drilldown grouping, auto-link confirmation, market prices, portfolio polish.**
+
+#### Features
+- **FEA-80: IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions (same `transaction_group_id`) into parent summary rows with blue left border, 🔗 count badge, group label, and chevron expand/collapse. Child rows hidden by default; click parent to reveal. Clicking a child row opens the edit modal. Consistent with the existing pattern in Ledger and Tags detail modal.
+- **FEA-79: Auto-Link Confirmation Modal** — Reimbursement auto-linking now shows a confirmation modal before applying any links. Each proposed pair (expense + reimbursement) is listed with descriptions, amounts, and confidence score. All links pre-checked; uncheck any to skip. "Link Selected" applies only checked items; "Skip All" dismisses without linking. Fixes repeated bad links (e.g. Yadav → Balance adjustment) caused by unlinked transactions re-entering the scoring pool.
+- **FEA-78: Market Prices Table** — New card in the Portfolio tab listing all active holdings with their current price and "as of" date. Click any price cell to edit inline (price + date inputs). Saves to `investment_symbols.latest_price` / `price_as_of` via PATCH, then re-renders the full portfolio so all market values, gains, and KPIs update immediately. Designed for manual entry now; API sync planned for a future release.
+
+#### UI
+- **Emoji favicon** — Browser tab now shows 💵 instead of the default globe icon.
+
+#### Fixes
+- **BUG-18:** "+ Add Holdings" button rendered full-width due to `.btn` class having `width:100%`. Fixed by adding `width:auto` inline style to the button.
+
+---
+
 ### v1.0.0 — Mar 25, 2026
+<sub>Deployed 2026-03-25</sub>
 
 **Tag detail grouping, editable group summaries, portfolio lot management.**
 
@@ -146,10 +164,14 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (100 items)</summary>
+<summary><strong>✅ Completed</strong> (104 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-80 | **IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions into parent summary rows (blue border, 🔗 badge, label, chevron). Child rows hidden by default; click parent to expand. Consistent with Ledger and Tags modal grouping. | Feature → Done | Mar 27 |
+| FEA-79 | **Auto-Link Confirmation Modal** — Reimbursement auto-linking now shows a confirmation modal before applying any links. Each proposed pair lists expense + reimbursement with descriptions, amounts, and confidence score. All pre-checked; uncheck any to skip. Fixes repeated bad links (e.g. Yadav → Balance adjustment). | Feature → Done | Mar 27 |
+| FEA-78 | **Market Prices Table** — New card in the Portfolio tab showing all active holdings with their current price and as-of date. Click any price cell to edit inline (price + date). PATCHes `investment_symbols` and re-renders the full portfolio so market values, gains, and KPIs update immediately. Manual entry now; API sync planned. | Feature → Done | Mar 25 |
+| BUG-18 | **"+ Add Holdings" button full-width** — `.btn` class has `width:100%` which caused the button in the Holdings card header to render full-width. Fixed by adding `width:auto` inline style. | Bug → Done | Mar 25 |
 | FEA-76 | **Editable Group Summary with AI Learning** — Clicking a linked group summary row opens a Group Detail Modal with editable description, category, payment type, and tag. Manual edits persist in `group_overrides` Supabase table. AI labels incorporate past corrections as few-shot examples. Reset button reverts to auto-computed values. | Feature → Done | Mar 25 |
 | FEA-77 | **Portfolio Lot Management** — Inline edit shares/price on lot rows (PATCH with auto cost_basis), "+ Add Lot" row within expanded symbols (POST), "+ Add Holdings" button with account/symbol/lot creation form (supports new accounts and symbols), delete lot with two-click confirmation (DELETE). Full portfolio re-render on every change. | Feature → Done | Mar 25 |
 | FEA-75 | **Tag Detail Linked Transaction Grouping** — Tag detail modal collapses linked transactions into expandable summary rows (net amount/accrual, dominant category, 🔗 badge, group label). Chevron expands indented child rows. Groups sorted by |net accrual|. Overlap styling inherited from worst child. | Feature → Done | Mar 25 |
