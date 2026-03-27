@@ -6,6 +6,16 @@
 
 ## 🚀 Releases
 
+### v1.2.0 — pending
+<sub>Pending deploy</sub>
+
+**Portfolio lot CSV/XLSX import with auto price refresh.**
+
+#### Features
+- **FEA-81: Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" button in Holdings header opens an import form with account selector and file picker. Supports Schwab (Open Date/Cost/Share/Market Value format), eTrade (symbol header rows + indented date lot rows), and Health Equity (Fund Name/Shares/NAV) formats. Format detection uses 2+ identifying signals per format. Parses lots, deduplicates against existing DB lots (symbol + date + price key), and shows a preview table with New/Exists badges. "Import N New Lots" button creates missing `investment_symbols` as needed, bulk-inserts lots, then calls `refreshPortfolioPrices()` which tries Yahoo Finance first (5s timeout) and falls back to the implied price derived from the file. Price source tracked via `price_source` column (`live`/`csv`/`manual`) — visible as a badge in the Market Prices table. Annualized return now computed dynamically at render time (CAGR: `(price/price_exec)^(365.25/days_held) - 1`) rather than read from DB, so all cells update whenever market price changes. XLSX files loaded via SheetJS CDN (lazy-loaded on first use).
+
+---
+
 ### v1.1.0 — Mar 27, 2026
 <sub>Deployed 2026-03-27</sub>
 
@@ -14,7 +24,7 @@
 #### Features
 - **FEA-80: IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions (same `transaction_group_id`) into parent summary rows with blue left border, 🔗 count badge, group label, and chevron expand/collapse. Child rows hidden by default; click parent to reveal. Clicking a child row opens the edit modal. Consistent with the existing pattern in Ledger and Tags detail modal.
 - **FEA-79: Auto-Link Confirmation Modal** — Reimbursement auto-linking now shows a confirmation modal before applying any links. Each proposed pair (expense + reimbursement) is listed with descriptions, amounts, and confidence score. All links pre-checked; uncheck any to skip. "Link Selected" applies only checked items; "Skip All" dismisses without linking. Fixes repeated bad links (e.g. Yadav → Balance adjustment) caused by unlinked transactions re-entering the scoring pool.
-- **FEA-78: Market Prices Table** — New card in the Portfolio tab listing all active holdings with their current price and "as of" date. Click any price cell to edit inline (price + date inputs). Saves to `investment_symbols.latest_price` / `price_as_of` via PATCH, then re-renders the full portfolio so all market values, gains, and KPIs update immediately. Designed for manual entry now; API sync planned for a future release.
+- **FEA-78: Market Prices Table** — New card in the Portfolio tab listing all active holdings with their current price, source badge (Live/CSV/Manual), and "as of" date. Click any price cell to edit inline (price + date inputs). Saves to `investment_symbols.latest_price` / `price_as_of` / `price_source` via PATCH, then re-renders the full portfolio so all market values, gains, and KPIs update immediately.
 
 #### UI
 - **UI-05: Emoji favicon** — Browser tab now shows 💵 instead of the default globe icon.
@@ -166,10 +176,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (106 items)</summary>
+<summary><strong>✅ Completed</strong> (107 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-81 | **Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" button in Holdings header. Supports Schwab, eTrade, and Health Equity formats (2+ detection signals each). Deduplicates against existing lots (symbol+date+price key). Preview table with New/Exists badges. Imports missing symbols and lots, then refreshes prices via Yahoo Finance (5s timeout) with CSV implied-price fallback. `price_source` column (`live`/`csv`/`manual`) shown as badge in Market Prices table. Ann return now computed dynamically via CAGR at render time. XLSX supported via lazy-loaded SheetJS CDN. | Feature → Done | Mar 27 |
 | BUG-19 | **Rakuten cashback miscategorized as income** — Edge Function hardcoded `category_id: "income"`. Changed to `null`; category is now inherited from the parent purchase via `linkRakutenCashback`. Unlinked imports require manual assignment. | Bug → Done | Mar 27 |
 | UI-05 | **Emoji favicon** — Browser tab shows 💵 via SVG data URL favicon instead of the default globe icon. | UI → Done | Mar 27 |
 | FEA-80 | **IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions into parent summary rows (blue border, 🔗 badge, label, chevron). Child rows hidden by default; click parent to expand. Consistent with Ledger and Tags modal grouping. | Feature → Done | Mar 27 |

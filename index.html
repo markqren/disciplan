@@ -3020,7 +3020,7 @@ async function renderPortfolio(el){
       l.price_exec=parseFloat(l.price_exec||0);
       l.shares=parseFloat(l.shares||0);
       l.cost_basis=parseFloat(l.cost_basis||0);
-      l.ann_return=l.ann_return!=null?parseFloat(l.ann_return):null;
+      {const _p=parseFloat((symInfo[l.symbol]||{}).latest_price||0);const _d=l.lot_date?(Date.now()-new Date(l.lot_date).getTime())/864e5:0;l.ann_return=(_p>0&&l.price_exec>0&&_d>=7)?Math.pow(_p/l.price_exec,365.25/_d)-1:null;}
       l.market_value=l.sell_date?0:(price>0?l.shares*price:l.cost_basis);
     }
 
@@ -3173,15 +3173,17 @@ async function renderPortfolio(el){
     const activePriceSyms=symbols.filter(s=>activeSymKeys.has(s.symbol));
 
     function renderPricesCard(){
+      const srcBadge=src=>{const cfg={live:{label:"Live",color:"#2a9d8f"},csv:{label:"CSV",color:"#4A6FA5"},manual:{label:"Manual",color:"#9B8EA0"}};const c=cfg[src]||cfg.manual;return`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:${c.color}22;color:${c.color};border:1px solid ${c.color}44">${c.label}</span>`};
       if(activePriceSyms.length===0){pricesCard.innerHTML=`<h3 style="margin-bottom:8px">Market Prices</h3><p style="font-size:12px;color:rgba(255,255,255,0.3)">No active holdings.</p>`;return}
       let ph=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px"><h3>Market Prices</h3><span style="font-size:11px;color:rgba(255,255,255,0.3)">Click price to edit</span></div>`;
-      ph+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:4px 0 8px">Symbol</th><th style="text-align:left;padding:4px 8px 8px">Name</th><th style="text-align:left;padding:4px 8px 8px">Asset Class</th><th style="text-align:right;padding:4px 0 8px">Price</th><th style="text-align:right;padding:4px 0 8px 12px">As Of</th></tr></thead><tbody>`;
+      ph+=`<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:4px 0 8px">Symbol</th><th style="text-align:left;padding:4px 8px 8px">Name</th><th style="text-align:left;padding:4px 8px 8px">Asset Class</th><th style="text-align:right;padding:4px 8px 8px">Source</th><th style="text-align:right;padding:4px 0 8px">Price</th><th style="text-align:right;padding:4px 0 8px 12px">As Of</th></tr></thead><tbody>`;
       activePriceSyms.forEach(s=>{
         const ac=PF_ACM[s.asset_class]||{label:s.asset_class||"—",color:"#9B8EA0"};
         const price=parseFloat(s.latest_price||0);
         const priceStr=price>0?`$${price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:`<span style="color:rgba(255,255,255,0.25)">—</span>`;
         const asOf=s.price_as_of?s.price_as_of.slice(0,10):`<span style="color:rgba(255,255,255,0.2)">—</span>`;
-        ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:9px 0;font-family:var(--mono);font-weight:600;color:rgba(255,255,255,0.9)">${s.symbol}</td><td style="padding:9px 8px;color:rgba(255,255,255,0.45);font-size:11px">${s.name||"—"}</td><td style="padding:9px 8px"><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${ac.color}22;color:${ac.color};border:1px solid ${ac.color}44">${ac.label}</span></td><td style="padding:9px 0;text-align:right;font-family:var(--mono);cursor:pointer" data-price-sym="${s.symbol}">${priceStr}</td><td style="padding:9px 0 9px 12px;text-align:right;font-size:11px;color:rgba(255,255,255,0.35)">${asOf}</td></tr>`;
+        const src=srcBadge(s.price_source||"manual");
+        ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:9px 0;font-family:var(--mono);font-weight:600;color:rgba(255,255,255,0.9)">${s.symbol}</td><td style="padding:9px 8px;color:rgba(255,255,255,0.45);font-size:11px">${s.name||"—"}</td><td style="padding:9px 8px"><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${ac.color}22;color:${ac.color};border:1px solid ${ac.color}44">${ac.label}</span></td><td style="padding:9px 8px;text-align:right">${src}</td><td style="padding:9px 0;text-align:right;font-family:var(--mono);cursor:pointer" data-price-sym="${s.symbol}">${priceStr}</td><td style="padding:9px 0 9px 12px;text-align:right;font-size:11px;color:rgba(255,255,255,0.35)">${asOf}</td></tr>`;
       });
       ph+=`</tbody></table>`;
       pricesCard.innerHTML=ph;
@@ -3206,8 +3208,8 @@ async function renderPortfolio(el){
             if(isNaN(nv)||nv<=0){renderPricesCard();return}
             if(nv===oldPrice&&nd===oldAsOf){renderPricesCard();return}
             try{
-              await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:nv,price_as_of:nd})});
-              symObj.latest_price=nv;symObj.price_as_of=nd;
+              await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:nv,price_as_of:nd,price_source:"manual"})});
+              symObj.latest_price=nv;symObj.price_as_of=nd;symObj.price_source="manual";
               renderPortfolio(el);
             }catch(err){alert("Error saving price: "+err.message);renderPricesCard()}
           };
@@ -3224,7 +3226,7 @@ async function renderPortfolio(el){
 
     // ── Holdings Card ──
     const holdCard=h("div",{class:"cd"});
-    holdCard.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><h3>Holdings</h3><button id="pfAddHoldBtn" class="btn" style="font-size:11px;padding:4px 12px;width:auto">+ Add Holdings</button></div><div id="pfAddHoldForm" style="display:none"></div><div id="pfHoldings"></div>`;
+    holdCard.innerHTML=`<div style="display:flex;align-items:center;justify-content:space-between"><h3>Holdings</h3><div style="display:flex;gap:8px"><button id="pfImportLotsBtn" class="btn" style="font-size:11px;padding:4px 12px;width:auto">&#x2191; Import Lots</button><button id="pfAddHoldBtn" class="btn" style="font-size:11px;padding:4px 12px;width:auto">+ Add Holdings</button></div></div><div id="pfImportLotsForm" style="display:none"></div><div id="pfAddHoldForm" style="display:none"></div><div id="pfHoldings"></div>`;
     body.append(holdCard);
 
     function renderHoldings(){
@@ -3543,12 +3545,244 @@ async function renderPortfolio(el){
       });
     }
 
+    // ── Import Lots Form ──
+    const importLotsBtn=document.getElementById("pfImportLotsBtn");
+    const importLotsForm=document.getElementById("pfImportLotsForm");
+    if(importLotsBtn&&importLotsForm){
+      importLotsBtn.addEventListener("click",()=>{
+        const isOpen=importLotsForm.style.display!=="none";
+        if(isOpen){importLotsForm.style.display="none";importLotsBtn.innerHTML="&#x2191; Import Lots";return}
+        const acctOpts=accounts.map(a=>`<option value="${a.id}">${a.label} (${a.institution})</option>`).join("");
+        importLotsForm.innerHTML=`<div style="border:1px solid rgba(74,111,165,0.2);border-radius:8px;padding:14px;margin:12px 0;background:rgba(74,111,165,0.04)">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:12px">
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Account</label><select id="pfIlAcct" class="inp" style="font-size:12px;min-width:140px"><option value="">Select…</option>${acctOpts}</select></div>
+            <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">CSV or XLSX File</label><input type="file" id="pfIlFile" accept=".csv,.xlsx" style="font-size:11px;color:rgba(255,255,255,0.7)"></div>
+            <div style="display:flex;gap:6px;align-items:end;padding-bottom:1px"><button id="pfIlParse" class="btn" style="font-size:11px;padding:5px 14px">Preview</button><button id="pfIlCancel" class="btn" style="font-size:11px;padding:5px 10px;background:rgba(255,255,255,0.06)">Cancel</button></div>
+          </div>
+          <div id="pfIlPreview"></div>
+        </div>`;
+        importLotsForm.style.display="block";
+        importLotsBtn.textContent="Cancel Import";
+
+        document.getElementById("pfIlCancel").addEventListener("click",()=>{importLotsForm.style.display="none";importLotsBtn.innerHTML="&#x2191; Import Lots"});
+
+        document.getElementById("pfIlParse").addEventListener("click",async()=>{
+          const acctId=document.getElementById("pfIlAcct").value;
+          const file=document.getElementById("pfIlFile").files[0];
+          const prev=document.getElementById("pfIlPreview");
+          if(!acctId){prev.innerHTML=`<p style="color:var(--r);font-size:12px">Select an account.</p>`;return}
+          if(!file){prev.innerHTML=`<p style="color:var(--r);font-size:12px">Select a file.</p>`;return}
+          prev.innerHTML=`<p style="font-size:12px;color:rgba(255,255,255,0.4)">Parsing…</p>`;
+          try{
+            const parsed=await parsePortfolioFile(file);
+            if(!parsed.length){prev.innerHTML=`<p style="color:var(--r);font-size:12px">No lots found in file.</p>`;return}
+            const existingLots=lots.filter(l=>l.account_id===acctId);
+            const existingKeys=new Set(existingLots.map(l=>`${l.symbol}|${l.lot_date}|${parseFloat(l.price_exec).toFixed(4)}`));
+            const rows=parsed.map(p=>{
+              const key=`${p.symbol}|${p.lot_date}|${parseFloat(p.price_exec).toFixed(4)}`;
+              return{...p,exists:existingKeys.has(key)};
+            });
+            const newCount=rows.filter(r=>!r.exists).length;
+            let ph=`<div style="margin-top:8px"><div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px">${rows.length} lots parsed · ${newCount} new · ${rows.length-newCount} already exist</div>`;
+            ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:4px 8px 6px 0">Date</th><th style="text-align:left;padding:4px 8px 6px">Symbol</th><th style="text-align:right;padding:4px 8px 6px">Shares</th><th style="text-align:right;padding:4px 8px 6px">Price</th><th style="text-align:right;padding:4px 0 6px">Cost</th><th style="text-align:center;padding:4px 0 6px 8px">Status</th></tr></thead><tbody>`;
+            rows.forEach(r=>{
+              const statusBadge=r.exists?`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(155,142,160,0.15);color:rgba(255,255,255,0.3)">Exists</span>`:`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(42,157,143,0.15);color:#2a9d8f">New</span>`;
+              ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05);${r.exists?"opacity:0.45":""}"><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${r.lot_date}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toFixed(4)}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toFixed(2)}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toFixed(2)}</td><td style="padding:6px 0 6px 8px;text-align:center">${statusBadge}</td></tr>`;
+            });
+            ph+=`</tbody></table>`;
+            const newRows=rows.filter(r=>!r.exists);
+            if(newRows.length){
+              ph+=`<div style="margin-top:12px;display:flex;gap:8px"><button id="pfIlImport" class="btn" style="font-size:11px;padding:5px 16px">Import ${newRows.length} New Lot${newRows.length===1?"":"s"}</button></div>`;
+            }
+            ph+=`</div>`;
+            prev.innerHTML=ph;
+
+            if(newRows.length){
+              document.getElementById("pfIlImport").addEventListener("click",async()=>{
+                const btn=document.getElementById("pfIlImport");
+                btn.disabled=true;btn.textContent="Importing…";
+                try{
+                  const symSet=new Set(newRows.map(r=>r.symbol));
+                  const existSyms=new Set(symbols.map(s=>s.symbol));
+                  for(const sym of symSet){
+                    if(!existSyms.has(sym)){
+                      const implP=newRows.find(r=>r.symbol===sym)?.implied_price||null;
+                      await sb("investment_symbols",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({symbol:sym,name:sym,asset_class:"equity",latest_price:implP})});
+                    }
+                  }
+                  for(const r of newRows){
+                    await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:r.symbol,lot_date:r.lot_date,shares:r.shares,price_exec:r.price_exec,cost_basis:r.cost_basis})});
+                  }
+                  const impliedPrices={};
+                  newRows.forEach(r=>{if(r.implied_price>0)impliedPrices[r.symbol]=r.implied_price});
+                  await refreshPortfolioPrices([...symSet],impliedPrices);
+                  importLotsForm.style.display="none";
+                  importLotsBtn.innerHTML="&#x2191; Import Lots";
+                  if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
+                  renderPortfolio(el);
+                }catch(err){alert("Import error: "+err.message);btn.disabled=false;btn.textContent="Retry Import"}
+              });
+            }
+          }catch(err){prev.innerHTML=`<p style="color:var(--r);font-size:12px">Parse error: ${err.message}</p>`}
+        });
+      });
+    }
+
     // ── Footer ──
     const foot=h("div",{class:"pf-foot"});
     foot.innerHTML=`<span>${totalLots} lots · ${accounts.length} accounts · ${totalSyms.size} symbols</span>${priceDate?`<span>Prices as of ${fmtD(priceDate)}</span>`:""}`;
     body.append(foot);
 
   }catch(e){document.getElementById("pfBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error loading portfolio: ${e.message}</div>`}
+}
+
+
+// ── Portfolio Import Helpers ──
+async function loadSheetJS(){
+  if(window.XLSX)return;
+  await new Promise((res,rej)=>{const s=document.createElement("script");s.src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";s.onload=res;s.onerror=rej;document.head.append(s)});
+}
+
+function detectPortfolioFormat(rows){
+  const flat=rows.map(r=>(r||[]).map(c=>String(c||"")).join("|")).join("\n").toLowerCase();
+  // Schwab: "open date" header + "cost/share" column + dollar-sign values
+  const hasSchwabHeaders=/open.?date/.test(flat)&&/cost.?share/.test(flat);
+  const hasDollarVals=rows.some(r=>(r||[]).some(c=>/^\$[\d,]+/.test(String(c||""))));
+  if(hasSchwabHeaders&&hasDollarVals)return"schwab";
+  // eTrade: "account summary" + "net account value" in header block
+  const hasAccountSummary=/account summary/.test(flat);
+  const hasNetAccountValue=/net account value/.test(flat);
+  if(hasAccountSummary&&hasNetAccountValue)return"etrade";
+  // Health Equity: "health equity" + "fund name"
+  const hasHE=/health.?equity/.test(flat);
+  const hasFundName=/fund.?name/.test(flat);
+  if(hasHE&&hasFundName)return"healthequity";
+  return"unknown";
+}
+
+function parseSchwabLots(rows,symbol){
+  const headerIdx=rows.findIndex(r=>(r||[]).some(c=>/open\s*date/i.test(String(c))));
+  if(headerIdx<0)throw new Error("Schwab: header row not found");
+  const hdr=rows[headerIdx];
+  const col=n=>hdr.findIndex(c=>new RegExp(n,"i").test(String(c)));
+  const iDate=col("open date"),iQty=col("quantity"),iCost=col("cost.?share"),iMkt=col("market value"),iCostBasis=col("cost basis");
+  let sym=symbol;
+  if(!sym){const title=(rows[0]||[]).join(" ");const m=title.match(/([A-Z]{1,5})\s+Lot/i);if(m)sym=m[1].toUpperCase();}
+  if(!sym)sym="UNKNOWN";
+  const lots=[];const impliedPrices=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]||[];
+    const dateVal=String(r[iDate]||"").trim();
+    if(!dateVal||/total/i.test(dateVal)||!/\d{2}\/\d{2}\/\d{4}/.test(dateVal))continue;
+    const qty=parseFloat(String(r[iQty]||"").replace(/[^0-9.-]/g,""));
+    const costShare=parseFloat(String(r[iCost]||"").replace(/[^0-9.-]/g,""));
+    const mktVal=parseFloat(String(r[iMkt]||"").replace(/[^0-9.-]/g,""));
+    const cbRaw=iCostBasis>=0?parseFloat(String(r[iCostBasis]||"").replace(/[^0-9.-]/g,"")):NaN;
+    const cb=isNaN(cbRaw)?Math.round(qty*costShare*100)/100:cbRaw;
+    if(isNaN(qty)||isNaN(costShare)||qty<=0||costShare<=0)continue;
+    const[mm,dd,yyyy]=dateVal.split("/");
+    const lot_date=`${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+    lots.push({symbol:sym,lot_date,shares:Math.round(qty*1e6)/1e6,price_exec:Math.round(costShare*1e6)/1e6,cost_basis:Math.round(cb*100)/100,implied_price:0});
+    if(mktVal>0&&qty>0)impliedPrices.push(mktVal/qty);
+  }
+  const impliedPrice=impliedPrices.length?impliedPrices.reduce((a,b)=>a+b,0)/impliedPrices.length:0;
+  lots.forEach(l=>l.implied_price=impliedPrice);
+  return lots;
+}
+
+function parseEtradeLots(rows){
+  const lots=[];let currentSym=null;let impliedPrice=0;
+  for(let i=0;i<rows.length;i++){
+    const r=rows[i]||[];
+    const first=String(r[0]||"").trim();
+    if(/^[A-Z]{1,5}$/.test(first)&&r.length>5){
+      currentSym=first;
+      const lp=parseFloat(String(r[1]||"").replace(/[^0-9.-]/g,""));
+      if(lp>0)impliedPrice=lp;
+      continue;
+    }
+    if(currentSym){
+      const raw=String(r[0]||"");
+      const dateM=raw.match(/(\d{2}\/\d{2}\/\d{4})/);
+      if(dateM){
+        const[mm,dd,yyyy]=dateM[1].split("/");
+        const lot_date=`${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
+        const qty=parseFloat(String(r[4]||"").replace(/[^0-9.-]/g,""));
+        const pricePaid=parseFloat(String(r[5]||"").replace(/[^0-9.-]/g,""));
+        if(isNaN(qty)||isNaN(pricePaid)||qty<=0||pricePaid<=0)continue;
+        lots.push({symbol:currentSym,lot_date,shares:Math.round(qty*1e6)/1e6,price_exec:Math.round(pricePaid*1e6)/1e6,cost_basis:Math.round(qty*pricePaid*100)/100,implied_price:impliedPrice});
+      }
+    }
+  }
+  return lots;
+}
+
+function parseHealthEquityLots(rows){
+  const headerIdx=rows.findIndex(r=>(r||[]).some(c=>/fund\s*name/i.test(String(c))));
+  if(headerIdx<0)throw new Error("HealthEquity: header row not found");
+  const hdr=rows[headerIdx];
+  const col=n=>hdr.findIndex(c=>new RegExp(n,"i").test(String(c)));
+  const iFund=col("fund"),iSym=col("symbol|ticker"),iShares=col("shares|units|qty"),iPrice=col("price|nav"),iDate=col("date|purchased");
+  const today=new Date().toISOString().slice(0,10);
+  const lots=[];
+  for(let i=headerIdx+1;i<rows.length;i++){
+    const r=rows[i]||[];
+    if(r.every(c=>!String(c||"").trim()))continue;
+    const sym=iSym>=0&&String(r[iSym]||"").trim()?String(r[iSym]).trim().toUpperCase():String(r[iFund]||"").trim().substring(0,8).toUpperCase();
+    if(!sym)continue;
+    const qty=parseFloat(String(r[iShares]||"").replace(/[^0-9.-]/g,""));
+    const price=parseFloat(String(r[iPrice]||"").replace(/[^0-9.-]/g,""));
+    if(isNaN(qty)||isNaN(price)||qty<=0||price<=0)continue;
+    const lotRaw=iDate>=0&&r[iDate]?String(r[iDate]).trim():"";
+    let lot_date=today;
+    const dm=lotRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+    if(dm){const yy=dm[3].length===2?"20"+dm[3]:dm[3];lot_date=`${yy}-${dm[1].padStart(2,"0")}-${dm[2].padStart(2,"0")}`;}
+    else if(/\d{4}-\d{2}-\d{2}/.test(lotRaw))lot_date=lotRaw.slice(0,10);
+    lots.push({symbol:sym,lot_date,shares:Math.round(qty*1e6)/1e6,price_exec:Math.round(price*1e6)/1e6,cost_basis:Math.round(qty*price*100)/100,implied_price:price});
+  }
+  return lots;
+}
+
+async function parsePortfolioFile(file){
+  const ext=file.name.split(".").pop().toLowerCase();
+  let rows=[];
+  if(ext==="csv"){
+    const text=await file.text();
+    rows=text.split("\n").map(line=>{
+      const out=[];let cur="";let inQ=false;
+      for(const ch of line){if(ch==='"'){inQ=!inQ}else if(ch===","&&!inQ){out.push(cur.trim());cur=""}else cur+=ch}
+      out.push(cur.trim());return out;
+    });
+  }else if(ext==="xlsx"||ext==="xls"){
+    await loadSheetJS();
+    const buf=await file.arrayBuffer();
+    const wb=XLSX.read(buf,{type:"array"});
+    const ws=wb.Sheets[wb.SheetNames[0]];
+    rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+  }else throw new Error("Unsupported file type: ."+ext);
+  const fmt=detectPortfolioFormat(rows);
+  if(fmt==="schwab")return parseSchwabLots(rows,null);
+  if(fmt==="etrade")return parseEtradeLots(rows);
+  if(fmt==="healthequity")return parseHealthEquityLots(rows);
+  throw new Error("Unrecognized file format. Supported: Schwab, eTrade, Health Equity.");
+}
+
+async function refreshPortfolioPrices(symbolList,impliedPrices={}){
+  for(const sym of symbolList){
+    try{
+      let price=null,source="csv";
+      try{
+        const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),5000);
+        const resp=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`,{signal:ctrl.signal});
+        clearTimeout(tid);
+        if(resp.ok){const j=await resp.json();const p=j?.chart?.result?.[0]?.meta?.regularMarketPrice;if(p>0){price=p;source="live";}}
+      }catch(_){}
+      if(!price&&impliedPrices[sym]>0){price=impliedPrices[sym];source="csv";}
+      if(!price)continue;
+      const today=new Date().toISOString().slice(0,10);
+      await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:price,price_as_of:today,price_source:source})});
+    }catch(err){console.warn("refreshPortfolioPrices error for",sym,err)}
+  }
 }
 
 
