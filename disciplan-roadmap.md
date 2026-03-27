@@ -6,18 +6,15 @@
 
 ## 🚀 Releases
 
-### v1.2.0 — pending
-<sub>Pending deploy</sub>
+### v1.1.1 — Mar 27, 2026
+<sub>Deployed 2026-03-27</sub>
 
-**Portfolio lot CSV/XLSX import with auto price refresh.**
-
-#### Features
-- **FEA-81: Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" button in Holdings header opens an import form with account selector and file picker. Supports Schwab (Open Date/Cost/Share/Market Value format), eTrade (symbol header rows + indented date lot rows), and Health Equity (Fund Name/Shares/NAV) formats. Format detection uses 2+ identifying signals per format. Parses lots, deduplicates against existing DB lots (symbol + date + price key), and shows a preview table with New/Exists badges. "Import N New Lots" button creates missing `investment_symbols` as needed, bulk-inserts lots, then calls `refreshPortfolioPrices()` which tries Yahoo Finance first (5s timeout) and falls back to the implied price derived from the file. Price source tracked via `price_source` column (`live`/`csv`/`manual`) — visible as a badge in the Market Prices table. Annualized return now computed dynamically at render time (CAGR: `(price/price_exec)^(365.25/days_held) - 1`) rather than read from DB, so all cells update whenever market price changes. XLSX files loaded via SheetJS CDN (lazy-loaded on first use).
+- **FEA-81: Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" in Holdings header. Parses Schwab, eTrade, and Health Equity files (2+ detection signals each), deduplicates against existing lots, shows preview with New/Exists badges, then bulk-inserts and refreshes prices via Yahoo Finance (CSV implied-price fallback). Source badge (Live/CSV/Manual) in Market Prices table. Ann return now dynamic CAGR at render time.
 
 ---
 
 ### v1.1.0 — Mar 27, 2026
-<sub>Deployed 2026-03-27</sub>
+<sub>Deployed 2026-03-27 · superseded by v1.1.1</sub>
 
 **IS drilldown grouping, auto-link confirmation, market prices, portfolio polish.**
 
