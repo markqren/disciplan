@@ -16,7 +16,7 @@
 - **FEA-78: Market Prices Table** — New card in the Portfolio tab listing all active holdings with their current price and "as of" date. Click any price cell to edit inline (price + date inputs). Saves to `investment_symbols.latest_price` / `price_as_of` via PATCH, then re-renders the full portfolio so all market values, gains, and KPIs update immediately. Designed for manual entry now; API sync planned for a future release.
 
 #### UI
-- **Emoji favicon** — Browser tab now shows 💵 instead of the default globe icon.
+- **UI-05: Emoji favicon** — Browser tab now shows 💵 instead of the default globe icon.
 
 #### Fixes
 - **BUG-18:** "+ Add Holdings" button rendered full-width due to `.btn` class having `width:100%`. Fixed by adding `width:auto` inline style to the button.
@@ -164,10 +164,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (104 items)</summary>
+<summary><strong>✅ Completed</strong> (105 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| UI-05 | **Emoji favicon** — Browser tab shows 💵 via SVG data URL favicon instead of the default globe icon. | UI → Done | Mar 27 |
 | FEA-80 | **IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions into parent summary rows (blue border, 🔗 badge, label, chevron). Child rows hidden by default; click parent to expand. Consistent with Ledger and Tags modal grouping. | Feature → Done | Mar 27 |
 | FEA-79 | **Auto-Link Confirmation Modal** — Reimbursement auto-linking now shows a confirmation modal before applying any links. Each proposed pair lists expense + reimbursement with descriptions, amounts, and confidence score. All pre-checked; uncheck any to skip. Fixes repeated bad links (e.g. Yadav → Balance adjustment). | Feature → Done | Mar 27 |
 | FEA-78 | **Market Prices Table** — New card in the Portfolio tab showing all active holdings with their current price and as-of date. Click any price cell to edit inline (price + date). PATCHes `investment_symbols` and re-renders the full portfolio so market values, gains, and KPIs update immediately. Manual entry now; API sync planned. | Feature → Done | Mar 25 |
