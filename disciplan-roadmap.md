@@ -19,6 +19,7 @@
 - **UI-05: Emoji favicon** — Browser tab now shows 💵 instead of the default globe icon.
 
 #### Fixes
+- **BUG-19:** Rakuten cashback imported as `income` category instead of inheriting from the linked parent purchase. Edge Function was hardcoding `category_id: "income"`. Changed to `null` — `linkRakutenCashback` already patches the category from the parent when found; unlinked imports now require manual assignment rather than silently miscategorizing.
 - **BUG-18:** "+ Add Holdings" button rendered full-width due to `.btn` class having `width:100%`. Fixed by adding `width:auto` inline style to the button.
 
 ---
@@ -164,10 +165,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (105 items)</summary>
+<summary><strong>✅ Completed</strong> (106 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-19 | **Rakuten cashback miscategorized as income** — Edge Function hardcoded `category_id: "income"`. Changed to `null`; category is now inherited from the parent purchase via `linkRakutenCashback`. Unlinked imports require manual assignment. | Bug → Done | Mar 27 |
 | UI-05 | **Emoji favicon** — Browser tab shows 💵 via SVG data URL favicon instead of the default globe icon. | UI → Done | Mar 27 |
 | FEA-80 | **IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions into parent summary rows (blue border, 🔗 badge, label, chevron). Child rows hidden by default; click parent to expand. Consistent with Ledger and Tags modal grouping. | Feature → Done | Mar 27 |
 | FEA-79 | **Auto-Link Confirmation Modal** — Reimbursement auto-linking now shows a confirmation modal before applying any links. Each proposed pair lists expense + reimbursement with descriptions, amounts, and confidence score. All pre-checked; uncheck any to skip. Fixes repeated bad links (e.g. Yadav → Balance adjustment). | Feature → Done | Mar 27 |
