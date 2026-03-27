@@ -372,7 +372,8 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
 
   const description = `Rakuten - ${merchantName}`;
 
-  // Rakuten cashback is categorized as "income" (it's earned cash back)
+  // Category is null — will be inherited from the linked parent purchase by linkRakutenCashback.
+  // If no parent is found, remains null for manual assignment.
   // payment_type = "Rakuten" (the Working Capital account)
   let tag: string | undefined;
   if (forwardingNote?.tag) tag = forwardingNote.tag;
@@ -381,7 +382,7 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
     date: orderDate,
     description,
     amount_usd: amountUsd,
-    category_id: "income",  // Cashback earned = income
+    category_id: null,  // Inherited from parent purchase on link
     payment_type: "Rakuten",  // Working Capital account
     tag,
     service_start: orderDate,
