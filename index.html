@@ -2381,6 +2381,20 @@ function rejectLinks(links){
     localStorage.setItem("rejected_links",JSON.stringify(existing));
   }catch(e){console.warn("Failed to save rejected links:",e)}
 }
+function lotRejKey(r){return`${r.symbol}:${String(r.lot_date).slice(0,10)}:${parseFloat(r.shares).toFixed(4)}`}
+function isLotRejected(r){
+  try{const s=localStorage.getItem("rejected_lots");if(!s)return false;return JSON.parse(s).includes(lotRejKey(r))}
+  catch(e){return false}
+}
+function persistLotRejection(r,rejected){
+  try{
+    const s=localStorage.getItem("rejected_lots");const existing=s?JSON.parse(s):[];const k=lotRejKey(r);
+    const idx=existing.indexOf(k);
+    if(rejected&&idx<0)existing.push(k);
+    else if(!rejected&&idx>=0)existing.splice(idx,1);
+    localStorage.setItem("rejected_lots",JSON.stringify(existing));
+  }catch(e){console.warn("Failed to save rejected lot:",e)}
+}
 
 async function applyReimbursementLinks(links){
   for(const link of links){
@@ -3606,39 +3620,44 @@ async function renderPortfolio(el){
               const s1=parseFloat(e.shares),s2=parseFloat(p.shares);
               return Math.abs(s1-s2)/Math.max(s1,s2,0.0001)<0.02;
             });
-            const rows=parsed.map((p,i)=>({...p,_idx:i,exists:isDup(p)}));
-            const newCount=rows.filter(r=>!r.exists).length;
-            let ph=`<div style="margin-top:8px"><div id="pfIlSummary" style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px">${rows.length} lots parsed · <span id="pfIlSelCount">${newCount}</span> selected</div>`;
-            ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="padding:4px 8px 6px 0;text-align:center"><input type="checkbox" id="pfIlChkAll" title="Select all" checked></th><th style="text-align:left;padding:4px 8px 6px 0">Date</th><th style="text-align:left;padding:4px 8px 6px">Symbol</th><th style="text-align:right;padding:4px 8px 6px">Shares</th><th style="text-align:right;padding:4px 8px 6px">Price</th><th style="text-align:right;padding:4px 0 6px">Cost</th><th style="text-align:center;padding:4px 0 6px 8px">Status</th></tr></thead><tbody>`;
+            const rows=parsed.map((p,i)=>({...p,_idx:i,exists:isDup(p),rejected:!isDup(p)&&isLotRejected(p)}));
+            const initialCount=rows.filter(r=>!r.exists&&!r.rejected).length;
+            function updateLotImportBtn(){
+              const n=prev.querySelectorAll(".pfIlChk:checked").length;
+              document.getElementById("pfIlSelCount").textContent=n;
+              const btn=document.getElementById("pfIlImport");
+              if(btn)btn.textContent=`Import ${n} Lot${n===1?"":"s"}`;
+            }
+            let ph=`<div style="margin-top:8px"><div id="pfIlSummary" style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px">${rows.length} lots parsed · <span id="pfIlSelCount">${initialCount}</span> selected</div>`;
+            ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="padding:4px 8px 6px 0;text-align:center"><input type="checkbox" id="pfIlChkAll" title="Select all"></th><th style="text-align:left;padding:4px 8px 6px 0">Date</th><th style="text-align:left;padding:4px 8px 6px">Symbol</th><th style="text-align:right;padding:4px 8px 6px">Shares</th><th style="text-align:right;padding:4px 8px 6px">Price</th><th style="text-align:right;padding:4px 0 6px">Cost</th><th style="text-align:center;padding:4px 0 6px 8px">Status</th></tr></thead><tbody>`;
             rows.forEach(r=>{
               const isNew=!r.exists;
+              const isChecked=isNew&&!r.rejected;
               const badge=isNew?`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(42,157,143,0.15);color:#2a9d8f">New</span>`:`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(155,142,160,0.15);color:rgba(255,255,255,0.3)">Exists</span>`;
-              ph+=`<tr data-idx="${r._idx}" style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:6px 8px 6px 0;text-align:center"><input type="checkbox" class="pfIlChk" data-idx="${r._idx}" ${isNew?"checked":""}></td><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${r.lot_date}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toFixed(4)}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toFixed(2)}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toFixed(2)}</td><td style="padding:6px 0 6px 8px;text-align:center">${badge}</td></tr>`;
+              ph+=`<tr data-idx="${r._idx}" style="border-top:1px solid rgba(255,255,255,0.05);opacity:${isChecked?"1":"0.3"}"><td style="padding:6px 8px 6px 0;text-align:center"><input type="checkbox" class="pfIlChk" data-idx="${r._idx}" ${isChecked?"checked":""}></td><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${r.lot_date}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toFixed(4)}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toFixed(2)}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toFixed(2)}</td><td style="padding:6px 0 6px 8px;text-align:center">${badge}</td></tr>`;
             });
             ph+=`</tbody></table>`;
-            ph+=`<div style="margin-top:12px;display:flex;gap:8px"><button id="pfIlImport" class="btn" style="font-size:11px;padding:5px 16px">Import <span id="pfIlImportCount">${newCount}</span> Lot${newCount===1?"":"s"}</button></div>`;
+            ph+=`<div style="margin-top:12px;display:flex;gap:8px"><button id="pfIlImport" class="btn" style="font-size:11px;padding:5px 16px">Import ${initialCount} Lot${initialCount===1?"":"s"}</button></div>`;
             ph+=`</div>`;
             prev.innerHTML=ph;
 
             // Select-all toggle
             document.getElementById("pfIlChkAll").addEventListener("change",e=>{
-              prev.querySelectorAll(".pfIlChk").forEach(c=>c.checked=e.target.checked);
-              const n=prev.querySelectorAll(".pfIlChk:checked").length;
-              document.getElementById("pfIlSelCount").textContent=n;
-              document.getElementById("pfIlImportCount").textContent=n;
-              document.getElementById("pfIlImport").textContent=`Import ${n} Lot${n===1?"":"s"}`;
+              prev.querySelectorAll(".pfIlChk").forEach(c=>{
+                c.checked=e.target.checked;
+                c.closest("tr").style.opacity=c.checked?"1":"0.3";
+                const r=rows.find(r=>r._idx===parseInt(c.dataset.idx));
+                if(r&&!r.exists)persistLotRejection(r,!c.checked);
+              });
+              updateLotImportBtn();
             });
-            // Per-row checkbox updates count
+            // Per-row checkbox: update count + persist rejection
             prev.querySelectorAll(".pfIlChk").forEach(c=>c.addEventListener("change",()=>{
-              const n=prev.querySelectorAll(".pfIlChk:checked").length;
-              document.getElementById("pfIlSelCount").textContent=n;
-              document.getElementById("pfIlImportCount").textContent=n;
-              document.getElementById("pfIlImport").textContent=`Import ${n} Lot${n===1?"":"s"}`;
-              // Fade unchecked rows
               c.closest("tr").style.opacity=c.checked?"1":"0.3";
+              const r=rows.find(r=>r._idx===parseInt(c.dataset.idx));
+              if(r&&!r.exists)persistLotRejection(r,!c.checked);
+              updateLotImportBtn();
             }));
-            // Fade existing rows that are unchecked by default
-            prev.querySelectorAll(".pfIlChk:not(:checked)").forEach(c=>c.closest("tr").style.opacity="0.3");
 
             document.getElementById("pfIlImport").addEventListener("click",async()=>{
               const selectedIdxs=new Set([...prev.querySelectorAll(".pfIlChk:checked")].map(c=>parseInt(c.dataset.idx)));

@@ -8,9 +8,11 @@
 
 ### v1.1 — Mar 27, 2026
 
-#### v1.1.2
-<sub>Pending deploy</sub>
+#### v1.1.3
+<sub>Deployed 2026-03-27</sub>
 
+- **BUG-20c:** Lot import button count frozen on deselect; deselected new lots not remembered. Root cause: per-row checkbox handler called `textContent` on the button which destroyed the inner `<span>`, causing subsequent `getElementById("pfIlImportCount")` calls to null-crash and halt execution. Fix: replaced span-based update with a single `updateLotImportBtn()` helper using `btn.textContent` cleanly. Added `localStorage.rejected_lots` (keyed by `symbol:date:shares`) — deselecting a new lot saves it as rejected; re-checking removes it. Rejected lots start pre-unchecked on future imports. Select-all also persists rejections per row.
+- **BUG-21b:** Skipped/rejected auto-link suggestions had no persistence — "Skip All" dismissed the modal but the same pairs reappeared every page load. Added `rejected_links` in `localStorage` (keyed by sorted transaction ID pairs). Scan filters out rejected pairs before showing the modal. Unchecking a link + "Link Selected" permanently rejects unchecked items. "Reject All" (renamed from "Skip All") rejects all. ✕ closes without rejecting (genuine snooze).
 - **BUG-21:** Skipped auto-link suggestions were lost until the next email import. Added a scan on first ledger open each page load (`_linkScanDone` flag prevents repeat scans on filter/pagination). Skipped links resurface on next page refresh since transactions remain `transaction_group_id = null`.
 - **BUG-20b: Fuzzy lot dedup** — Exact `shares.toFixed(4)` key still missed duplicates where share counts differed by rounding or manual-entry precision. New approach: symbol + date + shares within 2% tolerance (`|s1-s2| / max(s1,s2) < 0.02`). Catches rounding to integers, minor float drift, and data entry differences without conflating genuinely distinct same-day lots (e.g. 8 shares vs 2 shares stay separate).
 - **UI-06: Version badge in header** — `v1.1.1` shown next to the logo in dim monospace; updates with each release.
@@ -183,10 +185,12 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (111 items)</summary>
+<summary><strong>✅ Completed</strong> (113 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-20c | **Lot import count frozen + deselections not remembered** — Per-row checkbox handler was calling `textContent` on the import button (destroying inner `<span>`), causing `getElementById("pfIlImportCount")` to null-crash and freeze the count display. Fixed with single `updateLotImportBtn()` helper. Added `localStorage.rejected_lots` (keyed `symbol:date:shares`) — unchecking a new lot persists the rejection; re-checking removes it. Rejected lots start pre-unchecked on future imports. | Bug → Done | Mar 27 |
+| BUG-21b | **Auto-link rejections not persisted** — Skipping the modal had no memory; same bad pairs reappeared every page load. Added `localStorage.rejected_links` (sorted ID pairs). Scan filters rejected pairs before showing modal. Unchecking + "Link Selected" rejects unchecked items; "Reject All" rejects everything. ✕ snoozes without rejecting. | Bug → Done | Mar 27 |
 | BUG-21 | **Skipped auto-links not re-surfaced** — Skipped suggestions were lost until the next email import. Added scan on first ledger open per page load (`_linkScanDone` flag prevents repeat scans on filter/pagination). Skipped links return on next page refresh since transactions stay `transaction_group_id = null`. | Bug → Done | Mar 27 |
 | UI-06 | **Version badge in header** — `v1.1.x` shown next to the logo in dim monospace. | UI → Done | Mar 27 |
 | BUG-20b | **Fuzzy lot dedup** — Exact share key still missed duplicates from rounding/manual-entry differences. New: symbol + date + shares within 2% tolerance. | Bug → Done | Mar 27 |
