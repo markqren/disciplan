@@ -12,6 +12,7 @@
 <sub>Deployed 2026-03-27</sub>
 
 - **FEA-81: Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" in Holdings header. Parses Schwab, eTrade, and Health Equity files (2+ detection signals each), deduplicates against existing lots, shows preview with New/Exists badges, then bulk-inserts and refreshes prices via Yahoo Finance (CSV implied-price fallback). Source badge (Live/CSV/Manual) in Market Prices table. Ann return now dynamic CAGR at render time.
+- **BUG-20: Import lot dedup + per-row checkboxes** — Old dedup key used `price_exec` which broke on Supabase ISO timestamps and float drift. New key: `symbol + date(0,10) + shares.toFixed(4)`. Preview now shows a checkbox per row (new = pre-checked, existing = unchecked); select-all header toggle; Import button imports only checked rows.
 
 #### v1.1.0
 <sub>Deployed 2026-03-27</sub>
@@ -173,10 +174,11 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (107 items)</summary>
+<summary><strong>✅ Completed</strong> (108 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-20 | **Import lot dedup false positives + no row control** — Dedup key used `price_exec.toFixed(4)` which failed when Supabase returned ISO timestamps for `lot_date` and on float drift. Fixed key: `symbol + date.slice(0,10) + shares.toFixed(4)`. Added per-row checkboxes (new = pre-checked, exists = unchecked), select-all toggle, and Import button respects selection. | Bug → Done | Mar 27 |
 | FEA-81 | **Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" button in Holdings header. Supports Schwab, eTrade, and Health Equity formats (2+ detection signals each). Deduplicates against existing lots (symbol+date+price key). Preview table with New/Exists badges. Imports missing symbols and lots, then refreshes prices via Yahoo Finance (5s timeout) with CSV implied-price fallback. `price_source` column (`live`/`csv`/`manual`) shown as badge in Market Prices table. Ann return now computed dynamically via CAGR at render time. XLSX supported via lazy-loaded SheetJS CDN. | Feature → Done | Mar 27 |
 | BUG-19 | **Rakuten cashback miscategorized as income** — Edge Function hardcoded `category_id: "income"`. Changed to `null`; category is now inherited from the parent purchase via `linkRakutenCashback`. Unlinked imports require manual assignment. | Bug → Done | Mar 27 |
 | UI-05 | **Emoji favicon** — Browser tab shows 💵 via SVG data URL favicon instead of the default globe icon. | UI → Done | Mar 27 |
