@@ -384,6 +384,7 @@ async function fetchSubscriptions(){
 }
 
 let creditNames=[];
+let _linkScanDone=false;
 async function fetchCreditNames(){
   if(creditNames.length)return;
   const rows=await sb("transactions?select=credit&credit=neq.&limit=5000");
@@ -3577,12 +3578,17 @@ async function renderPortfolio(el){
           try{
             const parsed=await parsePortfolioFile(file);
             if(!parsed.length){prev.innerHTML=`<p style="color:var(--r);font-size:12px">No lots found in file.</p>`;return}
-            // Dedup key: symbol + date (first 10 chars, handles ISO timestamps) + shares rounded to 4dp
-            // Avoids float precision issues with price; shares are the stable identifier per lot
+            // Fuzzy dedup: same symbol + same date + shares within 2% tolerance
+            // Handles rounding, manual entry differences, and float drift without false positives
+            // (Two genuine lots on same date with very different share counts won't collide)
             const existingLots=lots.filter(l=>l.account_id===acctId);
-            const dupKey=(sym,date,shares)=>`${sym}|${String(date).slice(0,10)}|${parseFloat(shares).toFixed(4)}`;
-            const existingKeys=new Set(existingLots.map(l=>dupKey(l.symbol,l.lot_date,l.shares)));
-            const rows=parsed.map((p,i)=>({...p,_idx:i,exists:existingKeys.has(dupKey(p.symbol,p.lot_date,p.shares))}));
+            const isDup=(p)=>existingLots.some(e=>{
+              if(e.symbol!==p.symbol)return false;
+              if(String(e.lot_date).slice(0,10)!==String(p.lot_date).slice(0,10))return false;
+              const s1=parseFloat(e.shares),s2=parseFloat(p.shares);
+              return Math.abs(s1-s2)/Math.max(s1,s2,0.0001)<0.02;
+            });
+            const rows=parsed.map((p,i)=>({...p,_idx:i,exists:isDup(p)}));
             const newCount=rows.filter(r=>!r.exists).length;
             let ph=`<div style="margin-top:8px"><div id="pfIlSummary" style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px">${rows.length} lots parsed · <span id="pfIlSelCount">${newCount}</span> selected</div>`;
             ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="padding:4px 8px 6px 0;text-align:center"><input type="checkbox" id="pfIlChkAll" title="Select all" checked></th><th style="text-align:left;padding:4px 8px 6px 0">Date</th><th style="text-align:left;padding:4px 8px 6px">Symbol</th><th style="text-align:right;padding:4px 8px 6px">Shares</th><th style="text-align:right;padding:4px 8px 6px">Price</th><th style="text-align:right;padding:4px 0 6px">Cost</th><th style="text-align:center;padding:4px 0 6px 8px">Status</th></tr></thead><tbody>`;
@@ -5140,6 +5146,7 @@ async function doBatchLink(txns,onDone){
 async function renderLedger(el){
   const PS=50;
   if(!state.lf)state.lf={cat:"",pt:"",tag:"",dfrom:"",dto:"",q:"",subsOnly:false};
+  if(!_linkScanDone){_linkScanDone=true;scanForReimbursementLinks().catch(e=>console.error("Ledger link scan:",e))}
   const f=state.lf;
   const fS="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 10px;color:#e8e8e4;font-size:11px;font-family:var(--sans);outline:none";
   // Cache tags for cross-tab navigation + filter dropdown
