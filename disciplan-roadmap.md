@@ -9,10 +9,16 @@
 ### v1.1 — Mar 27, 2026
 
 #### v1.1.3
-<sub>Deployed 2026-03-27</sub>
+<sub>Deployed 2026-03-28 01:02 UTC</sub>
 
 - **BUG-20c:** Lot import button count frozen on deselect; deselected new lots not remembered. Root cause: per-row checkbox handler called `textContent` on the button which destroyed the inner `<span>`, causing subsequent `getElementById("pfIlImportCount")` calls to null-crash and halt execution. Fix: replaced span-based update with a single `updateLotImportBtn()` helper using `btn.textContent` cleanly. Added `localStorage.rejected_lots` (keyed by `symbol:date:shares`) — deselecting a new lot saves it as rejected; re-checking removes it. Rejected lots start pre-unchecked on future imports. Select-all also persists rejections per row.
 - **BUG-21b:** Skipped/rejected auto-link suggestions had no persistence — "Skip All" dismissed the modal but the same pairs reappeared every page load. Added `rejected_links` in `localStorage` (keyed by sorted transaction ID pairs). Scan filters out rejected pairs before showing the modal. Unchecking a link + "Link Selected" permanently rejects unchecked items. "Reject All" (renamed from "Skip All") rejects all. ✕ closes without rejecting (genuine snooze).
+
+---
+
+#### v1.1.2
+<sub>Deployed 2026-03-28 00:52 UTC</sub>
+
 - **BUG-21:** Skipped auto-link suggestions were lost until the next email import. Added a scan on first ledger open each page load (`_linkScanDone` flag prevents repeat scans on filter/pagination). Skipped links resurface on next page refresh since transactions remain `transaction_group_id = null`.
 - **BUG-20b: Fuzzy lot dedup** — Exact `shares.toFixed(4)` key still missed duplicates where share counts differed by rounding or manual-entry precision. New approach: symbol + date + shares within 2% tolerance (`|s1-s2| / max(s1,s2) < 0.02`). Catches rounding to integers, minor float drift, and data entry differences without conflating genuinely distinct same-day lots (e.g. 8 shares vs 2 shares stay separate).
 - **UI-06: Version badge in header** — `v1.1.1` shown next to the logo in dim monospace; updates with each release.
@@ -20,13 +26,13 @@
 ---
 
 #### v1.1.1
-<sub>Deployed 2026-03-27</sub>
+<sub>Deployed 2026-03-27 23:34 UTC</sub>
 
 - **FEA-81: Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" in Holdings header. Parses Schwab, eTrade, and Health Equity files (2+ detection signals each), deduplicates against existing lots, shows preview with New/Exists badges, then bulk-inserts and refreshes prices via Yahoo Finance (CSV implied-price fallback). Source badge (Live/CSV/Manual) in Market Prices table. Ann return now dynamic CAGR at render time.
 - **BUG-20: Import lot dedup + per-row checkboxes** — Old dedup key used `price_exec` which broke on Supabase ISO timestamps and float drift. New key: `symbol + date(0,10) + shares.toFixed(4)`. Preview now shows a checkbox per row (new = pre-checked, existing = unchecked); select-all header toggle; Import button imports only checked rows.
 
 #### v1.1.0
-<sub>Deployed 2026-03-27</sub>
+<sub>Deployed 2026-03-27 21:01 UTC</sub>
 
 **IS drilldown grouping, auto-link confirmation, market prices, portfolio polish.**
 
