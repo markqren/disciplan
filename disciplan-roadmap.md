@@ -8,6 +8,15 @@
 
 ### v1.1 — Mar 27, 2026
 
+#### v1.1.2
+<sub>Pending deploy</sub>
+
+- **BUG-21:** Skipped auto-link suggestions were lost until the next email import. Added a scan on first ledger open each page load (`_linkScanDone` flag prevents repeat scans on filter/pagination). Skipped links resurface on next page refresh since transactions remain `transaction_group_id = null`.
+- **BUG-20b: Fuzzy lot dedup** — Exact `shares.toFixed(4)` key still missed duplicates where share counts differed by rounding or manual-entry precision. New approach: symbol + date + shares within 2% tolerance (`|s1-s2| / max(s1,s2) < 0.02`). Catches rounding to integers, minor float drift, and data entry differences without conflating genuinely distinct same-day lots (e.g. 8 shares vs 2 shares stay separate).
+- **UI-06: Version badge in header** — `v1.1.1` shown next to the logo in dim monospace; updates with each release.
+
+---
+
 #### v1.1.1
 <sub>Deployed 2026-03-27</sub>
 
@@ -174,10 +183,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (108 items)</summary>
+<summary><strong>✅ Completed</strong> (111 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-21 | **Skipped auto-links not re-surfaced** — Skipped suggestions were lost until the next email import. Added scan on first ledger open per page load (`_linkScanDone` flag prevents repeat scans on filter/pagination). Skipped links return on next page refresh since transactions stay `transaction_group_id = null`. | Bug → Done | Mar 27 |
+| UI-06 | **Version badge in header** — `v1.1.x` shown next to the logo in dim monospace. | UI → Done | Mar 27 |
+| BUG-20b | **Fuzzy lot dedup** — Exact share key still missed duplicates from rounding/manual-entry differences. New: symbol + date + shares within 2% tolerance. | Bug → Done | Mar 27 |
 | BUG-20 | **Import lot dedup false positives + no row control** — Dedup key used `price_exec.toFixed(4)` which failed when Supabase returned ISO timestamps for `lot_date` and on float drift. Fixed key: `symbol + date.slice(0,10) + shares.toFixed(4)`. Added per-row checkboxes (new = pre-checked, exists = unchecked), select-all toggle, and Import button respects selection. | Bug → Done | Mar 27 |
 | FEA-81 | **Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" button in Holdings header. Supports Schwab, eTrade, and Health Equity formats (2+ detection signals each). Deduplicates against existing lots (symbol+date+price key). Preview table with New/Exists badges. Imports missing symbols and lots, then refreshes prices via Yahoo Finance (5s timeout) with CSV implied-price fallback. `price_source` column (`live`/`csv`/`manual`) shown as badge in Market Prices table. Ann return now computed dynamically via CAGR at render time. XLSX supported via lazy-loaded SheetJS CDN. | Feature → Done | Mar 27 |
 | BUG-19 | **Rakuten cashback miscategorized as income** — Edge Function hardcoded `category_id: "income"`. Changed to `null`; category is now inherited from the parent purchase via `linkRakutenCashback`. Unlinked imports require manual assignment. | Bug → Done | Mar 27 |
