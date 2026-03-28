@@ -134,7 +134,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v1.1.1</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v1.1.2</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
   </div>
@@ -2362,8 +2362,24 @@ async function scanForReimbursementLinks(){
         expenses.splice(expenses.indexOf(bestMatch),1);
       }
     }
-    if(links.length>0)showLinkConfirmModal(links);
+    // Filter out previously rejected pairs
+    const filtered=links.filter(l=>!isLinkRejected(l.reimbursement.id,l.expense.id));
+    if(filtered.length>0)showLinkConfirmModal(filtered);
   }catch(e){console.error("Link scan error:",e)}
+}
+
+function rejectedLinkKey(idA,idB){return[idA,idB].sort((a,b)=>a-b).join(":")}
+function isLinkRejected(idA,idB){
+  try{const s=localStorage.getItem("rejected_links");if(!s)return false;return JSON.parse(s).includes(rejectedLinkKey(idA,idB))}
+  catch(e){return false}
+}
+function rejectLinks(links){
+  try{
+    const s=localStorage.getItem("rejected_links");
+    const existing=s?JSON.parse(s):[];
+    links.forEach(l=>{const k=rejectedLinkKey(l.reimbursement.id,l.expense.id);if(!existing.includes(k))existing.push(k)});
+    localStorage.setItem("rejected_links",JSON.stringify(existing));
+  }catch(e){console.warn("Failed to save rejected links:",e)}
 }
 
 async function applyReimbursementLinks(links){
@@ -2391,7 +2407,7 @@ function showLinkConfirmModal(links){
   const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px"}});
   const hdrText=h("div",{});
   hdrText.append(h("h3",{style:{margin:"0",fontSize:"18px"}},"Confirm Auto-Links"));
-  hdrText.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"4px"}},`${links.length} suggested link${links.length>1?"s":""} — review before applying`));
+  hdrText.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"4px"}},`${links.length} suggested link${links.length>1?"s":""} — uncheck to reject permanently`));
   hdr.append(hdrText);
   const closeBtn=h("button",{style:{background:"rgba(255,255,255,0.06)",border:"none",borderRadius:"8px",width:"32px",height:"32px",cursor:"pointer",color:"rgba(255,255,255,0.5)",fontSize:"16px"},onClick:()=>bg.remove()},"✕");
   hdr.append(closeBtn);
@@ -2419,13 +2435,15 @@ function showLinkConfirmModal(links){
   const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"8px"}});
   const confirmBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
     const selected=links.filter((_,i)=>checkboxes[i].checked);
+    const rejected=links.filter((_,i)=>!checkboxes[i].checked);
+    if(rejected.length)rejectLinks(rejected);
     if(!selected.length){bg.remove();return}
     confirmBtn.textContent="Linking...";confirmBtn.disabled=true;
     try{await applyReimbursementLinks(selected);bg.remove()}
     catch(e){errEl.textContent="Failed: "+e.message;confirmBtn.textContent="Link Selected";confirmBtn.disabled=false}
   }},"Link Selected");
-  const skipBtn=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Skip All");
-  btnRow.append(confirmBtn,skipBtn);
+  const rejectAllBtn=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{rejectLinks(links);bg.remove()}},"Reject All");
+  btnRow.append(confirmBtn,rejectAllBtn);
   modal.append(btnRow);
   bg.append(modal);
   document.body.append(bg);
