@@ -6,27 +6,27 @@
 
 ## 🚀 Releases
 
-### v1.1.1 — Mar 27, 2026
+### v1.1 — Mar 27, 2026
+
+#### v1.1.1
 <sub>Deployed 2026-03-27</sub>
 
 - **FEA-81: Portfolio Lot CSV/XLSX Import** — "↑ Import Lots" in Holdings header. Parses Schwab, eTrade, and Health Equity files (2+ detection signals each), deduplicates against existing lots, shows preview with New/Exists badges, then bulk-inserts and refreshes prices via Yahoo Finance (CSV implied-price fallback). Source badge (Live/CSV/Manual) in Market Prices table. Ann return now dynamic CAGR at render time.
 
----
-
-### v1.1.0 — Mar 27, 2026
-<sub>Deployed 2026-03-27 · superseded by v1.1.1</sub>
+#### v1.1.0
+<sub>Deployed 2026-03-27</sub>
 
 **IS drilldown grouping, auto-link confirmation, market prices, portfolio polish.**
 
-#### Features
+##### Features
 - **FEA-80: IS Drilldown Linked Transaction Grouping** — IS drilldown modal now collapses linked transactions (same `transaction_group_id`) into parent summary rows with blue left border, 🔗 count badge, group label, and chevron expand/collapse. Child rows hidden by default; click parent to reveal. Clicking a child row opens the edit modal. Consistent with the existing pattern in Ledger and Tags detail modal.
 - **FEA-79: Auto-Link Confirmation Modal** — Reimbursement auto-linking now shows a confirmation modal before applying any links. Each proposed pair (expense + reimbursement) is listed with descriptions, amounts, and confidence score. All links pre-checked; uncheck any to skip. "Link Selected" applies only checked items; "Skip All" dismisses without linking. Fixes repeated bad links (e.g. Yadav → Balance adjustment) caused by unlinked transactions re-entering the scoring pool.
 - **FEA-78: Market Prices Table** — New card in the Portfolio tab listing all active holdings with their current price, source badge (Live/CSV/Manual), and "as of" date. Click any price cell to edit inline (price + date inputs). Saves to `investment_symbols.latest_price` / `price_as_of` / `price_source` via PATCH, then re-renders the full portfolio so all market values, gains, and KPIs update immediately.
 
-#### UI
+##### UI
 - **UI-05: Emoji favicon** — Browser tab now shows 💵 instead of the default globe icon.
 
-#### Fixes
+##### Fixes
 - **BUG-19:** Rakuten cashback imported as `income` category instead of inheriting from the linked parent purchase. Edge Function was hardcoding `category_id: "income"`. Changed to `null` — `linkRakutenCashback` already patches the category from the parent when found; unlinked imports now require manual assignment rather than silently miscategorizing.
 - **BUG-18:** "+ Add Holdings" button rendered full-width due to `.btn` class having `width:100%`. Fixed by adding `width:auto` inline style to the button.
 
@@ -43,6 +43,9 @@
 - **FEA-77: Portfolio Lot Management** — Inline editing and CRUD for investment lots in the Portfolio tab. (1) Click Shares or Price cells on expanded lot rows to edit in-place — PATCH to `investment_lots` with auto-recomputed `cost_basis`, full portfolio re-render. (2) "+ Add Lot" row at bottom of expanded active lots — inline form with date/shares/price, POST to `investment_lots`. (3) "+ Add Holdings" button at top of Holdings card — form with account dropdown (+ "New Account…" with label/institution/type fields), symbol input with autocomplete (+ new symbol name/asset class fields), date/shares/price. Creates `investment_accounts`, `investment_symbols`, and `investment_lots` rows as needed. (4) Delete lot via ✕ button with two-click confirmation. All derived values (market value, gain, return, annual return, KPIs, charts) recalculate on every change.
 
 ---
+
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v0.9.0)</summary>
 
 ### v0.9.0 — Mar 23, 2026
 <sub>Deployed 2026-03-24</sub>
@@ -82,9 +85,6 @@
 - **BUG-15:** Tag date editing broken — Both tag card and tag detail modal date editors were using direct `fetch()` with the anon key instead of the authenticated session token, causing "failed to fetch" errors with RLS policies. Fixed by routing through `sb()` helper which uses `authHeaders()`.
 
 ---
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v0.7.0)</summary>
 
 ### v0.7.0 — Mar 16, 2026
 <sub>Deployed 2026-03-16 19:47 UTC</sub>
