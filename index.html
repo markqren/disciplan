@@ -3576,53 +3576,72 @@ async function renderPortfolio(el){
           try{
             const parsed=await parsePortfolioFile(file);
             if(!parsed.length){prev.innerHTML=`<p style="color:var(--r);font-size:12px">No lots found in file.</p>`;return}
+            // Dedup key: symbol + date (first 10 chars, handles ISO timestamps) + shares rounded to 4dp
+            // Avoids float precision issues with price; shares are the stable identifier per lot
             const existingLots=lots.filter(l=>l.account_id===acctId);
-            const existingKeys=new Set(existingLots.map(l=>`${l.symbol}|${l.lot_date}|${parseFloat(l.price_exec).toFixed(4)}`));
-            const rows=parsed.map(p=>{
-              const key=`${p.symbol}|${p.lot_date}|${parseFloat(p.price_exec).toFixed(4)}`;
-              return{...p,exists:existingKeys.has(key)};
-            });
+            const dupKey=(sym,date,shares)=>`${sym}|${String(date).slice(0,10)}|${parseFloat(shares).toFixed(4)}`;
+            const existingKeys=new Set(existingLots.map(l=>dupKey(l.symbol,l.lot_date,l.shares)));
+            const rows=parsed.map((p,i)=>({...p,_idx:i,exists:existingKeys.has(dupKey(p.symbol,p.lot_date,p.shares))}));
             const newCount=rows.filter(r=>!r.exists).length;
-            let ph=`<div style="margin-top:8px"><div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px">${rows.length} lots parsed · ${newCount} new · ${rows.length-newCount} already exist</div>`;
-            ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:4px 8px 6px 0">Date</th><th style="text-align:left;padding:4px 8px 6px">Symbol</th><th style="text-align:right;padding:4px 8px 6px">Shares</th><th style="text-align:right;padding:4px 8px 6px">Price</th><th style="text-align:right;padding:4px 0 6px">Cost</th><th style="text-align:center;padding:4px 0 6px 8px">Status</th></tr></thead><tbody>`;
+            let ph=`<div style="margin-top:8px"><div id="pfIlSummary" style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px">${rows.length} lots parsed · <span id="pfIlSelCount">${newCount}</span> selected</div>`;
+            ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="padding:4px 8px 6px 0;text-align:center"><input type="checkbox" id="pfIlChkAll" title="Select all" checked></th><th style="text-align:left;padding:4px 8px 6px 0">Date</th><th style="text-align:left;padding:4px 8px 6px">Symbol</th><th style="text-align:right;padding:4px 8px 6px">Shares</th><th style="text-align:right;padding:4px 8px 6px">Price</th><th style="text-align:right;padding:4px 0 6px">Cost</th><th style="text-align:center;padding:4px 0 6px 8px">Status</th></tr></thead><tbody>`;
             rows.forEach(r=>{
-              const statusBadge=r.exists?`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(155,142,160,0.15);color:rgba(255,255,255,0.3)">Exists</span>`:`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(42,157,143,0.15);color:#2a9d8f">New</span>`;
-              ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05);${r.exists?"opacity:0.45":""}"><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${r.lot_date}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toFixed(4)}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toFixed(2)}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toFixed(2)}</td><td style="padding:6px 0 6px 8px;text-align:center">${statusBadge}</td></tr>`;
+              const isNew=!r.exists;
+              const badge=isNew?`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(42,157,143,0.15);color:#2a9d8f">New</span>`:`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(155,142,160,0.15);color:rgba(255,255,255,0.3)">Exists</span>`;
+              ph+=`<tr data-idx="${r._idx}" style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:6px 8px 6px 0;text-align:center"><input type="checkbox" class="pfIlChk" data-idx="${r._idx}" ${isNew?"checked":""}></td><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${r.lot_date}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toFixed(4)}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toFixed(2)}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toFixed(2)}</td><td style="padding:6px 0 6px 8px;text-align:center">${badge}</td></tr>`;
             });
             ph+=`</tbody></table>`;
-            const newRows=rows.filter(r=>!r.exists);
-            if(newRows.length){
-              ph+=`<div style="margin-top:12px;display:flex;gap:8px"><button id="pfIlImport" class="btn" style="font-size:11px;padding:5px 16px">Import ${newRows.length} New Lot${newRows.length===1?"":"s"}</button></div>`;
-            }
+            ph+=`<div style="margin-top:12px;display:flex;gap:8px"><button id="pfIlImport" class="btn" style="font-size:11px;padding:5px 16px">Import <span id="pfIlImportCount">${newCount}</span> Lot${newCount===1?"":"s"}</button></div>`;
             ph+=`</div>`;
             prev.innerHTML=ph;
 
-            if(newRows.length){
-              document.getElementById("pfIlImport").addEventListener("click",async()=>{
-                const btn=document.getElementById("pfIlImport");
-                btn.disabled=true;btn.textContent="Importing…";
-                try{
-                  const symSet=new Set(newRows.map(r=>r.symbol));
-                  const existSyms=new Set(symbols.map(s=>s.symbol));
-                  for(const sym of symSet){
-                    if(!existSyms.has(sym)){
-                      const implP=newRows.find(r=>r.symbol===sym)?.implied_price||null;
-                      await sb("investment_symbols",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({symbol:sym,name:sym,asset_class:"equity",latest_price:implP})});
-                    }
+            // Select-all toggle
+            document.getElementById("pfIlChkAll").addEventListener("change",e=>{
+              prev.querySelectorAll(".pfIlChk").forEach(c=>c.checked=e.target.checked);
+              const n=prev.querySelectorAll(".pfIlChk:checked").length;
+              document.getElementById("pfIlSelCount").textContent=n;
+              document.getElementById("pfIlImportCount").textContent=n;
+              document.getElementById("pfIlImport").textContent=`Import ${n} Lot${n===1?"":"s"}`;
+            });
+            // Per-row checkbox updates count
+            prev.querySelectorAll(".pfIlChk").forEach(c=>c.addEventListener("change",()=>{
+              const n=prev.querySelectorAll(".pfIlChk:checked").length;
+              document.getElementById("pfIlSelCount").textContent=n;
+              document.getElementById("pfIlImportCount").textContent=n;
+              document.getElementById("pfIlImport").textContent=`Import ${n} Lot${n===1?"":"s"}`;
+              // Fade unchecked rows
+              c.closest("tr").style.opacity=c.checked?"1":"0.3";
+            }));
+            // Fade existing rows that are unchecked by default
+            prev.querySelectorAll(".pfIlChk:not(:checked)").forEach(c=>c.closest("tr").style.opacity="0.3");
+
+            document.getElementById("pfIlImport").addEventListener("click",async()=>{
+              const selectedIdxs=new Set([...prev.querySelectorAll(".pfIlChk:checked")].map(c=>parseInt(c.dataset.idx)));
+              const toImport=rows.filter(r=>selectedIdxs.has(r._idx));
+              if(!toImport.length){alert("No lots selected.");return}
+              const btn=document.getElementById("pfIlImport");
+              btn.disabled=true;btn.textContent="Importing…";
+              try{
+                const symSet=new Set(toImport.map(r=>r.symbol));
+                const existSyms=new Set(symbols.map(s=>s.symbol));
+                for(const sym of symSet){
+                  if(!existSyms.has(sym)){
+                    const implP=toImport.find(r=>r.symbol===sym)?.implied_price||null;
+                    await sb("investment_symbols",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({symbol:sym,name:sym,asset_class:"equity",latest_price:implP})});
                   }
-                  for(const r of newRows){
-                    await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:r.symbol,lot_date:r.lot_date,shares:r.shares,price_exec:r.price_exec,cost_basis:r.cost_basis})});
-                  }
-                  const impliedPrices={};
-                  newRows.forEach(r=>{if(r.implied_price>0)impliedPrices[r.symbol]=r.implied_price});
-                  await refreshPortfolioPrices([...symSet],impliedPrices);
-                  importLotsForm.style.display="none";
-                  importLotsBtn.innerHTML="&#x2191; Import Lots";
-                  if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
-                  renderPortfolio(el);
-                }catch(err){alert("Import error: "+err.message);btn.disabled=false;btn.textContent="Retry Import"}
-              });
-            }
+                }
+                for(const r of toImport){
+                  await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:r.symbol,lot_date:r.lot_date,shares:r.shares,price_exec:r.price_exec,cost_basis:r.cost_basis})});
+                }
+                const impliedPrices={};
+                toImport.forEach(r=>{if(r.implied_price>0)impliedPrices[r.symbol]=r.implied_price});
+                await refreshPortfolioPrices([...symSet],impliedPrices);
+                importLotsForm.style.display="none";
+                importLotsBtn.innerHTML="&#x2191; Import Lots";
+                if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
+                renderPortfolio(el);
+              }catch(err){alert("Import error: "+err.message);btn.disabled=false;btn.textContent="Retry Import"}
+            });
           }catch(err){prev.innerHTML=`<p style="color:var(--r);font-size:12px">Parse error: ${err.message}</p>`}
         });
       });
