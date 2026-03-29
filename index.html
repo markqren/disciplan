@@ -3054,7 +3054,7 @@ async function renderPortfolio(el){
       l.price_exec=parseFloat(l.price_exec||0);
       l.shares=parseFloat(l.shares||0);
       l.cost_basis=parseFloat(l.cost_basis||0);
-      {const _p=parseFloat((symInfo[l.symbol]||{}).latest_price||0);const _d=l.lot_date?(Date.now()-new Date(l.lot_date).getTime())/864e5:0;l.ann_return=(_p>0&&l.price_exec>0&&_d>=7)?Math.pow(_p/l.price_exec,365.25/_d)-1:null;}
+      {const _p=parseFloat((symInfo[l.symbol]||{}).latest_price||0);const _d=l.lot_date?(Date.now()-new Date(l.lot_date).getTime())/864e5:0;const _mv=l.shares*_p;l.ann_return=(_p>0&&l.cost_basis>0&&_d>=7)?Math.pow(_mv/l.cost_basis,365.25/_d)-1:null;}
       l.market_value=l.sell_date?0:(price>0?l.shares*price:l.cost_basis);
     }
 
@@ -3217,7 +3217,7 @@ async function renderPortfolio(el){
         const priceStr=price>0?`$${price.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:`<span style="color:rgba(255,255,255,0.25)">—</span>`;
         const asOf=s.price_as_of?s.price_as_of.slice(0,10):`<span style="color:rgba(255,255,255,0.2)">—</span>`;
         const src=srcBadge(s.price_source||"manual");
-        ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:9px 0;font-family:var(--mono);font-weight:600;color:rgba(255,255,255,0.9)">${s.symbol}</td><td style="padding:9px 8px;color:rgba(255,255,255,0.45);font-size:11px">${s.name||"—"}</td><td style="padding:9px 8px"><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${ac.color}22;color:${ac.color};border:1px solid ${ac.color}44">${ac.label}</span></td><td style="padding:9px 8px;text-align:right">${src}</td><td style="padding:9px 0;text-align:right;font-family:var(--mono);cursor:pointer" data-price-sym="${s.symbol}">${priceStr}</td><td style="padding:9px 0 9px 12px;text-align:right;font-size:11px;color:rgba(255,255,255,0.35)">${asOf}</td></tr>`;
+        ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.05)"><td style="padding:9px 0;font-family:var(--mono);font-weight:600;color:rgba(255,255,255,0.9)">${s.symbol} <span class="pf-price-hist" data-hist-sym="${s.symbol}" title="Price history" style="cursor:pointer;font-size:10px;color:rgba(255,255,255,0.18);margin-left:2px">⦿</span></td><td style="padding:9px 8px;color:rgba(255,255,255,0.45);font-size:11px">${s.name||"—"}</td><td style="padding:9px 8px"><span style="font-size:10px;padding:2px 7px;border-radius:10px;background:${ac.color}22;color:${ac.color};border:1px solid ${ac.color}44">${ac.label}</span></td><td style="padding:9px 8px;text-align:right">${src}</td><td style="padding:9px 0;text-align:right;font-family:var(--mono);cursor:pointer" data-price-sym="${s.symbol}">${priceStr}</td><td style="padding:9px 0 9px 12px;text-align:right;font-size:11px;color:rgba(255,255,255,0.35)">${asOf}</td></tr><tr class="pf-hist-row" id="pf-hist-${s.symbol}" style="display:none"><td colspan="6" style="padding:0 0 8px 0"><div class="pf-hist-body" style="background:rgba(255,255,255,0.03);border-radius:4px;padding:8px 10px;font-size:11px"><span style="color:rgba(255,255,255,0.25)">Loading…</span></div></td></tr>`;
       });
       ph+=`</tbody></table>`;
       pricesCard.innerHTML=ph;
@@ -3242,7 +3242,7 @@ async function renderPortfolio(el){
             if(isNaN(nv)||nv<=0){renderPricesCard();return}
             if(nv===oldPrice&&nd===oldAsOf){renderPricesCard();return}
             try{
-              await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:nv,price_as_of:nd,price_source:"manual"})});
+              await applyPriceUpdate(sym,nv,"manual",oldPrice,oldAsOf);
               symObj.latest_price=nv;symObj.price_as_of=nd;symObj.price_source="manual";
               renderPortfolio(el);
             }catch(err){alert("Error saving price: "+err.message);renderPricesCard()}
@@ -3252,6 +3252,33 @@ async function renderPortfolio(el){
           di.addEventListener("blur",onBlur);
           pi.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();commit()}if(ev.key==="Escape"){renderPricesCard()}});
           di.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();commit()}if(ev.key==="Escape"){renderPricesCard()}});
+        });
+      });
+      // Price history toggle
+      pricesCard.querySelectorAll(".pf-price-hist").forEach(btn=>{
+        btn.addEventListener("click",async e=>{
+          e.stopPropagation();
+          const sym=btn.dataset.histSym;
+          const row=document.getElementById(`pf-hist-${sym}`);
+          const body=row?.querySelector(".pf-hist-body");
+          if(!row||!body)return;
+          if(row.style.display!=="none"){row.style.display="none";return}
+          row.style.display="";
+          try{
+            const hist=await sb(`investment_price_history?symbol=eq.${encodeURIComponent(sym)}&order=recorded_at.desc&limit=20`);
+            if(!hist.length){body.innerHTML=`<span style="color:rgba(255,255,255,0.25)">No history yet.</span>`;return}
+            const cur=activePriceSyms.find(s=>s.symbol===sym);
+            const curP=cur?parseFloat(cur.latest_price||0):0;
+            let ph=`<table style="width:100%;border-collapse:collapse"><thead><tr style="color:rgba(255,255,255,0.25);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:2px 8px 4px 0">Date</th><th style="text-align:right;padding:2px 8px 4px">Price</th><th style="text-align:right;padding:2px 0 4px 8px">Δ from current</th></tr></thead><tbody>`;
+            hist.forEach(h=>{
+              const p=parseFloat(h.price);
+              const d=curP>0?p-curP:null;
+              const dStr=d!=null?`<span style="color:${d>=0?"#2a9d8f":"rgba(224,122,95,0.8)"}">${d>=0?"+":""}$${Math.abs(d).toFixed(2)} (${(d/curP*100).toFixed(1)}%)</span>`:"—";
+              ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.04)"><td style="padding:3px 8px 3px 0;color:rgba(255,255,255,0.35)">${(h.recorded_at||"").slice(0,10)}</td><td style="padding:3px 8px;text-align:right;font-family:var(--mono)">$${p.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td style="padding:3px 0 3px 8px;text-align:right">${dStr}</td></tr>`;
+            });
+            ph+=`</tbody></table>`;
+            body.innerHTML=ph;
+          }catch(err){body.innerHTML=`<span style="color:var(--r)">Error: ${err.message}</span>`}
         });
       });
     }
@@ -3634,7 +3661,7 @@ async function renderPortfolio(el){
               const isNew=!r.exists;
               const isChecked=isNew&&!r.rejected;
               const badge=isNew?`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(42,157,143,0.15);color:#2a9d8f">New</span>`:`<span style="font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(155,142,160,0.15);color:rgba(255,255,255,0.3)">Exists</span>`;
-              ph+=`<tr data-idx="${r._idx}" style="border-top:1px solid rgba(255,255,255,0.05);opacity:${isChecked?"1":"0.3"}"><td style="padding:6px 8px 6px 0;text-align:center"><input type="checkbox" class="pfIlChk" data-idx="${r._idx}" ${isChecked?"checked":""}></td><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${r.lot_date}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toFixed(4)}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toFixed(2)}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toFixed(2)}</td><td style="padding:6px 0 6px 8px;text-align:center">${badge}</td></tr>`;
+              ph+=`<tr data-idx="${r._idx}" style="border-top:1px solid rgba(255,255,255,0.05);opacity:${isChecked?"1":"0.3"}"><td style="padding:6px 8px 6px 0;text-align:center"><input type="checkbox" class="pfIlChk" data-idx="${r._idx}" ${isChecked?"checked":""}></td><td style="padding:6px 8px 6px 0;font-family:var(--mono)">${fmtD(r.lot_date)}</td><td style="padding:6px 8px;font-family:var(--mono);font-weight:600">${r.symbol}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${parseFloat(r.shares).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:4})}</td><td style="padding:6px 8px;text-align:right;font-family:var(--mono)">$${parseFloat(r.price_exec).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td style="padding:6px 0;text-align:right;font-family:var(--mono)">$${parseFloat(r.cost_basis).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td style="padding:6px 0 6px 8px;text-align:center">${badge}</td></tr>`;
             });
             ph+=`</tbody></table>`;
             ph+=`<div style="margin-top:12px;display:flex;gap:8px"><button id="pfIlImport" class="btn" style="font-size:11px;padding:5px 16px">Import ${initialCount} Lot${initialCount===1?"":"s"}</button></div>`;
@@ -3677,13 +3704,41 @@ async function renderPortfolio(el){
                 for(const r of toImport){
                   await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:r.symbol,lot_date:r.lot_date,shares:r.shares,price_exec:r.price_exec,cost_basis:r.cost_basis})});
                 }
+                // Fetch proposed prices and show confirmation before saving
+                btn.textContent="Fetching prices…";
                 const impliedPrices={};
                 toImport.forEach(r=>{if(r.implied_price>0)impliedPrices[r.symbol]=r.implied_price});
-                await refreshPortfolioPrices([...symSet],impliedPrices);
-                importLotsForm.style.display="none";
-                importLotsBtn.innerHTML="&#x2191; Import Lots";
-                if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
-                renderPortfolio(el);
+                const proposals=await fetchProposedPrices([...symSet],impliedPrices,symbols);
+                if(!proposals.length){
+                  importLotsForm.style.display="none";importLotsBtn.innerHTML="&#x2191; Import Lots";
+                  if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
+                  renderPortfolio(el);return;
+                }
+                // Show price confirmation UI
+                const fmtP=p=>p>0?`$${p.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—";
+                const fmtDelta=(cur,nw)=>{if(!cur||!nw)return"";const d=nw-cur,pct=cur>0?d/cur*100:0;const col=d>=0?"#2a9d8f":"rgba(224,122,95,0.9)";return`<span style="color:${col};font-size:10px">${d>=0?"+":""}${fmtP(d)} (${pct>=0?"+":""}${pct.toFixed(1)}%)</span>`};
+                let ph=`<div style="border-top:1px solid rgba(255,255,255,0.07);margin-top:14px;padding-top:12px"><div style="font-size:11px;font-weight:600;color:rgba(255,255,255,0.6);margin-bottom:8px">Update market prices?</div>`;
+                ph+=`<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase;letter-spacing:0.05em"><th style="text-align:left;padding:3px 8px 5px 0">Symbol</th><th style="text-align:right;padding:3px 8px 5px">Current</th><th style="text-align:right;padding:3px 8px 5px">New</th><th style="text-align:left;padding:3px 0 5px 8px">Change</th></tr></thead><tbody>`;
+                proposals.forEach(p=>{
+                  ph+=`<tr style="border-top:1px solid rgba(255,255,255,0.04)"><td style="padding:5px 8px 5px 0;font-family:var(--mono);font-weight:600">${p.symbol} <span style="font-size:9px;padding:1px 5px;border-radius:8px;background:${p.source==="live"?"rgba(42,157,143,0.15)":"rgba(74,111,165,0.15)"};color:${p.source==="live"?"#2a9d8f":"#4A6FA5"}">${p.source}</span></td><td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.4)">${fmtP(p.currentPrice)}</td><td style="padding:5px 8px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.9)">${fmtP(p.newPrice)}</td><td style="padding:5px 0 5px 8px">${fmtDelta(p.currentPrice,p.newPrice)}</td></tr>`;
+                });
+                ph+=`</tbody></table><div style="display:flex;gap:8px;margin-top:10px"><button id="pfIlConfirmPrices" class="btn" style="font-size:11px;padding:5px 14px">Confirm & Update</button><button id="pfIlSkipPrices" class="btn" style="font-size:11px;padding:5px 10px;background:rgba(255,255,255,0.06)">Skip</button></div></div>`;
+                prev.insertAdjacentHTML("beforeend",ph);
+                btn.disabled=false;btn.textContent="Lots imported ✓";
+
+                const finishImport=async(applyPrices)=>{
+                  if(applyPrices){
+                    for(const p of proposals){
+                      try{await applyPriceUpdate(p.symbol,p.newPrice,p.source,p.currentPrice,p.currentAsOf);}
+                      catch(e){console.warn("price update failed",p.symbol,e)}
+                    }
+                  }
+                  importLotsForm.style.display="none";importLotsBtn.innerHTML="&#x2191; Import Lots";
+                  if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
+                  renderPortfolio(el);
+                };
+                document.getElementById("pfIlConfirmPrices").addEventListener("click",()=>finishImport(true));
+                document.getElementById("pfIlSkipPrices").addEventListener("click",()=>finishImport(false));
               }catch(err){alert("Import error: "+err.message);btn.disabled=false;btn.textContent="Retry Import"}
             });
           }catch(err){prev.innerHTML=`<p style="color:var(--r);font-size:12px">Parse error: ${err.message}</p>`}
@@ -3745,7 +3800,7 @@ function parseSchwabLots(rows,symbol){
     if(isNaN(qty)||isNaN(costShare)||qty<=0||costShare<=0)continue;
     const[mm,dd,yyyy]=dateVal.split("/");
     const lot_date=`${yyyy}-${mm.padStart(2,"0")}-${dd.padStart(2,"0")}`;
-    lots.push({symbol:sym,lot_date,shares:Math.round(qty*1e6)/1e6,price_exec:Math.round(costShare*1e6)/1e6,cost_basis:Math.round(cb*100)/100,implied_price:0});
+    lots.push({symbol:sym,lot_date,shares:Math.round(qty*1e4)/1e4,price_exec:Math.round(costShare*100)/100,cost_basis:Math.round(Math.round(qty*1e4)/1e4*Math.round(costShare*100)/100*100)/100,implied_price:0});
     if(mktVal>0&&qty>0)impliedPrices.push(mktVal/qty);
   }
   const impliedPrice=impliedPrices.length?impliedPrices.reduce((a,b)=>a+b,0)/impliedPrices.length:0;
@@ -3773,7 +3828,7 @@ function parseEtradeLots(rows){
         const qty=parseFloat(String(r[4]||"").replace(/[^0-9.-]/g,""));
         const pricePaid=parseFloat(String(r[5]||"").replace(/[^0-9.-]/g,""));
         if(isNaN(qty)||isNaN(pricePaid)||qty<=0||pricePaid<=0)continue;
-        lots.push({symbol:currentSym,lot_date,shares:Math.round(qty*1e6)/1e6,price_exec:Math.round(pricePaid*1e6)/1e6,cost_basis:Math.round(qty*pricePaid*100)/100,implied_price:impliedPrice});
+        lots.push({symbol:currentSym,lot_date,shares:Math.round(qty*1e4)/1e4,price_exec:Math.round(pricePaid*100)/100,cost_basis:Math.round(Math.round(qty*1e4)/1e4*Math.round(pricePaid*100)/100*100)/100,implied_price:impliedPrice});
       }
     }
   }
@@ -3801,7 +3856,7 @@ function parseHealthEquityLots(rows){
     const dm=lotRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
     if(dm){const yy=dm[3].length===2?"20"+dm[3]:dm[3];lot_date=`${yy}-${dm[1].padStart(2,"0")}-${dm[2].padStart(2,"0")}`;}
     else if(/\d{4}-\d{2}-\d{2}/.test(lotRaw))lot_date=lotRaw.slice(0,10);
-    lots.push({symbol:sym,lot_date,shares:Math.round(qty*1e6)/1e6,price_exec:Math.round(price*1e6)/1e6,cost_basis:Math.round(qty*price*100)/100,implied_price:price});
+    lots.push({symbol:sym,lot_date,shares:Math.round(qty*1e4)/1e4,price_exec:Math.round(price*100)/100,cost_basis:Math.round(Math.round(qty*1e4)/1e4*Math.round(price*100)/100*100)/100,implied_price:price});
   }
   return lots;
 }
@@ -3830,7 +3885,9 @@ async function parsePortfolioFile(file){
   throw new Error("Unrecognized file format. Supported: Schwab, eTrade, Health Equity.");
 }
 
-async function refreshPortfolioPrices(symbolList,impliedPrices={}){
+// Fetch proposed prices without saving — returns [{symbol, newPrice, source, currentPrice, currentAsOf}]
+async function fetchProposedPrices(symbolList,impliedPrices={},symbolData=[]){
+  const results=[];
   for(const sym of symbolList){
     try{
       let price=null,source="csv";
@@ -3838,13 +3895,34 @@ async function refreshPortfolioPrices(symbolList,impliedPrices={}){
         const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),5000);
         const resp=await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`,{signal:ctrl.signal});
         clearTimeout(tid);
-        if(resp.ok){const j=await resp.json();const p=j?.chart?.result?.[0]?.meta?.regularMarketPrice;if(p>0){price=p;source="live";}}
+        if(resp.ok){const j=await resp.json();const p=j?.chart?.result?.[0]?.meta?.regularMarketPrice;if(p>0){price=Math.round(p*100)/100;source="live";}}
       }catch(_){}
-      if(!price&&impliedPrices[sym]>0){price=impliedPrices[sym];source="csv";}
+      if(!price&&impliedPrices[sym]>0){price=Math.round(impliedPrices[sym]*100)/100;source="csv";}
       if(!price)continue;
-      const today=new Date().toISOString().slice(0,10);
-      await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:price,price_as_of:today,price_source:source})});
-    }catch(err){console.warn("refreshPortfolioPrices error for",sym,err)}
+      const cur=symbolData.find(s=>s.symbol===sym);
+      results.push({symbol:sym,newPrice:price,source,currentPrice:cur?parseFloat(cur.latest_price||0):0,currentAsOf:cur?.price_as_of||null});
+    }catch(err){console.warn("fetchProposedPrices error for",sym,err)}
+  }
+  return results;
+}
+
+// Save old price to history, then apply new price
+async function applyPriceUpdate(sym,newPrice,source,oldPrice,oldAsOf){
+  const today=new Date().toISOString().slice(0,10);
+  // Log old price to history if it exists
+  if(oldPrice>0){
+    try{await sb("investment_price_history",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({symbol:sym,price:oldPrice,price_as_of:oldAsOf||today,source:"archived"})});}
+    catch(_){}
+  }
+  await sb(`investment_symbols?symbol=eq.${encodeURIComponent(sym)}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({latest_price:newPrice,price_as_of:today,price_source:source})});
+}
+
+// Legacy auto-apply (used outside import flow)
+async function refreshPortfolioPrices(symbolList,impliedPrices={},symbolData=[]){
+  const proposals=await fetchProposedPrices(symbolList,impliedPrices,symbolData);
+  for(const p of proposals){
+    try{await applyPriceUpdate(p.symbol,p.newPrice,p.source,p.currentPrice,p.currentAsOf);}
+    catch(err){console.warn("refreshPortfolioPrices error for",p.symbol,err)}
   }
 }
 
