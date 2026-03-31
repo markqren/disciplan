@@ -134,7 +134,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v1.2.0</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v1.2.1</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
   </div>
@@ -3054,7 +3054,7 @@ async function renderPortfolio(el){
       l.price_exec=parseFloat(l.price_exec||0);
       l.shares=parseFloat(l.shares||0);
       l.cost_basis=parseFloat(l.cost_basis||0);
-      {const _p=parseFloat((symInfo[l.symbol]||{}).latest_price||0);const _d=l.lot_date?(Date.now()-new Date(l.lot_date).getTime())/864e5:0;const _mv=l.shares*_p;l.ann_return=(_p>0&&l.cost_basis>0&&_d>=7)?Math.pow(_mv/l.cost_basis,365.25/_d)-1:null;}
+      {const _p=parseFloat((symInfo[l.symbol]||{}).latest_price||0);const _d=l.lot_date?(Date.now()-new Date(l.lot_date).getTime())/864e5:0;const _mv=l.shares*_p;l.ann_return=(_p>0&&l.cost_basis>0&&_d>=7)?(Math.pow(_mv/l.cost_basis,365.25/_d)-1)*100:null;}
       l.market_value=l.sell_date?0:(price>0?l.shares*price:l.cost_basis);
     }
 

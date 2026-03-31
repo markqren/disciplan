@@ -48,6 +48,7 @@ interface ForwardingNote {
   descriptionHint: string | null;
   tag: string | null;
   paymentType: string | null;
+  servicePeriodHint: string | null; // natural language service period from user note
 }
 
 function extractForwardingNote(textBody: string | null): ForwardingNote | null {
@@ -78,6 +79,7 @@ function extractForwardingNote(textBody: string | null): ForwardingNote | null {
     descriptionHint: null,
     tag: null,
     paymentType: null,
+    servicePeriodHint: null,
   };
 
   // Extract tag: #japan or tag:japan
@@ -92,6 +94,25 @@ function extractForwardingNote(textBody: string | null): ForwardingNote | null {
   if (ptMatch) {
     result.paymentType = ptMatch[1].trim();
     noteText = noteText.replace(ptMatch[0], "").trim();
+  }
+
+  // Extract service period hints (natural language)
+  const servicePeriodPatterns = [
+    /spread\s+over\s+[\w\s]+\d{0,4}/i,              // "spread over march 2026"
+    /service\s+[\d/]+-[\d/]+/i,                      // "service 3/1-3/31"
+    /service\s+[\d/]+\s+to\s+[\d/]+/i,              // "service 3/1 to 3/31"
+    /\d+\s+days?(?:\s+from\s+(?:today|purchase))?/i, // "30 days" / "30 days from today"
+    /(?:annual|yearly|monthly|quarterly|weekly)\s*(?:subscription|sub|plan|fee|charge)?/i,
+    /(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*\s+\d{4}/i, // "march 2026"
+    /q[1-4]\s+\d{4}/i,                              // "Q1 2026"
+  ];
+  for (const pat of servicePeriodPatterns) {
+    const m = noteText.match(pat);
+    if (m) {
+      result.servicePeriodHint = m[0].trim();
+      noteText = noteText.replace(m[0], "").trim();
+      break;
+    }
   }
 
   // Check remaining text for category keyword (first word)
@@ -401,8 +422,99 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
 }
 
 // ═══════════════════════════════════════════════════════
+// History Lookup
+// ═══════════════════════════════════════════════════════
+
+interface HistoricalMatch {
+  description: string;
+  category_id: string;
+  payment_type: string;
+  service_days: number;
+  amount_usd: number;
+}
+
+async function lookupTransactionHistory(
+  supabase: ReturnType<typeof createClient>,
+  description: string,
+): Promise<HistoricalMatch[]> {
+  if (!description) return [];
+
+  // Strip common source prefixes before matching
+  const cleanDesc = description.replace(/^(venmo|rakuten)\s*[-–]\s*/i, "").trim();
+  if (!cleanDesc) return [];
+
+  // Anchor on first ~20 chars — avoids expensive full-table scan while giving good recall
+  const anchor = cleanDesc.slice(0, 20).replace(/[%_]/g, "\\$&"); // escape ILIKE wildcards
+
+  try {
+    const { data } = await supabase
+      .from("transactions")
+      .select("description, category_id, payment_type, service_days, amount_usd")
+      .ilike("description", `%${anchor}%`)
+      .order("date", { ascending: false })
+      .limit(5);
+
+    return (data || []) as HistoricalMatch[];
+  } catch {
+    return []; // Non-blocking: history failure never stops the import
+  }
+}
+
+function formatHistoryContext(history: HistoricalMatch[]): string {
+  if (!history.length) return "No historical matches found.";
+  return history.map((h, i) =>
+    `${i + 1}. "${h.description}" | ${h.category_id} | ${h.payment_type} | ${h.service_days} day(s) | $${Math.abs(h.amount_usd)}`
+  ).join("\n");
+}
+
+// ═══════════════════════════════════════════════════════
+// Service Period Math
+// ═══════════════════════════════════════════════════════
+
+interface ServicePeriodFields {
+  service_start: string;
+  service_end: string;
+  service_days: number;
+  daily_cost: number | null;
+}
+
+function computeServicePeriod(
+  start: string,
+  end: string,
+  amount_usd: number | null,
+): ServicePeriodFields {
+  const startDate = new Date(start + "T00:00:00Z");
+  const endDate = new Date(end + "T00:00:00Z");
+
+  // Clamp: end must be >= start
+  const effectiveEnd = endDate >= startDate ? endDate : startDate;
+  const effectiveEndStr = effectiveEnd.toISOString().slice(0, 10);
+
+  // Inclusive range: service_days = end - start + 1
+  const msPerDay = 86_400_000;
+  const days = Math.round((effectiveEnd.getTime() - startDate.getTime()) / msPerDay) + 1;
+
+  const daily_cost = (amount_usd !== null && days > 0)
+    ? Math.round((amount_usd / days) * 1_000_000) / 1_000_000
+    : null;
+
+  return {
+    service_start: start,
+    service_end: effectiveEndStr,
+    service_days: days,
+    daily_cost,
+  };
+}
+
+// ═══════════════════════════════════════════════════════
 // AI Categorization
 // ═══════════════════════════════════════════════════════
+
+interface AIServicePeriod {
+  start: string | null;
+  end: string | null;
+  description: string; // audit trail, e.g. "spread over march → 2026-03-01 to 2026-03-31"
+}
 
 interface AIEnrichmentResult {
   cat?: string;
@@ -411,6 +523,8 @@ interface AIEnrichmentResult {
   tag?: string;
   payment_type?: string;
   amount_usd?: number;
+  service_period?: AIServicePeriod;
+  is_subscription?: boolean;
 }
 
 interface AIUnknownResult {
@@ -423,6 +537,8 @@ interface AIUnknownResult {
   payment_type?: string;
   source_hint?: string;
   tag?: string;
+  service_period?: AIServicePeriod;
+  is_subscription?: boolean;
 }
 
 type AIResult = AIEnrichmentResult & AIUnknownResult;
@@ -433,23 +549,33 @@ async function aiCategorize(
   subject: string,
   textBody: string,
   forwardingNote: ForwardingNote | null,
+  supabaseClient?: ReturnType<typeof createClient>,
 ): Promise<AIResult | null> {
   if (!ANTHROPIC_KEY) return null;
 
-  // For Rakuten with a clear forwarding note, let AI interpret the full context
-  // to extract merchant name, tag, and description
-  if (source === "rakuten" && forwardingNote?.raw) {
-    return await aiInterpretForwardingNote(source, parsed!, forwardingNote, subject, textBody);
+  // Fetch transaction history for pattern matching
+  let history: HistoricalMatch[] = [];
+  if (supabaseClient && parsed?.description) {
+    history = await lookupTransactionHistory(supabaseClient, parsed.description);
   }
 
-  // If forwarding note already provides a high-confidence category, skip AI
-  if (forwardingNote?.category && forwardingNote.categoryConfidence === "high") {
+  const servicePeriodHint = forwardingNote?.servicePeriodHint || null;
+
+  // For Rakuten with a clear forwarding note, let AI interpret the full context
+  if (source === "rakuten" && forwardingNote?.raw) {
+    return await aiInterpretForwardingNote(source, parsed!, forwardingNote, subject, textBody, history, servicePeriodHint);
+  }
+
+  // If forwarding note already provides a high-confidence category, skip AI for categorization
+  // but still run AI for service period / subscription detection if there are hints
+  const needsServiceAnalysis = !!servicePeriodHint || source === "unknown";
+  if (forwardingNote?.category && forwardingNote.categoryConfidence === "high" && !needsServiceAnalysis) {
     return { cat: forwardingNote.category, conf: "high", desc: null } as unknown as AIResult;
   }
 
   const prompt = source === "unknown"
-    ? buildUnknownEmailPrompt(subject, textBody, forwardingNote)
-    : buildEnrichmentPrompt(source, parsed!, forwardingNote);
+    ? buildUnknownEmailPrompt(subject, textBody, forwardingNote, history, servicePeriodHint, parsed?.date || null)
+    : buildEnrichmentPrompt(source, parsed!, forwardingNote, history, servicePeriodHint);
 
   try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -484,22 +610,28 @@ async function aiCategorize(
   }
 }
 
-// New: AI interprets forwarding note in context of the email source
-// This is the "smarter" approach — let AI read the full context and decide
+// AI interprets forwarding note in full context (used for Rakuten and complex notes)
 async function aiInterpretForwardingNote(
   source: string,
   parsed: ParsedEmail,
   forwardingNote: ForwardingNote,
   subject: string,
-  textBody: string,
+  _textBody: string,
+  history: HistoricalMatch[],
+  servicePeriodHint: string | null,
 ): Promise<AIResult | null> {
+  const refDate = parsed.date || new Date().toISOString().slice(0, 10);
+  const historyBlock = formatHistoryContext(history);
+
   const prompt = `You are a personal finance assistant helping parse a forwarded financial email.
 
 The user forwarded a ${source} email and added a note before forwarding. Your job is to interpret
-the user's note to extract the best description, category, tag, and any other context.
+the user's note to extract the best description, category, tag, service period, and subscription status.
 
 EMAIL SOURCE: ${source}
 EMAIL SUBJECT: ${subject}
+REFERENCE DATE (transaction date or today): ${refDate}
+
 PARSER-EXTRACTED DATA:
 - Description: ${parsed.description}
 - Amount: $${Math.abs(parsed.amount_usd || 0)}
@@ -509,33 +641,49 @@ ${parsed.parsed_data.store_name ? `- Store: ${parsed.parsed_data.store_name}` : 
 
 USER'S FORWARDING NOTE (text they typed before forwarding):
 "${forwardingNote.raw}"
+${servicePeriodHint ? `\nDETECTED SERVICE PERIOD HINT: "${servicePeriodHint}"` : ""}
+
+HISTORICAL MATCHES (similar past transactions — use for category/payment_type/service_days patterns):
+${historyBlock}
 
 CONTEXT FOR ${source.toUpperCase()}:
 ${source === "rakuten" ? `This is a Rakuten cashback notification. The amount ($${Math.abs(parsed.amount_usd || 0)}) is cashback EARNED, not the purchase price. The payment_type should always be "Rakuten". The category should be "income" for cashback earned. The description format should be "Rakuten - {StoreName}" matching historical patterns like "Rakuten - Chewy", "Rakuten - Sur la Table", "Rakuten - Vrbo".` : ""}
 
-DESCRIPTION STYLE GUIDE (match this format):
+DESCRIPTION STYLE GUIDE:
 - Rakuten cashback: "Rakuten - {StoreName}" (e.g., "Rakuten - Vrbo", "Rakuten - Chewy")
 - Venmo: "Venmo - {Person} ({Note})"
 
 CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
 
-From the user's forwarding note, extract:
-1. The best clean description (matching the style guide)
-2. A tag (trip/event tag if mentioned, lowercase, e.g., "cozumel")
-3. The correct category
+SERVICE PERIOD RULES (user forwarding note takes priority over email content):
+- "spread over march" → start=first day of March in the reference year, end=last day of March
+- "annual subscription" or "yearly" → start=reference date, end=reference date + 365 days
+- "monthly subscription" or "monthly" → start=first day of reference month, end=last day of reference month
+- "service 3/1-3/31" → start=2026-03-01, end=2026-03-31 (use reference year if year omitted)
+- "30 days from today" → start=reference date, end=reference date + 29 days
+- "Q1 2026" → start=2026-01-01, end=2026-03-31
+- Only set service_period if you are confident a non-single-day period was intended. Omit otherwise.
+
+SUBSCRIPTION DETECTION:
+- Set is_subscription=true if: user note contains "annual", "monthly", "yearly", "subscription", "sub", "recurring"
+- OR if the merchant is a known subscription service (Netflix, Spotify, Apple, Amazon Prime, NYT, etc.)
+- OR if historical matches show this merchant always appears with service_days > 1
+- Otherwise set is_subscription=false
 
 Return ONLY a JSON object:
 {
   "desc": "<clean description matching style guide>",
   "cat": "<category_id>",
   "conf": "high|medium|low",
-  "tag": "<tag if mentioned, null otherwise>"
+  "tag": "<tag if mentioned, null otherwise>",
+  "service_period": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "description": "<reason>"},
+  "is_subscription": false
 }
 
-Rules:
+Notes:
+- Omit "service_period" key entirely if no service period was detected (do not set to null)
 - Look for trip names, location references, or event names → those become tags
-- "cozumel trip" → tag: "cozumel"
-- For Rakuten, the description should be "Rakuten - {Store}" not the full forwarding note
+- For Rakuten, description should be "Rakuten - {Store}" not the full forwarding note
 - Extract the actual store/merchant name from the note or email context`;
 
   try {
@@ -571,10 +719,21 @@ Rules:
   }
 }
 
-function buildEnrichmentPrompt(source: string, parsed: ParsedEmail, forwardingNote: ForwardingNote | null): string {
-  let prompt = `You are a personal finance assistant. Given this ${source} transaction, assign a category.
+function buildEnrichmentPrompt(
+  source: string,
+  parsed: ParsedEmail,
+  forwardingNote: ForwardingNote | null,
+  history: HistoricalMatch[],
+  servicePeriodHint: string | null,
+): string {
+  const refDate = parsed.date || new Date().toISOString().slice(0, 10);
+  const historyBlock = formatHistoryContext(history);
+
+  let prompt = `You are a personal finance assistant. Given this ${source} transaction, assign a category and detect subscription/service period.
 
 CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
+
+REFERENCE DATE (transaction date): ${refDate}
 
 Transaction:
 - Description: ${parsed.description}
@@ -587,39 +746,99 @@ Transaction:
     prompt += `\n- User's forwarding note (STRONG hint): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
   }
 
+  if (servicePeriodHint) {
+    prompt += `\n- Service period hint from user: "${servicePeriodHint}"`;
+  }
+
   prompt += `
 
-Return ONLY a JSON object: {"cat": "<category_id>", "conf": "high|medium|low", "desc": "<optionally improved description>"}
+HISTORICAL MATCHES (similar past transactions — use for pattern matching):
+${historyBlock}
+
+SERVICE PERIOD RULES (user forwarding note takes priority):
+- "spread over march" → start=first day of March, end=last day of March (use reference year)
+- "annual subscription" or "yearly" → start=reference date, end=reference date + 365 days
+- "monthly subscription" or "monthly" → start=first day of reference month, end=last day of reference month
+- "service 3/1-3/31" → start=YYYY-03-01, end=YYYY-03-31
+- "30 days" → start=reference date, end=reference date + 29 days
+- Omit service_period entirely if no non-single-day period was intended
+
+SUBSCRIPTION DETECTION:
+- Set is_subscription=true if user note contains "annual", "monthly", "yearly", "subscription"
+- OR if counterparty/description is a known subscription service
+- OR if historical matches show recurring service_days > 1 patterns
+- Otherwise false
+
+Return ONLY a JSON object:
+{"cat": "<category_id>", "conf": "high|medium|low", "desc": "<optionally improved description>", "service_period": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "description": "<reason>"}, "is_subscription": false}
 
 Rules:
 - If the note clearly indicates a category (e.g. "groceries", "dinner"), use high confidence
 - If the counterparty is a known business type, use medium confidence
 - If ambiguous, use "other" with low confidence
-- For "received" direction, always use "income" with high confidence`;
+- For "received" direction, always use "income" with high confidence
+- Omit "service_period" key entirely if not applicable`;
 
   return prompt;
 }
 
-function buildUnknownEmailPrompt(subject: string, textBody: string, forwardingNote: ForwardingNote | null): string {
+function buildUnknownEmailPrompt(
+  subject: string,
+  textBody: string,
+  forwardingNote: ForwardingNote | null,
+  history: HistoricalMatch[],
+  servicePeriodHint: string | null,
+  refDate: string | null,
+): string {
+  const dateRef = refDate || new Date().toISOString().slice(0, 10);
+  const historyBlock = formatHistoryContext(history);
+
   let prompt = `You are a personal finance assistant. Extract a financial transaction from this email.
 
 CATEGORIES: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income
 
 KNOWN PAYMENT TYPES: Chase Chequing, Chase Sapphire, Chase Freedom, AMEX Rose Gold, Bilt, Venmo, Rakuten, Apple, Capital One, Uber, and others.
 
+REFERENCE DATE (use for resolving relative dates): ${dateRef}
+
 Email subject: ${subject}
 Email body (first 2000 chars): ${(textBody || "").slice(0, 2000)}`;
 
   if (forwardingNote?.descriptionHint || forwardingNote?.raw) {
-    prompt += `\nUser's forwarding note (STRONG hint — the user typed this when forwarding, it often contains the category, tag, or description context): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
+    prompt += `\nUser's forwarding note (STRONG hint — often contains category, tag, or description context): "${forwardingNote.descriptionHint || forwardingNote.raw}"`;
+  }
+
+  if (servicePeriodHint) {
+    prompt += `\nService period hint from user note: "${servicePeriodHint}"`;
   }
 
   prompt += `
 
-If this email contains a financial transaction (purchase, payment, refund, cashback, subscription charge), extract it.
+HISTORICAL MATCHES (similar past transactions — use for pattern matching):
+${historyBlock}
+
+SERVICE PERIOD RULES:
+- "spread over march" → start=first day of March in reference year, end=last day of March
+- "annual subscription" or "yearly" → start=reference date, end=reference date + 365 days
+- "monthly subscription" or "monthly" → start=first day of reference month, end=last day of reference month
+- "service 3/1-3/31" → start=YYYY-03-01, end=YYYY-03-31 (use reference year if year omitted)
+- "30 days from today" → start=reference date, end=reference date + 29 days
+- "Q1 2026" → start=2026-01-01, end=2026-03-31
+- For monthly subscription charges, spread over the full service month even without a user hint
+- Only set service_period when confident. Omit the key entirely if not applicable.
+
+SUBSCRIPTION DETECTION:
+- Set is_subscription=true if:
+  - User note contains "annual", "monthly", "yearly", "subscription", "sub", "recurring"
+  - Email is from a known subscription service (Netflix, Spotify, Apple, Amazon Prime, Adobe, NYT, Hulu, Disney+, etc.)
+  - Historical matches show this merchant with service_days > 1 regularly
+  - Email subject/body mentions "renewal", "billing cycle", "next billing date"
+- Otherwise set is_subscription=false
+
+If this email contains a financial transaction, extract it.
 If not a financial email, return {"is_transaction": false}.
 
-IMPORTANT: 
+IMPORTANT:
 - If the user's forwarding note mentions a trip name or location (e.g., "cozumel", "japan"), extract it as a tag.
 - If the email is from Rakuten about cashback, use payment_type "Rakuten" and category "income".
 - The description should be clean and match patterns like "Rakuten - Vrbo" or "Venmo - PersonName".
@@ -634,8 +853,12 @@ Return ONLY a JSON object:
   "confidence": "high|medium|low",
   "payment_type": "<best guess payment account>",
   "source_hint": "<what service sent this email>",
-  "tag": "<trip/event tag if mentioned in forwarding note, null otherwise>"
-}`;
+  "tag": "<trip/event tag if mentioned in forwarding note, null otherwise>",
+  "service_period": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD", "description": "<reason>"},
+  "is_subscription": false
+}
+
+Omit "service_period" key entirely if no service period was detected.`;
 
   return prompt;
 }
@@ -687,7 +910,7 @@ function buildCandidate(
   // Forwarding note overrides (highest priority for explicit structured hints)
   let finalPaymentType = base.payment_type || null;
   let finalTag = ai_tag || (base.tag as string) || "";
-  
+
   // Forwarding note structured hints override AI
   if (forwardingNote?.paymentType) finalPaymentType = forwardingNote.paymentType;
   if (forwardingNote?.tag) finalTag = forwardingNote.tag;
@@ -697,11 +920,24 @@ function buildCandidate(
   if (forwardingNote?.raw) parsedData.forwarding_note = forwardingNote.raw;
 
   // For Rakuten: AI forwarding note interpreter returns clean "Rakuten - {Store}" → prefer it.
-  // But fall back to parser description (not email subject) if AI didn't run or failed.
-  // For others: AI description is usually better formatted.
   const finalDescription = (source === "rakuten")
     ? (ai_description || (base.description as string))
     : (ai_description || (base.description as string) || emailMeta.email_subject);
+
+  // Apply AI-detected service period (highest priority — overrides parser defaults)
+  if (aiResult?.service_period?.start && aiResult.service_period.end) {
+    const amount = (base.amount_usd as number | null) ?? null;
+    const sp = computeServicePeriod(aiResult.service_period.start, aiResult.service_period.end, amount);
+    base.service_start = sp.service_start;
+    base.service_end = sp.service_end;
+    base.service_days = sp.service_days;
+    base.daily_cost = sp.daily_cost;
+    // Log the AI's reasoning into parsed_data for audit
+    parsedData.ai_service_period = aiResult.service_period;
+  }
+
+  // Subscription flag
+  const is_subscription = aiResult?.is_subscription ?? false;
 
   return {
     source,
@@ -718,6 +954,7 @@ function buildCandidate(
     service_end: base.service_end || base.date || null,
     service_days: (base.service_days as number) || 1,
     daily_cost: base.daily_cost ?? base.amount_usd ?? null,
+    is_subscription,
     ai_category,
     ai_confidence,
     ai_description,
@@ -805,10 +1042,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  // 6. AI categorization
+  // 6. AI categorization (passes supabase for history lookup)
   let aiResult: AIResult | null = null;
   try {
-    aiResult = await aiCategorize(source, parsed, subject || "", textBody || "", forwardingNote);
+    aiResult = await aiCategorize(source, parsed, subject || "", textBody || "", forwardingNote, supabase);
   } catch (e) {
     console.error("AI categorization error:", e);
   }
@@ -843,7 +1080,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // 9. Success
-  return new Response(JSON.stringify({ status: "ok", source, forwarding_note: forwardingNote?.raw || null }), {
+  return new Response(JSON.stringify({
+    status: "ok",
+    source,
+    forwarding_note: forwardingNote?.raw || null,
+    is_subscription: candidate.is_subscription || false,
+    service_period: aiResult?.service_period || null,
+  }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });

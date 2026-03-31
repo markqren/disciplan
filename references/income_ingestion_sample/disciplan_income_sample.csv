@@ -1,22 +1,30 @@
-12/28/25,9/8/25,12/31/25,Income Taxes and Social Security,Income,13535.52,USD,"CA$18,543.66",Charles Schwab, ,,CA$161.25
-12/28/25,9/8/25,12/31/25,Pinterest Stock Units Vested (Q4 2025),Income,(33225.92),USD,"(CA$45,519.51)",Charles Schwab, ,,(CA$395.82)
-12/28/25,12/1/25,12/15/25,Vanguard Deposited 401K,Financial,(1437.51),USD,"(CA$1,969.39)",Vanguard, ,,(CA$131.29)
-12/28/25,12/1/25,12/15/25,401K,Financial,1437.51,USD,"CA$1,969.39",Chase Chequing, ,,CA$131.29
-12/28/25,12/1/25,12/15/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$15.06
-12/28/25,12/1/25,12/15/25,Income Taxes and Social Security,Income,3450.17,USD,"CA$4,726.73",Chase Chequing, ,,CA$315.12
-12/28/25,12/1/25,12/15/25,Pinterest Income,Income,(9725.64),USD,"(CA$13,324.13)",Chase Chequing, ,,(CA$888.28)
-12/28/25,11/16/25,11/30/25,Vanguard Deposited 401K,Financial,(1437.51),USD,"(CA$1,969.39)",Vanguard, ,,(CA$131.29)
-12/28/25,11/16/25,11/30/25,401K,Financial,1437.51,USD,"CA$1,969.39",Chase Chequing, ,,CA$131.29
-12/28/25,11/16/25,11/30/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$15.06
-12/28/25,11/16/25,11/30/25,Income Taxes and Social Security,Income,3450.16,USD,"CA$4,726.72",Chase Chequing, ,,CA$315.11
-12/28/25,11/16/25,11/30/25,Pinterest Income,Income,(9595.64),USD,"(CA$13,146.03)",Chase Chequing, ,,(CA$876.40)
-12/28/25,12/28/25,12/28/25,Vanguard 401K Rollover In,Financial,(75655.74),USD,"(CA$103,648.36)",Vanguard, ,,"(CA$103,648.36)"
-12/28/25,12/28/25,12/28/25,Charles Schwab 401K Rollover Out,Financial,75655.74,USD,"CA$103,648.36",Charles Schwab, ,,"CA$103,648.36"
-12/28/25,11/1/25,11/15/25,Vanguard Deposited 401K,Financial,(1437.51),USD,"(CA$1,969.39)",Vanguard, ,,(CA$131.29)
-12/28/25,11/1/25,11/15/25,401K,Financial,1437.51,USD,"CA$1,969.39",Chase Chequing, ,,CA$131.29
-12/28/25,11/1/25,11/15/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$15.06
-12/28/25,11/1/25,11/15/25,Income Taxes and Social Security,Income,3450.17,USD,"CA$4,726.73",Chase Chequing, ,,CA$315.12
-12/28/25,11/1/25,11/15/25,Pinterest Income,Income,(9725.64),USD,"(CA$13,324.13)",Chase Chequing, ,,(CA$888.28)
-12/28/25,10/16/25,10/31/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$14.11
-12/28/25,10/16/25,10/31/25,Income Taxes and Social Security,Income,3450.17,USD,"CA$4,726.73",Chase Chequing, ,,CA$295.42
+03/31/26,03/16/26,03/31/26,Pinterest Income,Income,(9870.84),USD,"(CA$13,523.05)",Chase Chequing, ,,(CA$845.19)
+03/31/26,03/16/26,03/31/26,Income Taxes and Social Security,Income,2664.34,USD,"CA$3,650.15",Chase Chequing, ,,CA$228.13
+03/31/26,03/16/26,03/31/26,Medical Insurance Benefits,Health,73.54,USD,CA$100.75,Chase Chequing, ,,CA$6.30
+03/31/26,03/16/26,03/31/26,FSA Deposit,Financial,28.33,USD,CA$38.81,Chase Chequing, ,,CA$2.43
+03/31/26,03/16/26,03/31/26,FSA Deposited,Financial,(28.33),USD,(CA$38.81),Transfer,FSA 2026,,(CA$2.43)
+03/31/26,03/16/26,03/31/26,Pre-tax 401K,Financial,2467.71,USD,"CA$3,380.76",Chase Chequing, ,,CA$211.30
+03/31/26,03/16/26,03/31/26,Vanguard Deposited Pre-tax 401K,Financial,(2467.71),USD,"(CA$3,380.76)",Vanguard, ,,(CA$211.30)
+03/31/26,03/16/26,03/31/26,401K Match,Income,(1233.86),USD,"(CA$1,690.39)",Vanguard, ,,(CA$105.65)
+12/28/25,9/8/25,12/31/25,Income Taxes and Social Security,Income,13535.52,USD,"CA$18,543.66",Charles Schwab, ,,CA$161.25
+12/28/25,9/8/25,12/31/25,Pinterest Stock Units Vested (Q4 2025),Income,(33225.92),USD,"(CA$45,519.51)",Charles Schwab, ,,(CA$395.82)
+12/28/25,12/1/25,12/15/25,Vanguard Deposited 401K (Post-tax),Financial,(1437.51),USD,"(CA$1,969.39)",Vanguard, ,,(CA$131.29)
+12/28/25,12/1/25,12/15/25,401K (Post-tax),Financial,1437.51,USD,"CA$1,969.39",Chase Chequing, ,,CA$131.29
+12/28/25,12/1/25,12/15/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$15.06
+12/28/25,12/1/25,12/15/25,Income Taxes and Social Security,Income,3450.17,USD,"CA$4,726.73",Chase Chequing, ,,CA$315.12
+12/28/25,12/1/25,12/15/25,Pinterest Income,Income,(9725.64),USD,"(CA$13,324.13)",Chase Chequing, ,,(CA$888.28)
+12/28/25,11/16/25,11/30/25,Vanguard Deposited 401K (Post-tax),Financial,(1437.51),USD,"(CA$1,969.39)",Vanguard, ,,(CA$131.29)
+12/28/25,11/16/25,11/30/25,401K (Post-tax),Financial,1437.51,USD,"CA$1,969.39",Chase Chequing, ,,CA$131.29
+12/28/25,11/16/25,11/30/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$15.06
+12/28/25,11/16/25,11/30/25,Income Taxes and Social Security,Income,3450.16,USD,"CA$4,726.72",Chase Chequing, ,,CA$315.11
+12/28/25,11/16/25,11/30/25,Pinterest Income,Income,(9595.64),USD,"(CA$13,146.03)",Chase Chequing, ,,(CA$876.40)
+12/28/25,12/28/25,12/28/25,Vanguard 401K Rollover In,Financial,(75655.74),USD,"(CA$103,648.36)",Vanguard, ,,"(CA$103,648.36)"
+12/28/25,12/28/25,12/28/25,Charles Schwab 401K Rollover Out,Financial,75655.74,USD,"CA$103,648.36",Charles Schwab, ,,"CA$103,648.36"
+12/28/25,11/1/25,11/15/25,Vanguard Deposited 401K (Post-tax),Financial,(1437.51),USD,"(CA$1,969.39)",Vanguard, ,,(CA$131.29)
+12/28/25,11/1/25,11/15/25,401K (Post-tax),Financial,1437.51,USD,"CA$1,969.39",Chase Chequing, ,,CA$131.29
+12/28/25,11/1/25,11/15/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$15.06
+12/28/25,11/1/25,11/15/25,Income Taxes and Social Security,Income,3450.17,USD,"CA$4,726.73",Chase Chequing, ,,CA$315.12
+12/28/25,11/1/25,11/15/25,Pinterest Income,Income,(9725.64),USD,"(CA$13,324.13)",Chase Chequing, ,,(CA$888.28)
+12/28/25,10/16/25,10/31/25,Medical Insurance Benefits,Health,164.84,USD,CA$225.83,Chase Chequing, ,,CA$14.11
+12/28/25,10/16/25,10/31/25,Income Taxes and Social Security,Income,3450.17,USD,"CA$4,726.73",Chase Chequing, ,,CA$295.42
 12/28/25,10/16/25,10/31/25,Pinterest Income,Income,(9595.64),USD,"(CA$13,146.03)",Chase Chequing, ,,(CA$821.63)
