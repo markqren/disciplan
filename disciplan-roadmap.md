@@ -9,11 +9,11 @@
 ### v1.2 — Mar 31, 2026
 
 #### v1.2.1
-<sub>Pending deploy</sub>
+<sub>Deployed 2026-03-31 23:12 UTC</sub>
 
 ##### Features
 - **FEA-85: Email Import AI Enhancements** — AI can now read natural language instructions in the forwarding note (before the forwarding divider) to set or override service period, subscription status, and improve categorization. (1) **Service period:** `servicePeriodHint` extracted from note — AI interprets natural language like "covers Jan 1–15" and returns `{start, end}` which `computeServicePeriod()` converts to exact accrual math (inclusive days, `daily_cost = amount/days`). (2) **Subscription detection:** `is_subscription` boolean — AI flags recurring services from note keywords ("subscription", "monthly"), known services (Netflix, Spotify), email signals, or transaction history patterns. Stored on `pending_imports`, visible in review UI. (3) **Transaction history context:** `lookupTransactionHistory()` queries last 5 matching transactions by description anchor (ilike first 20 chars) — passed as AI context for consistent categorization and subscription pattern recognition. Non-blocking; omitted on failure.
-- **Income ingestion: Pre-tax 401K + FSA pattern** — Updated reference CSV to handle pre-tax 401K deductions and 50% employer match (Pinterest/Google pattern). Pre-tax 401K: deduction on Chase Chequing (financial) + equal offsetting deposit to Vanguard. 401K Match: separate income entry on Vanguard. FSA: `FSA Deposit` on Chase Chequing + equal offsetting `FSA Deposited` on Transfer/credit: FSA 2026 — FSA 2026 sub-account appears under Credits & Transfers on Balance Sheet. Retroactively applied to all 5 prior 2026 Pinterest payroll periods for $141.65 YTD.
+- **FEA-86: Income Ingestion Pre-tax 401K + FSA Pattern** — Updated reference CSV to handle pre-tax 401K deductions and 50% employer match (Pinterest/Google pattern). Pre-tax 401K: deduction on Chase Chequing (financial) + equal offsetting deposit to Vanguard. 401K Match: separate income entry on Vanguard. FSA: `FSA Deposit` on Chase Chequing + equal offsetting `FSA Deposited` on Transfer/credit: FSA 2026 — FSA 2026 sub-account appears under Credits & Transfers on Balance Sheet. Retroactively applied to all 5 prior 2026 Pinterest payroll periods for $141.65 YTD.
 
 ##### Fixes
 - **BUG-23:** Aggregated annualized returns all displayed as <1% (e.g. VTSAX showing +0.1% instead of ~+12%). Root cause: `Math.pow(mv/cost_basis, 365.25/days) - 1` returns a decimal (e.g. 0.12), but `fPct()` calls `.toFixed(1)` directly expecting percentage points. Fixed by multiplying the formula result by 100: `(Math.pow(...) - 1) * 100`. Per-lot and weighted-average aggregation now display correctly.
@@ -21,7 +21,7 @@
 ---
 
 #### v1.2.0
-<sub>Deployed 2026-03-30</sub>
+<sub>Deployed 2026-03-31 05:18 UTC</sub>
 
 **Price history, import confirmation, live API refresh, and display polish.**
 
@@ -227,6 +227,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-86 | **Income Ingestion Pre-tax 401K + FSA Pattern** — Reference CSV updated for Pinterest/Google pre-tax 401K (Chase deduction + Vanguard deposit + 50% match income) and FSA double-entry (FSA Deposit on Chase + FSA Deposited to Transfer/FSA 2026 sub-account). Retroactively applied to all 5 prior 2026 payroll periods. | Feature → Done | Mar 31 |
 | FEA-85 | **Email Import AI Enhancements** — Natural language service period hints from forwarding note, `is_subscription` flagging (from keywords, known services, or history patterns), and last-5-match transaction history passed as AI context. `computeServicePeriod()` does exact accrual math from AI-returned `{start, end}`. | Feature → Done | Mar 31 |
 | BUG-23 | **Annualized returns displayed as <1%** — `Math.pow(...)-1` returns a decimal (0.12); `fPct()` expects percentage points. Fixed by multiplying formula result by 100. | Bug → Done | Mar 30 |
 | BUG-22 | **Annualized return mismatch with source CSVs** — Was computing `(price/price_exec)^(365.25/days)-1`. Fixed to `(shares×price/cost_basis)^(365.25/days)-1` to match spreadsheet formula `(Market/Book)^(365.25/days)-1`, correctly handling commission-adjusted cost basis. | Bug → Done | Mar 30 |
