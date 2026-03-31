@@ -1,10 +1,28 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 27, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Mar 30, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
+
+### v1.2.0 — Mar 30, 2026
+<sub>Pending deploy</sub>
+
+**Price history, import confirmation, live API refresh, and display polish.**
+
+#### Features
+- **FEA-82: Price History** — New `investment_price_history` table. Every price update (manual edit, import confirm, or live API fetch) archives the previous price before overwriting. Market Prices table shows a `⦿` history button per symbol — click to expand an inline history panel with date, archived price, and Δ from current value.
+- **FEA-83: Price confirmation on lot import** — After inserting lots, the flow fetches proposed prices (Yahoo Finance / CSV implied) without saving, then shows a confirmation table (Symbol | Current | New | Δ | Source). User can confirm and apply or skip entirely.
+- **FEA-84: ↻ Live API button in price edit** — Clicking a price to edit now shows a "↻ Live" button alongside the manual inputs. Fetches from Yahoo Finance (5s timeout), auto-populates price + today's date, and saves with `source="live"`. Turns red with tooltip on failure; inputs remain open for manual fallback.
+
+#### UI
+- **UI-07: Import lot formatting + shares 2dp** — Parsed shares normalized to 4dp / price to 2dp at parse time. All share columns (symbol rows, lot rows, import preview) standardized to 2 decimal places. Preview dates use consistent formatted display.
+
+#### Fixes
+- **BUG-22:** Annualized return calculation didn't match source CSV values. Was using `(latest_price / price_exec)^(365.25/days) - 1` (price-per-share ratio), which diverges from the correct formula when `cost_basis` is commission-adjusted or rounded differently from `shares × price_exec`. Fixed to `(shares × latest_price / cost_basis)^(365.25/days) - 1` — exact match to spreadsheet formula `(Market Value / Book Value)^(365.25/days) - 1`. Aggregation (cost-basis-weighted average) was already correct.
+
+---
 
 ### v1.1 — Mar 27, 2026
 
@@ -50,6 +68,9 @@
 
 ---
 
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v1.0.0)</summary>
+
 ### v1.0.0 — Mar 25, 2026
 <sub>Deployed 2026-03-25</sub>
 
@@ -61,9 +82,6 @@
 - **FEA-77: Portfolio Lot Management** — Inline editing and CRUD for investment lots in the Portfolio tab. (1) Click Shares or Price cells on expanded lot rows to edit in-place — PATCH to `investment_lots` with auto-recomputed `cost_basis`, full portfolio re-render. (2) "+ Add Lot" row at bottom of expanded active lots — inline form with date/shares/price, POST to `investment_lots`. (3) "+ Add Holdings" button at top of Holdings card — form with account dropdown (+ "New Account…" with label/institution/type fields), symbol input with autocomplete (+ new symbol name/asset class fields), date/shares/price. Creates `investment_accounts`, `investment_symbols`, and `investment_lots` rows as needed. (4) Delete lot via ✕ button with two-click confirmation. All derived values (market value, gain, return, annual return, KPIs, charts) recalculate on every change.
 
 ---
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v0.9.0)</summary>
 
 ### v0.9.0 — Mar 23, 2026
 <sub>Deployed 2026-03-24</sub>
@@ -191,10 +209,15 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (113 items)</summary>
+<summary><strong>✅ Completed</strong> (117 items)</summary>
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-22 | **Annualized return mismatch with source CSVs** — Was computing `(price/price_exec)^(365.25/days)-1`. Fixed to `(shares×price/cost_basis)^(365.25/days)-1` to match spreadsheet formula `(Market/Book)^(365.25/days)-1`, correctly handling commission-adjusted cost basis. | Bug → Done | Mar 30 |
+| FEA-84 | **↻ Live API button in price edit** — "↻ Live" button in inline price editor fetches Yahoo Finance (5s timeout), auto-populates price + today's date, saves with `source="live"`. Turns red on failure. | Feature → Done | Mar 30 |
+| UI-07 | **Import lot formatting + shares 2dp** — Shares display standardized to 2dp everywhere. Parsed lots normalized to 4dp shares / 2dp price. Preview dates use `fmtD()`. | UI → Done | Mar 30 |
+| FEA-83 | **Price confirmation on lot import** — Import flow fetches proposed prices (Yahoo/implied) without saving, shows confirmation table (Symbol / Current / New / Δ / Source) before applying. User can confirm or skip. | Feature → Done | Mar 30 |
+| FEA-82 | **Price history** — `investment_price_history` table logs old price before every update. Market Prices table has `⦿` per symbol to view inline history with Δ from current. | Feature → Done | Mar 30 |
 | BUG-20c | **Lot import count frozen + deselections not remembered** — Per-row checkbox handler was calling `textContent` on the import button (destroying inner `<span>`), causing `getElementById("pfIlImportCount")` to null-crash and freeze the count display. Fixed with single `updateLotImportBtn()` helper. Added `localStorage.rejected_lots` (keyed `symbol:date:shares`) — unchecking a new lot persists the rejection; re-checking removes it. Rejected lots start pre-unchecked on future imports. | Bug → Done | Mar 27 |
 | BUG-21b | **Auto-link rejections not persisted** — Skipping the modal had no memory; same bad pairs reappeared every page load. Added `localStorage.rejected_links` (sorted ID pairs). Scan filters rejected pairs before showing modal. Unchecking + "Link Selected" rejects unchecked items; "Reject All" rejects everything. ✕ snoozes without rejecting. | Bug → Done | Mar 27 |
 | BUG-21 | **Skipped auto-links not re-surfaced** — Skipped suggestions were lost until the next email import. Added scan on first ledger open per page load (`_linkScanDone` flag prevents repeat scans on filter/pagination). Skipped links return on next page refresh since transactions stay `transaction_group_id = null`. | Bug → Done | Mar 27 |
