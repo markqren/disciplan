@@ -1,12 +1,20 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Mar 31, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Apr 1, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
 
-### v1.2 — Mar 31, 2026
+### v1.2 — Apr 1, 2026
+
+#### v1.2.2
+<sub>Pending deploy</sub>
+
+##### Fixes
+- **BUG-24:** Payslip import only generated 3 line items when payslip had pre-tax 401K or FSA deductions. Root cause: (1) parser looked for `"401(k) After-tax Deferral"` but Pinterest pre-tax 401K appears as bare `"401(k)"` in Pre Tax Deductions; (2) no regex for `"Flex Spending Health"` (FSA label); (3) medical formula used full `preTaxTotal` without subtracting the pre-tax 401K and FSA amounts, inflating medical by ~$2,496. Fixed: added `preTax401k` and `fsa` detection; updated medical formula to `preTaxTotal − preTax401k − fsa + postTaxNon401k + gtl`; generates Pre-tax 401K + Vanguard Deposited Pre-tax 401K entries; generates FSA Deposit + FSA Deposited (Transfer / credit: FSA 2026) entries. After-tax 401K descriptions renamed to `"401K (Post-tax)"` / `"Vanguard Deposited 401K (Post-tax)"` to match reference CSV. Verified: 03/31/26 payslip now produces 8 line items, Chase net = −$4,636.92.
+
+---
 
 #### v1.2.1
 <sub>Deployed 2026-03-31 23:12 UTC</sub>
@@ -227,6 +235,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| BUG-24 | **Payslip import missing pre-tax 401K and FSA line items** — Parser only matched `401(k) After-tax Deferral`; Pinterest uses bare `401(k)` in Pre Tax Deductions. Added `preTax401k` + `fsa` (`Flex Spending Health`) detection. Fixed medical formula to subtract both. Added FSA double-entry (Transfer / credit: FSA 2026). 3 items → 8 items on 03/31/26 payslip. | Bug → Done | Apr 1 |
 | FEA-86 | **Income Ingestion Pre-tax 401K + FSA Pattern** — Reference CSV updated for Pinterest/Google pre-tax 401K (Chase deduction + Vanguard deposit + 50% match income) and FSA double-entry (FSA Deposit on Chase + FSA Deposited to Transfer/FSA 2026 sub-account). Retroactively applied to all 5 prior 2026 payroll periods. | Feature → Done | Mar 31 |
 | FEA-85 | **Email Import AI Enhancements** — Natural language service period hints from forwarding note, `is_subscription` flagging (from keywords, known services, or history patterns), and last-5-match transaction history passed as AI context. `computeServicePeriod()` does exact accrual math from AI-returned `{start, end}`. | Feature → Done | Mar 31 |
 | BUG-23 | **Annualized returns displayed as <1%** — `Math.pow(...)-1` returns a decimal (0.12); `fPct()` expects percentage points. Fixed by multiplying formula result by 100. | Bug → Done | Mar 30 |
