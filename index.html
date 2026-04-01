@@ -732,7 +732,7 @@ function parsePayslipPage(lines,fullText){
   if(grossPay===0&&empTaxSum===0&&preTaxSum===0&&postTaxSum===0){
     return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay:0,netPay:0,
       earningsTotal:0,employeeTaxTotal:0,preTaxTotal:0,postTaxTotal:0,
-      gtl:0,deferral401k:0,match401k:0,rsuOffset:0,isRSU:false,isSkip:true};
+      gtl:0,preTax401k:0,deferral401k:0,fsa:0,match401k:0,rsuOffset:0,isRSU:false,isSkip:true};
   }
 
   // Section totals: try combined-line format first (old layout), then "Total:" lines (new layout)
@@ -770,10 +770,21 @@ function parsePayslipPage(lines,fullText){
   const gm=fullText.match(/GTL\s+\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}\s+[\d,.]+\s+[\d,.]+\s+([\d,.]+)/);
   const gtl=gm?pn(gm[1]):0;
 
-  // 401(k) After-tax Deferral: 2 numbers = [current, YTD], 1 number = YTD only
+  // Pre-tax 401(k): bare "401(k)" with 2 numbers in Pre Tax Deductions (Pinterest)
+  // Distinguished from "401(k) After-tax Deferral" and "401(k) Employer Match" by no trailing word
+  let preTax401k=0;
+  const ptm=fullText.match(/\b401\(k\)\s+([\d,.]+)\s+([\d,.]+)/);
+  if(ptm)preTax401k=pn(ptm[1]);
+
+  // 401(k) After-tax Deferral: 2 numbers = [current, YTD], 1 number = YTD only (Google post-tax)
   let deferral401k=0;
   const km=fullText.match(/401\(k\) After-tax Deferral\s+([\d,.]+)(?:\s+([\d,.]+))?/);
   if(km&&km[2])deferral401k=pn(km[1]);
+
+  // FSA: "Flex Spending Health" with 2 numbers = [current, YTD]
+  let fsa=0;
+  const fsam=fullText.match(/Flex\s+Spending\s+Health\s+([\d,.]+)\s+([\d,.]+)/i);
+  if(fsam)fsa=pn(fsam[1]);
 
   // 401(k) Company/Employer Match: same pattern
   let match401k=0;
@@ -790,7 +801,7 @@ function parsePayslipPage(lines,fullText){
 
   return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay,netPay,
     earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    gtl,deferral401k,match401k,rsuOffset,isRSU,isSkip:false};
+    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,isRSU,isSkip:false};
 }
 
 async function parsePayslipPDF(file){
@@ -827,7 +838,8 @@ function generatePayslipTransactions(pages,enteredDate){
         _group:`${fmtD(ss)} \u2013 ${fmtD(se)} (RSU Vesting)`,_source:"rsu_tax",_pageData:p});
     }else{
       const postTaxNon401k=Math.round((p.postTaxTotal-p.deferral401k-p.rsuOffset)*100)/100;
-      const medical=Math.round((p.preTaxTotal+postTaxNon401k+p.gtl)*100)/100;
+      // Medical = preTaxTotal minus pre-tax 401K and FSA (which are separate line items) + non-401K post-tax deductions + GTL
+      const medical=Math.round((p.preTaxTotal-p.preTax401k-p.fsa+postTaxNon401k+p.gtl)*100)/100;
       const grp=`${fmtD(ss)} \u2013 ${fmtD(se)} (Regular)`;
       txns.push({date:enteredDate,service_start:ss,service_end:se,
         description:"Pinterest Income",category_id:"income",
@@ -841,15 +853,35 @@ function generatePayslipTransactions(pages,enteredDate){
         description:"Medical Insurance Benefits",category_id:"health",
         amount_usd:medical,payment_type:"Chase Chequing",
         _group:grp,_source:"benefits",_pageData:p});
+      if(p.preTax401k>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Pre-tax 401K",category_id:"financial",
+          amount_usd:p.preTax401k,payment_type:"Chase Chequing",
+          _group:grp,_source:"pretax_401k_out",_pageData:p});
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Vanguard Deposited Pre-tax 401K",category_id:"financial",
+          amount_usd:-p.preTax401k,payment_type:"Vanguard",
+          _group:grp,_source:"pretax_401k_in",_pageData:p});
+      }
       if(p.deferral401k>0){
         txns.push({date:enteredDate,service_start:ss,service_end:se,
-          description:"401K",category_id:"financial",
+          description:"401K (Post-tax)",category_id:"financial",
           amount_usd:p.deferral401k,payment_type:"Chase Chequing",
           _group:grp,_source:"401k_out",_pageData:p});
         txns.push({date:enteredDate,service_start:ss,service_end:se,
-          description:"Vanguard Deposited 401K",category_id:"financial",
+          description:"Vanguard Deposited 401K (Post-tax)",category_id:"financial",
           amount_usd:-p.deferral401k,payment_type:"Vanguard",
           _group:grp,_source:"401k_in",_pageData:p});
+      }
+      if(p.fsa>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"FSA Deposit",category_id:"financial",
+          amount_usd:p.fsa,payment_type:"Chase Chequing",
+          _group:grp,_source:"fsa_out",_pageData:p});
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"FSA Deposited",category_id:"financial",
+          amount_usd:-p.fsa,payment_type:"Transfer",credit:"FSA 2026",
+          _group:grp,_source:"fsa_in",_pageData:p});
       }
       if(p.match401k>0){
         txns.push({date:enteredDate,service_start:ss,service_end:se,
@@ -1263,7 +1295,7 @@ function renderEntry(el){
         c._rawDescription=c.description;
         c.currency="USD";c.fx_rate=1;
         c.original_amount=c.amount_usd;
-        c.credit="";
+        if(c.credit===undefined)c.credit="";
         const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
         c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
         c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
@@ -2284,7 +2316,7 @@ async function commitPayslipImport(candidates){
     original_amount:c.amount_usd,currency:"USD",fx_rate:1,
     amount_usd:Math.round(c.amount_usd*100)/100,
     payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
-    daily_cost:c.daily_cost,service_days:c.service_days,credit:"",
+    daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||"",
     import_batch:batchId
   }));
   const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
