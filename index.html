@@ -792,11 +792,16 @@ function parsePayslipPage(lines,fullText){
     if(m){fsa=pn(m[1]);break;}
   }
 
-  // 401(k) Employer/Company Match: line containing "Match" then a number
+  // 401(k) Employer/Company Match: try lines first, then fullText fallback with permissive gap
+  // (label and amount may split across lines if PDF column Y values differ by >2px)
   let match401k=0;
   for(const ln of lines){
     const m=ln.match(/(?:Company|Employer)\s+Match\s+([\d,.]+)/i);
     if(m){match401k=pn(m[1]);break;}
+  }
+  if(!match401k){
+    const m=fullText.match(/(?:Company|Employer)\s+Match[^\d]*([\d,.]+)/i);
+    if(m)match401k=pn(m[1]);
   }
 
   // RSU Gain Offset: same pattern
@@ -825,6 +830,76 @@ async function parsePayslipPDF(file){
     if(parsed)pages.push(parsed);
   }
   return pages;
+}
+
+async function parsePayslipXLSX(file){
+  await loadSheetJS();
+  const buf=await file.arrayBuffer();
+  const wb=XLSX.read(buf,{type:"array"});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+
+  let ppb=null,ppe=null,cd=null;
+  let grossPay=0,earningsTotal=0,preTaxTotal=0,employeeTaxTotal=0,postTaxTotal=0,netPay=0;
+  let gtl=0,preTax401k=0,deferral401k=0,fsa=0,match401k=0,rsuOffset=0;
+  let isRSU=false;
+  const SECTIONS=["Earnings","Employee Taxes","Pre Tax Deductions","Post Tax Deductions","Employer Paid Benefits"];
+  let section=null;
+  let awaitingDates=false;
+
+  for(const row of rows){
+    if(!row||row.every(c=>c==null))continue;
+    const c=row.map(c=>c==null?null:String(c).trim());
+
+    // Pay Period dates: header row contains "Pay Period Begin", next data row has dates
+    if(c.includes("Pay Period Begin")){awaitingDates=true;continue;}
+    if(awaitingDates&&!ppb){
+      // Date values are at index 3,4,5 (matching header order)
+      const idx=c.findIndex(v=>v&&/\d{2}\/\d{2}\/\d{4}/.test(v));
+      if(idx>=0){ppb=convertMMDDYYYY(c[idx]);ppe=convertMMDDYYYY(c[idx+1]);cd=convertMMDDYYYY(c[idx+2]);}
+      awaitingDates=false;continue;
+    }
+
+    // Current summary row
+    if(c[0]==="Current"&&c[2]!=null){
+      grossPay=parseFloat(c[2])||0;earningsTotal=grossPay;
+      preTaxTotal=parseFloat(c[3])||0;
+      employeeTaxTotal=parseFloat(c[4])||0;
+      postTaxTotal=parseFloat(c[5])||0;
+      netPay=parseFloat(c[6])||0;
+      continue;
+    }
+
+    // Section header detection
+    const sec=SECTIONS.find(s=>c[0]===s);
+    if(sec){section=sec;continue;}
+    if(c[0]==="Description")continue; // column header row
+
+    // Section data rows: (Description, Amount, YTD)
+    if(section&&c[0]){
+      const desc=c[0],amt=c[1]!=null?parseFloat(c[1])||0:null;
+      if(section==="Earnings"){
+        if(/\bGTL\b/i.test(desc)&&amt!=null)gtl=amt;
+        if(/RSU\s*Gain/i.test(desc)&&!/Offset/i.test(desc)&&amt!=null)isRSU=true;
+      }
+      if(section==="Pre Tax Deductions"){
+        if(/^401\(k\)$/i.test(desc)&&amt!=null)preTax401k=amt;
+        if(/Flex\s+Spending\s+Health/i.test(desc)&&amt!=null)fsa=amt;
+      }
+      if(section==="Post Tax Deductions"){
+        if(/After-tax\s+Deferral/i.test(desc)&&amt!=null)deferral401k=amt;
+        if(/RSU\s+Gain\s+Offset/i.test(desc)&&amt!=null)rsuOffset=amt;
+      }
+      if(section==="Employer Paid Benefits"){
+        if(/(?:Company|Employer)\s+Match/i.test(desc)&&amt!=null)match401k=amt;
+      }
+    }
+  }
+
+  if(!ppb||!ppe||!cd||grossPay===0)return[];
+  return[{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,
+    grossPay,netPay,earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
+    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,isRSU,isSkip:false}];
 }
 
 function generatePayslipTransactions(pages,enteredDate){
@@ -1272,22 +1347,28 @@ function renderEntry(el){
   let psCandidates=null;
   let psSkippedPages=[];
 
-  const psFileInp=h("input",{class:"inp",type:"file",accept:".pdf,.csv"});
+  const psFileInp=h("input",{class:"inp",type:"file",accept:".pdf,.xlsx"});
   const psDateInp=h("input",{class:"inp",type:"date",value:today()});
   const psStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
   const psReview=h("div");
 
   const psBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
     const file=psFileInp.files[0];
-    if(!file)return alert("Choose a payslip PDF first.");
+    if(!file)return alert("Choose a payslip file first.");
+    const ext=file.name.split(".").pop().toLowerCase();
     psBtn.disabled=true;psBtn.textContent="Processing...";
     psStatus.classList.remove("hidden");
     psStatus.style.color="rgba(255,255,255,0.4)";
-    psStatus.textContent="Parsing PDF...";
+    psStatus.textContent=ext==="xlsx"?"Parsing XLSX...":"Parsing PDF...";
     try{
-      if(!window.pdfjsLib)throw new Error("PDF parser not available. Reload the page.");
-      const pages=await parsePayslipPDF(file);
-      if(!pages.length)throw new Error("No payslip pages found. Is this a Pinterest payslip?");
+      let pages;
+      if(ext==="xlsx"){
+        pages=await parsePayslipXLSX(file);
+      }else{
+        if(!window.pdfjsLib)throw new Error("PDF parser not available. Reload the page.");
+        pages=await parsePayslipPDF(file);
+      }
+      if(!pages.length)throw new Error("No payslip data found. Is this a Pinterest payslip?");
 
       const active=pages.filter(p=>!p.isSkip);
       psSkippedPages=pages.filter(p=>p.isSkip);
@@ -1327,7 +1408,7 @@ function renderEntry(el){
     psBtn.disabled=false;psBtn.textContent="Import";
   }},"Import");
 
-  psBody.append(row(field("Payslip PDF",psFileInp),field("Entered Date",psDateInp)));
+  psBody.append(row(field("Payslip (PDF or XLSX)",psFileInp),field("Entered Date",psDateInp)));
   psBody.append(psBtn);
   psBody.append(psStatus);
   psBody.append(psReview);
