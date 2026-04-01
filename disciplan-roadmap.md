@@ -9,11 +9,12 @@
 ### v1.2 — Apr 1, 2026
 
 #### v1.2.2
-<sub>Deployed 2026-04-01 20:57 UTC</sub>
+<sub>Deployed 2026-04-01 22:15 UTC</sub>
 
 ##### Fixes
 - **BUG-24:** Payslip import only generated 3 line items when payslip had pre-tax 401K or FSA deductions. Root cause: (1) parser looked for `"401(k) After-tax Deferral"` but Pinterest pre-tax 401K appears as bare `"401(k)"` in Pre Tax Deductions; (2) no regex for `"Flex Spending Health"` (FSA label); (3) medical formula used full `preTaxTotal` without subtracting the pre-tax 401K and FSA amounts, inflating medical by ~$2,496. Fixed: added `preTax401k` and `fsa` detection; updated medical formula to `preTaxTotal − preTax401k − fsa + postTaxNon401k + gtl`; generates Pre-tax 401K + Vanguard Deposited Pre-tax 401K entries; generates FSA Deposit + FSA Deposited (Transfer / credit: FSA 2026) entries. After-tax 401K descriptions renamed to `"401K (Post-tax)"` / `"Vanguard Deposited 401K (Post-tax)"` to match reference CSV.
 - **BUG-24b:** 401K employer match still not detected after BUG-24. Root cause: `fullText` joins raw PDF items in extraction order, not visual order — in multi-column layouts this interleaves labels and values from different rows, breaking regex matching. Switched `preTax401k`, `fsa`, and employer match detection to use the `lines` array (Y-sorted rows, X-sorted within row) so each regex matches against a single physical line. Employer match now detected from `"(Company|Employer) Match \d"` pattern per line.
+- **FEA-87: Payslip XLSX Import** — Payslip import now accepts `.xlsx` in addition to `.pdf`. `parsePayslipXLSX()` uses SheetJS (already loaded for lot import) to parse the structured section rows (Pre Tax Deductions, Employer Paid Benefits, etc.) by direct Description string match — no regex, no PDF column-layout ambiguity. Definitively fixes employer match and all other deduction detection issues. File input updated to accept both formats; label updated to "Payslip (PDF or XLSX)"; dispatcher branches on file extension.
 
 ---
 
@@ -236,6 +237,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-87 | **Payslip XLSX Import** — `.xlsx` accepted alongside PDF. `parsePayslipXLSX()` parses structured section rows by Description string match (no regex, no PDF layout ambiguity). Definitively fixes employer match detection. File input + label updated. | Feature → Done | Apr 1 |
 | BUG-24b | **401K employer match not detected after BUG-24 fix** — `fullText` joins raw PDF items in extraction order; multi-column layout interleaves labels and values. Switched `preTax401k`, FSA, and match detection to `lines` array (Y-sorted rows). Employer match now reliably detected per physical line. | Bug → Done | Apr 1 |
 | BUG-24 | **Payslip import missing pre-tax 401K and FSA line items** — Parser only matched `401(k) After-tax Deferral`; Pinterest uses bare `401(k)` in Pre Tax Deductions. Added `preTax401k` + `fsa` (`Flex Spending Health`) detection. Fixed medical formula to subtract both. Added FSA double-entry (Transfer / credit: FSA 2026). 3 items → 8 items on 03/31/26 payslip. | Bug → Done | Apr 1 |
 | FEA-86 | **Income Ingestion Pre-tax 401K + FSA Pattern** — Reference CSV updated for Pinterest/Google pre-tax 401K (Chase deduction + Vanguard deposit + 50% match income) and FSA double-entry (FSA Deposit on Chase + FSA Deposited to Transfer/FSA 2026 sub-account). Retroactively applied to all 5 prior 2026 payroll periods. | Feature → Done | Mar 31 |
