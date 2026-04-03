@@ -1,43 +1,13 @@
 async function renderTags(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsBody"></div>`;
   try{
-    const tagRows=await sb("tags?order=start_date.desc");
-    // Paginate to get ALL tagged transactions (Supabase caps at 1000 per request)
-    let allTxns=[];
-    let offset=0;
-    const batchSize=1000;
-    while(true){
-      const batch=await sb(`transactions?select=tag,amount_usd,daily_cost,service_start,service_end,category_id&tag=not.is.null&tag=neq.&order=id&limit=${batchSize}&offset=${offset}`);
-      allTxns=allTxns.concat(batch);
-      if(batch.length<batchSize)break;
-      offset+=batchSize;
-    }
-    const txns=allTxns;
-    // Build tag date lookup for accrual overlap
-    const tagDates={};
-    for(const t of tagRows)tagDates[t.name]={start:t.start_date,end:t.end_date};
+    const [tagRows,summaries]=await Promise.all([
+      sb("tags?order=start_date.desc"),
+      sbRPC("get_tag_summaries")
+    ]);
     const tm={};
-    for(const t of txns){
-      if(!t.tag)continue;
-      if(!tm[t.tag])tm[t.tag]={total:0,count:0,cats:{}};
-      tm[t.tag].count++;
-      if(t.category_id==="income"||t.category_id==="investment"||t.category_id==="adjustment")continue;
-      // Accrual: compute overlap of txn service period with tag date window
-      const tg=tagDates[t.tag];
-      if(tg&&tg.start&&tg.end&&t.daily_cost!=null&&t.service_start&&t.service_end){
-        const oStart=t.service_start>tg.start?t.service_start:tg.start;
-        const oEnd=t.service_end<tg.end?t.service_end:tg.end;
-        if(oStart<=oEnd){
-          const oDays=Math.floor((new Date(oEnd)-new Date(oStart))/864e5)+1;
-          const amt=t.daily_cost*oDays;
-          tm[t.tag].total+=amt;
-          tm[t.tag].cats[t.category_id]=(tm[t.tag].cats[t.category_id]||0)+amt;
-        }
-      }else if(t.amount_usd>0){
-        // Fallback: no tag dates or no service period
-        tm[t.tag].total+=t.amount_usd;
-        tm[t.tag].cats[t.category_id]=(tm[t.tag].cats[t.category_id]||0)+t.amount_usd;
-      }
+    for(const s of summaries){
+      tm[s.tag_name]={total:s.total_accrual,count:s.txn_count,cats:s.category_totals||{}};
     }
 
     const tags=tagRows.map(t=>({...t,...(tm[t.name]||{total:0,count:0,cats:{}})})).sort((a,b)=>b.total-a.total);
