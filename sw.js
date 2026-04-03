@@ -1,10 +1,15 @@
 // sw.js — Disciplan Service Worker (FEA-23)
-const SW_VERSION='v1.0.0';
+const SW_VERSION='v2.0.0';
 const CACHE_STATIC='dc-static-'+SW_VERSION;
 const CACHE_FONTS='dc-fonts-v1';
 
 const PRECACHE_URLS=[
   '/','/index.html','/manifest.json',
+  '/js/config.js','/js/constants.js','/js/helpers.js','/js/state.js',
+  '/js/ai-categorize.js','/js/import-engine.js','/js/payslip-parser.js','/js/linking.js',
+  '/js/income-stmt.js','/js/portfolio.js','/js/ledger.js','/js/entry.js',
+  '/js/import-review.js','/js/balance-sheet.js','/js/tags.js','/js/cashback.js',
+  '/js/cross-year.js','/js/export.js',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',

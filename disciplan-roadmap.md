@@ -1,10 +1,20 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 3, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + Chart.js + Supabase
+**Last updated:** Apr 3, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
+
+### v2.0 — Apr 3, 2026
+
+#### v2.0.0
+<sub>Deployed 2026-04-03</sub>
+
+##### Infrastructure
+- **INF-02: Modular JS Split** — Split monolithic `index.html` (~3,800 lines) into 18 focused JS modules under `js/`. `index.html` reduced to ~250 lines (HTML shell, CSS, routing, auth). No build step — plain `<script>` tags with global scope. Each tab is its own file (30–500 lines), enabling ~90% token reduction in Claude Code per focused task. Added `CLAUDE.md` developer context and `.claudeignore`. Service Worker updated to v2.0.0 to cache all 18 modules.
+
+---
 
 ### v1.2 — Apr 1, 2026
 
@@ -47,8 +57,6 @@
 - **BUG-22:** Annualized return calculation didn't match source CSV values. Was using `(latest_price / price_exec)^(365.25/days) - 1` (price-per-share ratio), which diverges from the correct formula when `cost_basis` is commission-adjusted or rounded differently from `shares × price_exec`. Fixed to `(shares × latest_price / cost_basis)^(365.25/days) - 1` — exact match to spreadsheet formula `(Market Value / Book Value)^(365.25/days) - 1`. Aggregation (cost-basis-weighted average) was already correct.
 
 ---
-
-### v1.1 — Mar 27, 2026
 
 #### v1.1.3
 <sub>Deployed 2026-03-28 01:02 UTC</sub>
@@ -93,9 +101,9 @@
 ---
 
 <details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v1.0.0)</summary>
+<summary><strong>Previous Releases</strong> (v0.5.0–v1.1)</summary>
 
-### v1.0.0 — Mar 25, 2026
+### v1.1 — Mar 27, 2026
 <sub>Deployed 2026-03-25</sub>
 
 **Tag detail grouping, editable group summaries, portfolio lot management.**
@@ -211,7 +219,6 @@
 
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
-| INF-02 | **Modular JS Split** | Infra | **High** | Split monolithic index.html (~3,800 lines) into 18 focused JS modules under `js/`. index.html reduced to ~250 lines (HTML shell, CSS, routing, auth). No build step — plain `<script>` tags with global scope. Each tab is its own file (30–500 lines), enabling ~90% token reduction in Claude Code per focused task. Added CLAUDE.md developer context and .claudeignore. SW updated to cache all modules. **As part of this refactor:** (1) The 6 near-identical edit modals (import, email, payslip, ledger, group, IS drilldown) should be consolidated into a shared `buildTransactionForm()` helper — currently duplicated across ~6 render functions with only minor field differences. (2) `renderEntry` (~600 lines containing 3 import pipelines + the new transaction form) should be split into separate modules per import type (`entry-csv.js`, `entry-email.js`, `entry-payslip.js`, `entry-form.js`). |
 | INF-03 | **Server-Side Tag Accrual RPC** | Infra | **High** | `renderTags` currently fetches ALL tagged transactions client-side via paginated loop (12K+ rows), then computes accrual overlaps in JS. Create a Supabase RPC `get_tag_summaries()` that computes `daily_cost × overlap_days` server-side, grouped by tag and category. Returns per-tag totals and category breakdowns without transferring bulk transaction data to the browser. `showTagDetail()` can still fetch individual transactions for the drilldown modal. This is the single biggest performance improvement available. |
 | INF-04 | **Global Error Boundary** | Infra | **High** | No try-catch around `renderContent()` or individual tab renderers. If any tab's async render throws (network error, bad data shape), the content area shows "Loading..." forever with no feedback. Wrap each tab renderer in a try-catch that displays a retry-able error card with the error message. Simple change, prevents the most common "stuck" UX failure. |
 | BUG-25 | **Service Worker Version Staleness** | Bug | **High** | `SW_VERSION` in `sw.js` is hardcoded to `v1.0.0` and has never been bumped despite app being at v1.2.x. `CACHE_STATIC` key never rotates, so old CDN assets are never evicted. Fix: bump `SW_VERSION` on each deploy (could tie to the version string in `index.html`), or switch to content-hash strategy. Prevents real cache staleness issues. |
@@ -325,6 +332,7 @@
 | FEA-29A | **One-Click Reimburse on Ledger Items** — "Reimburse" button in ledger edit modal for expense transactions. Split presets (50%, 33%, 25%, custom) with live amount calculation. Friends dropdown derived dynamically from Transfer credit history + Venmo reimbursement patterns. Payment method selector defaulting to Venmo. Creates negative offsetting transaction with same category/tag/service period and automatic bidirectional `related_transaction_id` linking. Live preview of reimbursement before creation. Added Splitwise payment type for future API integration. Description format: "Reimbursed - {desc} - {Person}". | Feature → Done | Mar 8 |
 | FEA-41 | **Reimbursement Auto-Linking + Ledger Grouping** — Automatic detection and linking of Venmo reimbursements to their original expenses. Scoring algorithm (amount match + date proximity + description fuzzy match + category/tag match, threshold ≥ 60) runs on app init and post-email-import. Linked transactions get `related_transaction_id` set bidirectionally. Reimbursement inherits expense's date, service_start, service_end (with recalculated daily_cost/service_days) so accruals align. Ledger shows linked pairs with blue left border + 🔗 icon, grouped adjacent even when dates differ. Edit modal shows linked partner details with unlink button. Category inheritance when reimbursement is "other". | Feature → Done | Mar 8 |
 | FEA-40 | **Email-to-Ledger Import Pipeline** — Forward transaction emails (Venmo, etc.) to Postmark inbound address → Supabase Edge Function parses with source-specific templates → `pending_imports` staging table → frontend review UI. Venmo parser handles outgoing payments ("You paid"), incoming payments ("paid your request", "sent you"), and forwarded emails (strips Fwd: prefix, extracts note/date from body after forwarding divider). Forwarding note metadata supports category, tag, payment type hints. Dedup via `email_message_id`. Banner shows pending count on app load. Entry tab has collapsible "Email Imports" section with approve/edit/skip + batch commit. | Feature → Done | Mar 8 |
+| INF-02 | **Modular JS Split** — Split monolithic `index.html` (~3,800 lines) into 18 focused JS modules under `js/`. `index.html` reduced to ~250 lines. No build step — plain `<script>` tags, global scope. Each tab is its own file. SW updated to v2.0.0. Added `CLAUDE.md` and `.claudeignore`. | Infra → Done | Apr 3 |
 | INF-01 | **Git CI/CD** — GitHub repo (`markqren/disciplan`) + Netlify auto-deploy from `main` branch. Every `git push` triggers a production build. | Infra → Done | Feb 18 |
 | FEA-39 | **"Since Last Export" Button** — New export option that tracks the highest transaction `id` at export time in `localStorage`. Subsequent clicks only export transactions added after that point. Button label shows last export date. Only the "Since Last Export" button advances the marker — "All" and "New Only" do not. Shows alert if no new transactions exist. | Feature → Done | Mar 1 |
 | BUG-11 | **Import Auto-Detect Overrides Manual Payment Type** — Chase CSV filename auto-detection was overwriting the payment type dropdown to "Chase Sapphire" on every Import click, even after manual selection of a different card. Fixed by tracking `impPtManual` flag — auto-detect only runs if the user hasn't changed the dropdown. | Bug → Done | Mar 1 |

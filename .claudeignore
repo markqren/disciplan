@@ -1,0 +1,4 @@
+*.csv
+*.sql
+node_modules/
+.git/

@@ -7,20 +7,49 @@ Accrual-based personal finance tracker. Single-page web app tracking 12,000+ tra
 - **Live site**: https://disciplan.netlify.app
 - **Repo**: https://github.com/markqren/disciplan
 - **Backend**: Supabase (project: `mjuannepfodstbsxweuc`)
-- **Stack**: Single `index.html` (vanilla JS + Chart.js CDN) → Supabase REST API
+- **Stack**: `index.html` (shell/CSS/routing/auth ~250 lines) + `js/*.js` modules (vanilla JS, no build step) → Supabase REST API
 - **Deploy**: Manual only — `npx netlify-cli deploy --prod` (auto-deploy disabled via `netlify.toml`)
 
 ## Architecture
 
+### Architecture
+
+Single-page app: `index.html` (shell/CSS/routing/auth ~250 lines) + `js/*.js` modules + Supabase backend. No build step. Plain `<script>` tags. All functions are globals.
+
+### File Map
+
+```
+js/config.js        — Supabase client, auth, sb(), sbRPC(), cache helpers
+js/constants.js     — Categories, colors, payment types, bank profiles, budget targets
+js/helpers.js       — Formatters (fmtF, fmtD, etc.), date utils, parseCSV, h() DOM helper
+js/state.js         — Shared state object, ensureTagExists()
+js/ai-categorize.js — Claude API categorization, merchant patterns
+js/import-engine.js — CSV row transform, duplicate detection, AI result application
+js/payslip-parser.js— Pinterest payslip PDF parsing via pdf.js
+js/linking.js       — Transaction linking, reimbursement auto-scan, Rakuten cashback linking
+js/entry.js         — Entry tab (new transaction form, import section shells)
+js/import-review.js — CSV/email/payslip review tables, edit modals, commit functions
+js/income-stmt.js   — Income Statement tab, IS drilldown modal
+js/balance-sheet.js — Balance Sheet tab, snapshot form
+js/portfolio.js     — Portfolio tab (accounts, symbols, lots drill-down)
+js/tags.js          — Tags tab, tag detail modal
+js/ledger.js        — Ledger tab, edit modal (with reimburse + cashback), batch modals
+js/cashback.js      — Cashback & Rewards tab
+js/cross-year.js    — Cross-year IS summary (All years view)
+js/export.js        — Export tab (TSV, JSON backup)
+```
+
 ### File Structure
 ```
 disciplan/
-├── index.html          # The entire app (~871 lines)
-├── CLAUDE.md           # This file
+├── index.html           # HTML shell, CSS, TABS/routing/auth/init (~250 lines)
+├── js/                  # 18 JS modules (see File Map above)
+├── sw.js                # Service Worker (caches all modules)
+├── CLAUDE.md            # This file
 ├── disciplan-roadmap.md # Feature/bug tracker (canonical)
 ├── tasks/
-│   ├── todo.md         # Current session task tracking
-│   └── lessons.md      # Accumulated learnings
+│   ├── todo.md          # Current session task tracking
+│   └── lessons.md       # Accumulated learnings
 └── README.md
 ```
 
@@ -86,6 +115,15 @@ All amounts stored and displayed in USD. Legacy CAD transactions converted at 0.
 4. **Ledger** — Paginated transaction list with filters (search, category, payment type, date range)
 5. **Entry** — Add new transactions
 6. **Export** — TSV/JSON download (all, new-only since import)
+
+## Conventions
+
+- All functions are plain globals (no module system, no `window.app` prefix)
+- Constants: `UPPER_CASE` (`PARENT_CATS`, `CC`, `PTS`, etc.)
+- State: `state.tab`, `state.year`, `state.page`, `state.lf` (ledger filters)
+- Never use `!` in JS strings (breaks execution)
+- Deploy: `npx netlify-cli deploy --prod`
+- Supabase default 1000-row limit — always paginate with offset loop
 
 ## Known Patterns & Gotchas
 
