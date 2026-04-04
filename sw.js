@@ -1,6 +1,4 @@
 // sw.js — Disciplan Service Worker (FEA-23)
-const SW_VERSION='v2.0.0';
-const CACHE_STATIC='dc-static-'+SW_VERSION;
 const CACHE_FONTS='dc-fonts-v1';
 
 const PRECACHE_URLS=[
@@ -15,6 +13,11 @@ const PRECACHE_URLS=[
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
 ];
+
+// Cache key auto-derived from URL list — rotates whenever modules are added/removed,
+// no manual SW_VERSION bump required.
+function urlHash(arr){let h=5381;const s=arr.join(',');for(let i=0;i<s.length;i++)h=((h<<5)+h)^s.charCodeAt(i);return(h>>>0).toString(36)}
+const CACHE_STATIC='dc-static-'+urlHash(PRECACHE_URLS);
 
 const GFONTS_CSS='https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap';
 
