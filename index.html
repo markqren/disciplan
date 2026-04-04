@@ -182,7 +182,7 @@ function renderTabs(){
   bar.append(so);
 }
 
-function renderContent(){
+async function renderContent(){
   const ob=document.getElementById("offlineBanner");if(ob)ob.classList.add("hidden");
   document.querySelectorAll(".batch-bar").forEach(b=>b.remove());
   const el=document.getElementById("content");
@@ -191,15 +191,21 @@ function renderContent(){
     el.innerHTML=`<div class="cd" style="text-align:center;padding:48px 24px"><div style="font-size:32px;margin-bottom:12px">\uD83D\uDCE1</div><h3 style="margin-bottom:8px">Offline Mode</h3><p style="font-size:13px;color:rgba(255,255,255,0.5)">${state.tab==="entry"?"Adding new transactions":"Exporting data"} requires an internet connection.<br>Browse cached data in other tabs while offline.</p></div>`;
     return;
   }
-  if(state.tab==="entry")renderEntry(el);
-  else if(state.tab==="income"&&state.year==="all")renderCrossYear(el);
-  else if(state.tab==="income")renderIS(el);
-  else if(state.tab==="balance")renderBS(el);
-  else if(state.tab==="portfolio")renderPortfolio(el);
-  else if(state.tab==="tags")renderTags(el);
-  else if(state.tab==="ledger")renderLedger(el);
-  else if(state.tab==="cashback")renderCashback(el);
-  else if(state.tab==="export")renderExport(el);
+  try{
+    if(state.tab==="entry")await renderEntry(el);
+    else if(state.tab==="income"&&state.year==="all")await renderCrossYear(el);
+    else if(state.tab==="income")await renderIS(el);
+    else if(state.tab==="balance")await renderBS(el);
+    else if(state.tab==="portfolio")await renderPortfolio(el);
+    else if(state.tab==="tags")await renderTags(el);
+    else if(state.tab==="ledger")await renderLedger(el);
+    else if(state.tab==="cashback")await renderCashback(el);
+    else if(state.tab==="export")await renderExport(el);
+  }catch(e){
+    const tabLabel=TABS.find(t=>t[0]===state.tab)?.[1]||state.tab;
+    el.innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);text-align:center;padding:48px 24px"><h3 style="color:var(--r);margin-bottom:8px">Failed to load ${tabLabel}</h3><p style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:20px;font-family:var(--mono)">${e.message||String(e)}</p><button class="pg-btn" onclick="renderContent()" style="padding:8px 20px">Retry</button></div>`;
+    console.error("Tab render error ["+state.tab+"]:",e);
+  }
 }
 
 function statCard(icon,label,value,color){
