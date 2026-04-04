@@ -9,7 +9,7 @@
 ### v2.0 — Apr 3, 2026
 
 #### v2.0.1
-<sub>Deployed 2026-04-03</sub>
+<sub>Deployed 2026-04-04 00:19 UTC</sub>
 
 ##### Infrastructure
 - **INF-03: Server-side tag accrual RPC** — Replaced client-side paginated fetch + JS accrual math in `renderTags()` with a single Supabase RPC `get_tag_summaries()`. Eliminates 5–12 REST calls (12,000+ rows transferred) on every Tags tab load. RPC computes `daily_cost × overlap_days` per tag/category in SQL and returns pre-aggregated totals. `showTagDetail()` still fetches individual transactions for the drill-down modal.
@@ -21,7 +21,7 @@
 ---
 
 #### v2.0.0
-<sub>Deployed 2026-04-03</sub>
+<sub>Deployed 2026-04-03 17:44 UTC</sub>
 
 ##### Infrastructure
 - **INF-02: Modular JS Split** — Split monolithic `index.html` (~3,800 lines) into 18 focused JS modules under `js/`. `index.html` reduced to ~250 lines (HTML shell, CSS, routing, auth). No build step — plain `<script>` tags with global scope. Each tab is its own file (30–500 lines), enabling ~90% token reduction in Claude Code per focused task. Added `CLAUDE.md` developer context and `.claudeignore`. Service Worker updated to v2.0.0 to cache all 18 modules.
