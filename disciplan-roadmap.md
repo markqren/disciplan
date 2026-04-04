@@ -70,6 +70,11 @@
 
 ---
 
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v1.1)</summary>
+
+### v1.1 — Mar 27, 2026
+
 #### v1.1.3
 <sub>Deployed 2026-03-28 01:02 UTC</sub>
 
@@ -109,21 +114,6 @@
 ##### Fixes
 - **BUG-19:** Rakuten cashback imported as `income` category instead of inheriting from the linked parent purchase. Edge Function was hardcoding `category_id: "income"`. Changed to `null` — `linkRakutenCashback` already patches the category from the parent when found; unlinked imports now require manual assignment rather than silently miscategorizing.
 - **BUG-18:** "+ Add Holdings" button rendered full-width due to `.btn` class having `width:100%`. Fixed by adding `width:auto` inline style to the button.
-
----
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v1.1)</summary>
-
-### v1.1 — Mar 27, 2026
-<sub>Deployed 2026-03-25</sub>
-
-**Tag detail grouping, editable group summaries, portfolio lot management.**
-
-#### Features
-- **FEA-75: Tag Detail Linked Transaction Grouping** — Tag detail modal now collapses linked transactions (same `transaction_group_id`) into expandable summary rows, matching the ledger's grouping behavior. Summary rows show net amount (bold), net accrual, dominant category badge (with `+` for mixed), 🔗 badge with member count, and `generateGroupLabel()` label. Click chevron to expand indented child rows with blue left border. Groups sorted by |net accrual|. Overlap styling (red/orange dashed outline) inherited from worst child status. Child row clicks open edit modal. KPIs and category bars unchanged (computed from individual accruals).
-- **FEA-76: Editable Group Summary with AI Learning** — Clicking a linked group summary row (not the chevron) opens a Group Detail Modal showing all member transactions and editable fields for the summary-level description, category, payment type, and tag. Manual edits persist in a new `group_overrides` Supabase table and override auto-computed values. AI group labels incorporate past manual corrections as few-shot examples, improving over time. Chevron retains expand/collapse behavior. Reset button reverts to auto-computed values.
-- **FEA-77: Portfolio Lot Management** — Inline editing and CRUD for investment lots in the Portfolio tab. (1) Click Shares or Price cells on expanded lot rows to edit in-place — PATCH to `investment_lots` with auto-recomputed `cost_basis`, full portfolio re-render. (2) "+ Add Lot" row at bottom of expanded active lots — inline form with date/shares/price, POST to `investment_lots`. (3) "+ Add Holdings" button at top of Holdings card — form with account dropdown (+ "New Account…" with label/institution/type fields), symbol input with autocomplete (+ new symbol name/asset class fields), date/shares/price. Creates `investment_accounts`, `investment_symbols`, and `investment_lots` rows as needed. (4) Delete lot via ✕ button with two-click confirmation. All derived values (market value, gain, return, annual return, KPIs, charts) recalculate on every change.
 
 ---
 
