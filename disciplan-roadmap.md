@@ -11,22 +11,14 @@
 #### v2.1.0
 <sub>Deployed 2026-04-04 22:00 UTC</sub>
 
+> **⚠️ Pending Postmark approval** — function + cron are live and tested end-to-end, but Postmark account is in sandbox mode (cross-domain sending blocked). Once approved: update `TO_EMAIL` back to `mark.q.ren2020@gmail.com` in `daily-insight/index.ts` and redeploy. Then test feedback loop by replying to an email with a rating.
+
 ##### Features
 - **FEA-11: Daily AI Finance Insight Newsletter** — Supabase Edge Function (`daily-insight`) runs on a daily cron at 8am PT. Fetches 14 months of accrual expense/income data, calls Claude Sonnet 4.6 to pick the highest-value insight type for the day (trained preferences: `category_yoy` 8/10, `budget_pace` 7/10, etc.), writes a tight 2-3 sentence write-up with a Chart.js chart rendered via QuickChart.io, and sends via Postmark to mark.q.ren2020@gmail.com. Email includes key stat callout, chart image, CTA button to open the app, token cost in footer, and reply instructions.
 
   Feedback loop: replying with `8/10 comment text` is caught by the existing `inbound-email` Edge Function, matched to the original email via `In-Reply-To` → `postmark_message_id`, and stored in `insight_log`. If the comment is substantive (>20 chars), Claude Haiku distills it into an `insight_context` principles document that is prepended to every future prompt — foundational learnings accumulate over time. Recent feedback (last 10 rated insights) is also included in the prompt.
 
   Model strategy: start with Sonnet; switch to Haiku once average rating ≥ 7.5 over 20 samples.
-
-  **Cron setup** (Supabase Dashboard → Database → Cron Jobs → New):
-  ```sql
-  select net.http_post(
-    url := 'https://mjuannepfodstbsxweuc.supabase.co/functions/v1/daily-insight',
-    headers := jsonb_build_object('Content-Type','application/json','X-Cron-Secret','<CRON_SECRET>'),
-    body := '{}'::jsonb
-  );
-  ```
-  Schedule: `0 15 * * *` (8am PT / 15:00 UTC, adjust ±1h for DST).
 
 ---
 
