@@ -1,10 +1,34 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 3, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Apr 4, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
+
+### v2.1 — Apr 4, 2026
+
+#### v2.1.0
+<sub>Deployed 2026-04-04 22:00 UTC</sub>
+
+##### Features
+- **FEA-11: Daily AI Finance Insight Newsletter** — Supabase Edge Function (`daily-insight`) runs on a daily cron at 8am PT. Fetches 14 months of accrual expense/income data, calls Claude Sonnet 4.6 to pick the highest-value insight type for the day (trained preferences: `category_yoy` 8/10, `budget_pace` 7/10, etc.), writes a tight 2-3 sentence write-up with a Chart.js chart rendered via QuickChart.io, and sends via Postmark to mark.q.ren2020@gmail.com. Email includes key stat callout, chart image, CTA button to open the app, token cost in footer, and reply instructions.
+
+  Feedback loop: replying with `8/10 comment text` is caught by the existing `inbound-email` Edge Function, matched to the original email via `In-Reply-To` → `postmark_message_id`, and stored in `insight_log`. If the comment is substantive (>20 chars), Claude Haiku distills it into an `insight_context` principles document that is prepended to every future prompt — foundational learnings accumulate over time. Recent feedback (last 10 rated insights) is also included in the prompt.
+
+  Model strategy: start with Sonnet; switch to Haiku once average rating ≥ 7.5 over 20 samples.
+
+  **Cron setup** (Supabase Dashboard → Database → Cron Jobs → New):
+  ```sql
+  select net.http_post(
+    url := 'https://mjuannepfodstbsxweuc.supabase.co/functions/v1/daily-insight',
+    headers := jsonb_build_object('Content-Type','application/json','X-Cron-Secret','<CRON_SECRET>'),
+    body := '{}'::jsonb
+  );
+  ```
+  Schedule: `0 15 * * *` (8am PT / 15:00 UTC, adjust ±1h for DST).
+
+---
 
 ### v2.0 — Apr 3, 2026
 
@@ -27,6 +51,9 @@
 - **INF-02: Modular JS Split** — Split monolithic `index.html` (~3,800 lines) into 18 focused JS modules under `js/`. `index.html` reduced to ~250 lines (HTML shell, CSS, routing, auth). No build step — plain `<script>` tags with global scope. Each tab is its own file (30–500 lines), enabling ~90% token reduction in Claude Code per focused task. Added `CLAUDE.md` developer context and `.claudeignore`. Service Worker updated to v2.0.0 to cache all 18 modules.
 
 ---
+
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v1.2)</summary>
 
 ### v1.2 — Apr 1, 2026
 
@@ -69,9 +96,6 @@
 - **BUG-22:** Annualized return calculation didn't match source CSV values. Was using `(latest_price / price_exec)^(365.25/days) - 1` (price-per-share ratio), which diverges from the correct formula when `cost_basis` is commission-adjusted or rounded differently from `shares × price_exec`. Fixed to `(shares × latest_price / cost_basis)^(365.25/days) - 1` — exact match to spreadsheet formula `(Market Value / Book Value)^(365.25/days) - 1`. Aggregation (cost-basis-weighted average) was already correct.
 
 ---
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v1.1)</summary>
 
 ### v1.1 — Mar 27, 2026
 
@@ -230,7 +254,6 @@
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
 | FEA-09 | **Plaid Integration** | Feature | High | Auto-sync bank account balances via Plaid API. Needs backend endpoint (Supabase Edge Function) for token management. Auth prerequisite done (FEA-10). |
-| FEA-11 | **AI Daily Insights Agent** | Feature | Low | Claude API-powered agent/chatbot that surfaces insights from transaction data. Runs daily (push notification or email digest) and on-demand when prompted. Examples: spending pattern analysis, anomaly detection ("you spent 3x on restaurants this month"), trend summaries, tag comparisons ("Japan was 20% cheaper than szója boys per day"). Could live as a chat panel in the app or a standalone bot. |
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
 | FEA-78 | **Subscription History Drilldown** | Feature | Medium | Clicking a subscription transaction (🔄 badge in ledger, or row in IS Subscriptions card) opens a modal showing all historical transactions for that merchant. Uses `normalizeMerchant()` to match — e.g. clicking any "Spotify + Apple iCloud (Feb 2026)" groups all normalized-matching transactions. **KPIs:** total spend (sum `amount_usd`), occurrence count, monthly average (`total / months between first and last`), first/last date. **Table:** all matching transactions sorted by date desc, showing date, description, amount, payment type. Click-through to ledger edit modal. **Multi-service edge case:** Bundled descriptions like "Spotify + Apple iCloud" appear in both the Spotify and iCloud history lists — full `amount_usd` counted in each (no splitting). This is acceptable since it reflects what was actually paid per billing event. **Depends on:** FEA-67 (subscription detection), FEA-71 (manual subscription flag). |
@@ -253,6 +276,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-11 | **Daily AI Finance Insight Newsletter** — `daily-insight` Edge Function sends a daily email (8am PT) via Postmark with Claude-written insight, QuickChart chart, and feedback loop. Replies rated `X/10` update `insight_log`; substantive comments distilled into `insight_context` principles by Haiku. Foundational learnings accumulate across emails. Trained on 15 insight types before launch. | Feature → Done | Apr 4 |
 | FEA-87 | **Payslip XLSX Import** — `.xlsx` accepted alongside PDF. `parsePayslipXLSX()` parses structured section rows by Description string match (no regex, no PDF layout ambiguity). Definitively fixes employer match detection. File input + label updated. | Feature → Done | Apr 1 |
 | BUG-24b | **401K employer match not detected after BUG-24 fix** — `fullText` joins raw PDF items in extraction order; multi-column layout interleaves labels and values. Switched `preTax401k`, FSA, and match detection to `lines` array (Y-sorted rows). Employer match now reliably detected per physical line. | Bug → Done | Apr 1 |
 | BUG-24 | **Payslip import missing pre-tax 401K and FSA line items** — Parser only matched `401(k) After-tax Deferral`; Pinterest uses bare `401(k)` in Pre Tax Deductions. Added `preTax401k` + `fsa` (`Flex Spending Health`) detection. Fixed medical formula to subtract both. Added FSA double-entry (Transfer / credit: FSA 2026). 3 items → 8 items on 03/31/26 payslip. | Bug → Done | Apr 1 |

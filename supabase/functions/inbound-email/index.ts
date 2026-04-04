@@ -1001,6 +1001,123 @@ Deno.serve(async (req: Request): Promise<Response> => {
   // 3. Init Supabase client (service role — bypasses RLS)
   const supabase = createClient(SB_URL, SB_SERVICE_KEY);
 
+  // 3.5. Insight feedback reply handler
+  // If this is a reply to a daily insight email, extract rating/comment,
+  // update insight_log, and optionally distill learnings into insight_context.
+  if (subject && /disciplan insight/i.test(subject)) {
+    const headers: Array<{ Name: string; Value: string }> = payload.Headers || [];
+    const inReplyToHeader = headers.find((h) => h.Name === "In-Reply-To");
+    const rawInReplyTo = inReplyToHeader?.Value || payload.InReplyTo || "";
+    // Postmark message IDs may be wrapped in angle brackets
+    const inReplyTo = rawInReplyTo.replace(/^<|>$/g, "").trim();
+
+    // Extract rating: match "8/10", "7.5/10", "9 /10", etc.
+    const ratingMatch = (textBody || "").match(/(\d+(?:\.\d+)?)\s*\/\s*10/i);
+    const rating = ratingMatch ? parseFloat(ratingMatch[1]) : null;
+
+    // Extract comment: everything after the rating on the same line, or all non-quoted lines
+    let comment: string | null = null;
+    if (textBody) {
+      const lines = textBody.split("\n")
+        .map((l: string) => l.trim())
+        .filter((l: string) => l && !l.startsWith(">") && !/^on .+wrote:/i.test(l));
+      const commentLines = lines.filter((l: string) => !/^\d+(\.\d+)?\s*\/\s*10/.test(l));
+      // Also grab trailing text on the rating line itself
+      if (ratingMatch) {
+        const ratingLine = lines.find((l: string) => /\d+(\.\d+)?\s*\/\s*10/.test(l)) || "";
+        const afterRating = ratingLine.replace(/\d+(\.\d+)?\s*\/\s*10/i, "").replace(/^[\s\-–:]+/, "").trim();
+        if (afterRating) commentLines.unshift(afterRating);
+      }
+      const joined = commentLines.join(" ").trim();
+      if (joined) comment = joined.slice(0, 2000);
+    }
+
+    if (inReplyTo) {
+      const { data: matchedLog } = await supabase
+        .from("insight_log")
+        .select("id, insight_type")
+        .eq("postmark_message_id", inReplyTo)
+        .limit(1);
+
+      if (matchedLog?.length) {
+        const logId = matchedLog[0].id;
+        const insightType = matchedLog[0].insight_type;
+
+        await supabase.from("insight_log").update({
+          feedback_rating: rating,
+          feedback_comment: comment,
+          feedback_received_at: new Date().toISOString(),
+        }).eq("id", logId);
+
+        // Distill substantive feedback into insight_context principles
+        if (ANTHROPIC_KEY && comment && comment.length > 20) {
+          try {
+            const { data: ctxRows } = await supabase
+              .from("insight_context")
+              .select("content")
+              .eq("id", "principles")
+              .limit(1);
+            const currentPrinciples = ctxRows?.[0]?.content || "";
+
+            const distillRes = await fetch("https://api.anthropic.com/v1/messages", {
+              method: "POST",
+              headers: {
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 800,
+                messages: [{
+                  role: "user",
+                  content: `You maintain a principles document for an AI newsletter system.
+A user just rated a "${insightType}" insight ${rating ?? "?"}/10 and left this comment:
+"${comment}"
+
+Current principles document:
+---
+${currentPrinciples}
+---
+
+If the feedback teaches something NEW or REFINES an existing principle, return an updated principles document.
+If the feedback is trivial or already covered, return the document unchanged.
+Return ONLY the updated document text, no explanation.`,
+                }],
+              }),
+            });
+
+            if (distillRes.ok) {
+              const distillData = await distillRes.json();
+              const updatedPrinciples = distillData.content?.[0]?.text?.trim();
+              if (updatedPrinciples && updatedPrinciples !== currentPrinciples) {
+                await supabase.from("insight_context").update({
+                  content: updatedPrinciples,
+                  updated_at: new Date().toISOString(),
+                }).eq("id", "principles");
+              }
+            }
+          } catch (e) {
+            console.error("Principles distill error:", e);
+          }
+        }
+
+        console.log(`Insight feedback recorded: log_id=${logId} rating=${rating} comment="${comment?.slice(0, 80)}"`);
+        return new Response(JSON.stringify({ status: "feedback_recorded", log_id: logId, rating, comment }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } else {
+        // Reply to a Disciplan Insight email but no matching log row — log and continue
+        console.warn(`Insight feedback: no matching log for In-Reply-To: ${inReplyTo}`);
+        return new Response(JSON.stringify({ status: "feedback_no_match", in_reply_to: inReplyTo }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+  }
+
   // 4. Dedup: skip if email_message_id already exists
   if (messageId) {
     const { data: existing } = await supabase
