@@ -1024,7 +1024,7 @@ async function renderLedger(el){
       tr.append(h("td",{class:"m",style:{color:indent?"rgba(255,255,255,0.45)":"rgba(255,255,255,0.55)",whiteSpace:"nowrap",...(indent?{paddingLeft:"16px"}:{})}},fmtD(t.date)));
       const descTd=h("td",{style:{color:indent?"rgba(255,255,255,0.65)":"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",...(indent?{paddingLeft:"20px"}:{})}});
       if(!indent&&isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
-      if(subMerchants.size&&subMerchants.has(normalizeMerchant(t.description)))descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"rgba(129,178,154,0.6)"},title:"Recurring subscription"},"\uD83D\uDD04"));
+      if(subMerchants.size&&subMerchants.has(normalizeMerchant(t.description)))descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"rgba(129,178,154,0.6)",cursor:"pointer"},title:"View subscription history",onClick:e=>{e.stopPropagation();showSubHistory(normalizeMerchant(t.description),t.description)}},"\uD83D\uDD04"));
       hilite(t.description,descTd);
       tr.append(descTd);
       const catTd=h("td");const catBadge=h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+(indent?"15":"22"),color:(CC[t.category_id]||"#888")+(indent?"aa":"")}});hilite(t.category_id,catBadge);catTd.append(catBadge);tr.append(catTd);

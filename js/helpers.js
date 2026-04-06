@@ -61,6 +61,63 @@ function normalizeMerchant(desc){
   return desc.replace(/\s*\([^)]*\)\s*$/,"").replace(/\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}.*$/i,"").replace(/^(SQ \*|TST\*|CLIP MX\*|TCB\*)/i,"").trim().toLowerCase().split(/\s+/).slice(0,2).join(" ");
 }
 
+// Subscription history drilldown modal (FEA-78)
+async function showSubHistory(merchantKey, sampleDesc){
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"640px"}});
+  // Strip trailing (Month Year) / date suffix from display title
+  const title=(sampleDesc||merchantKey).replace(/\s*\([^)]*\)\s*$/,"").replace(/\s*-\s*(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2}.*$/i,"").trim();
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px"}});
+  hdr.append(h("div",{},[h("h3",{style:{margin:0}},title),h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)",marginTop:"4px",fontFamily:"var(--mono)"}},"\uD83D\uDD04 "+merchantKey)]));
+  hdr.append(h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
+  modal.append(hdr);
+  const body=h("div",{},[h("div",{style:{color:"rgba(255,255,255,0.3)",fontSize:"12px",textAlign:"center",padding:"32px"}},"Loading...")]);
+  modal.append(body);
+  bg.append(modal);
+  document.body.append(bg);
+
+  try{
+    const firstWord=merchantKey.split(" ")[0];
+    const all=await sb(`transactions?description=ilike.*${encodeURIComponent(firstWord)}*&order=date.desc&limit=5000&select=id,date,description,amount_usd,category_id,payment_type,service_start,service_end,service_days,daily_cost`);
+    const txns=all.filter(t=>normalizeMerchant(t.description)===merchantKey);
+    body.innerHTML="";
+    if(!txns.length){body.append(h("p",{style:{color:"rgba(255,255,255,0.3)",textAlign:"center",padding:"24px"}},"No matching transactions found."));return}
+
+    // KPIs
+    const totalSpend=txns.reduce((s,t)=>s+parseFloat(t.amount_usd),0);
+    const firstDate=txns[txns.length-1].date;
+    const lastDate=txns[0].date;
+    const months=((new Date(lastDate)-new Date(firstDate))/(1000*60*60*24*30.44))+1;
+    const monthlyAvg=totalSpend/Math.max(1,months);
+    const kpis=h("div",{class:"g4",style:{marginBottom:"14px"}});
+    kpis.append(statCard("\uD83D\uDCB5","total spend",fmtN(totalSpend),"var(--b)"));
+    kpis.append(statCard("\uD83D\uDD22","occurrences",String(txns.length),"var(--g)"));
+    kpis.append(statCard("\uD83D\uDCC5","monthly avg",fmtN(monthlyAvg),"var(--y)"));
+    kpis.append(statCard("\uD83D\uDDD3","since",fmtD(firstDate),"rgba(255,255,255,0.5)"));
+    body.append(kpis);
+
+    // Table
+    const tWrap=h("div",{style:{overflowX:"auto",maxHeight:"360px",overflowY:"auto",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.06)"}});
+    const tbl=h("table");
+    tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th class="r">Amount</th><th class="hide-m">Payment</th></tr></thead>`;
+    const tbody=document.createElement("tbody");
+    for(const t of txns){
+      const tr=h("tr",{style:{cursor:"pointer"},onClick:async()=>{
+        bg.remove();
+        const full=await sb(`transactions?id=eq.${t.id}&select=*`);
+        if(full.length)openLedgerEditModal(full[0],()=>{});
+      }});
+      tr.innerHTML=`<td class="m" style="color:rgba(255,255,255,0.5);white-space:nowrap">${fmtD(t.date)}</td>`
+        +`<td style="color:rgba(255,255,255,0.8);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>`
+        +`<td class="r m" style="color:${t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}">${fmtF(t.amount_usd)}</td>`
+        +`<td class="hide-m" style="color:rgba(255,255,255,0.4);font-size:11px">${t.payment_type||""}</td>`;
+      tbody.append(tr);
+    }
+    tbl.append(tbody);tWrap.append(tbl);body.append(tWrap);
+    body.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",marginTop:"10px",textAlign:"right"}},`${txns.length} transaction${txns.length===1?"":"s"} \u00b7 last charged ${fmtD(lastDate)}`));
+  }catch(e){body.innerHTML=`<p style="color:var(--r);text-align:center;padding:24px">Error: ${e.message}</p>`}
+}
+
 let creditNames=[];
 let _linkScanDone=false;
 async function fetchCreditNames(){

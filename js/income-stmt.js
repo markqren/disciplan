@@ -354,6 +354,8 @@ async function renderIS(el){
             :`<span style="background:rgba(224,122,95,0.15);color:var(--r);padding:1px 6px;border-radius:3px;font-size:10px">Stopped</span>`;
           const tr=document.createElement("tr");
           tr.style.opacity=isActive?"1":"0.5";
+          tr.style.cursor="pointer";
+          tr.addEventListener("click",()=>showSubHistory(s.merchant,s.sample_description));
           tr.innerHTML=`<td style="color:rgba(255,255,255,0.8);font-size:12px">${s.sample_description||s.merchant}</td>`
             +`<td class="r m">${fmtF(s.typical_amount)}</td>`
             +`<td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[s.category_id]||"#555"};margin-right:4px;vertical-align:middle"></span><span style="font-size:11px;color:rgba(255,255,255,0.5)">${s.category_id}</span></td>`
