@@ -1,12 +1,20 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 4, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Apr 6, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
 
 ### v2.1 — Apr 4, 2026
+
+#### v2.1.1
+<sub>Pending deploy</sub>
+
+##### Performance
+- **FEA-89: Lazy Tab Data Caching** — Tab switches no longer re-fetch data if the tab was already loaded this session. Added a `_dc` in-memory cache (keyed by `is_<year>`, `crossyear`, `bs`, `portfolio`) backed by `dcGet/dcSet/dcDel/dcInvalidateTxns/dcInvalidatePortfolio` helpers in `state.js`. IS, cross-year IS, Balance Sheet, and Portfolio each check the cache before fetching and populate it on miss. ↻ refresh button invalidates only the current tab's cache key, forcing a fresh fetch. Any transaction mutation (edit, delete, add via entry form, CSV/email import commit) calls `dcInvalidateTxns()`. Any portfolio mutation (lot add/edit/delete, price update, import) calls `dcInvalidatePortfolio()`. Common pattern of browsing between tabs without edits now requires zero redundant API calls.
+
+---
 
 #### v2.1.0
 <sub>Deployed 2026-04-04 22:00 UTC</sub>
@@ -254,7 +262,6 @@
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
 | INF-05 | **Supabase RLS Policies** | Infra | Medium | Auth is Phase 1 only — no Row Level Security on transactions or other tables. The anon key is visible in source, meaning anyone inspecting the page can read/write all data via the REST API. Add RLS policies (`user_id = auth.uid()`) to: `transactions`, `tags`, `accounts`, `balance_snapshots`, `pending_imports`, `cashback_redemptions`, `investment_lots`, `investment_symbols`, `investment_accounts`, and `group_overrides`. Not urgent for single-user but becomes critical if sharing the URL or adding users. **Depends on:** FEA-10 (auth, done). |
 | FEA-88 | **Import Merchant Patterns RPC** | Feature | Medium | `fetchMerchantPatterns()` pulls ALL transactions (description + category_id) on every CSV import to build a frequency table for AI categorization context. At 12K+ rows this is a large payload. Replace with a Supabase RPC that returns aggregated patterns server-side: `SELECT description, category_id, COUNT(*) FROM transactions GROUP BY 1,2 HAVING COUNT(*) > 2 ORDER BY 3 DESC LIMIT 200`. Reduces import startup time and network transfer. |
-| FEA-89 | **Lazy Tab Data Caching** | Feature | Low | Switching tabs re-renders from scratch, re-fetching all data. For expensive tabs (IS, Portfolio) that involve multiple sequential API calls, cache fetched data in memory for the session. Only re-fetch on explicit refresh (↻ button) or after mutations. The existing sessionStorage offline cache doesn't prevent redundant successful fetches during normal use. |
 | FEA-90 | **Year-over-Year Category Comparison** | Feature | Low | Cross-year view shows annual totals but no way to drill into a specific category across years. Clicking any category in the cross-year detail table opens a mini chart showing that category's annual spending over time (bar chart or sparkline). Low effort, high insight value for tracking spending trends. |
 | FEA-91 | **Full-Text Transaction Search** | Feature | Low | Ledger search uses `ilike` pattern matching which is slow on 12K+ rows. Add `credit.ilike.*q*` to the existing OR filter (allows searching credit sub-accounts). Longer term, add a Supabase full-text search index (`to_tsvector`) on description for faster searches. |
 | FEA-92 | **Data Integrity Health Check** | Feature | Low | Background validation (on-demand or periodic) checking for: orphaned `transaction_group_id` references (groups with only 1 member), transactions where `daily_cost × service_days` diverges from `amount_usd` beyond rounding tolerance, tags referenced in transactions but missing from the `tags` table, and potential duplicate transactions (same date + amount + description + payment_type). Surface results as a "Data Health" indicator or a section in the Export tab. |
@@ -268,6 +275,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-89 | **Lazy Tab Data Caching** — In-memory `_dc` cache prevents redundant API calls on tab switches. IS (per year), cross-year IS, Balance Sheet, and Portfolio each cache their fetch results. ↻ invalidates current tab only. Mutations call `dcInvalidateTxns()` or `dcInvalidatePortfolio()` to keep data fresh after edits. | Feature → Done | Apr 6 |
 | FEA-11 | **Daily AI Finance Insight Newsletter** — `daily-insight` Edge Function sends a daily email (8am PT) via Postmark with Claude-written insight, QuickChart chart, and feedback loop. Replies rated `X/10` update `insight_log`; substantive comments distilled into `insight_context` principles by Haiku. Foundational learnings accumulate across emails. Trained on 15 insight types before launch. | Feature → Done | Apr 4 |
 | FEA-87 | **Payslip XLSX Import** — `.xlsx` accepted alongside PDF. `parsePayslipXLSX()` parses structured section rows by Description string match (no regex, no PDF layout ambiguity). Definitively fixes employer match detection. File input + label updated. | Feature → Done | Apr 1 |
 | BUG-24b | **401K employer match not detected after BUG-24 fix** — `fullText` joins raw PDF items in extraction order; multi-column layout interleaves labels and values. Switched `preTax401k`, FSA, and match detection to `lines` array (Y-sorted rows). Employer match now reliably detected per physical line. | Bug → Done | Apr 1 |

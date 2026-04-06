@@ -70,6 +70,7 @@ function renderEntry(el){
       const tagVal=f.tag.toLowerCase().trim();
       if(tagVal)await ensureTagExists(tagVal);
       const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({date:f.date,service_start:f.ss,service_end:f.se,description:f.desc,category_id:f.cat,original_amount:orig,currency:f.cur,fx_rate:fx,amount_usd:Math.round(usd*100)/100,payment_type:f.pt,tag:tagVal,daily_cost:Math.round(usd/days*1e6)/1e6,service_days:days,credit:f.pt==="Transfer"?creditSel.getValue():"",is_subscription:subChk.checked})});
+      dcInvalidateTxns();
       const newId=Array.isArray(created)?created[0]?.id:created?.id;
       const savedDesc=f.desc;
       descInp.value="";amtInp.value="";tagInp.value="";fxInp.value="";subChk.checked=false;creditSel.reset();creditRow.style.display="none";

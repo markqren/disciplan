@@ -3,11 +3,20 @@ let pfState={expandedInst:null,expandedAcct:null,expandedSym:null};
 async function renderPortfolio(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Portfolio</h2><p class="sub" id="pfSub">Loading...</p></div><div id="pfBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
   try{
-    const [accounts,symbols,lots]=await Promise.all([
-      sb("investment_accounts?order=label"),
-      sb("investment_symbols?order=symbol"),
-      sb("investment_lots?order=lot_date")
-    ]);
+    let pfCache=dcGet('portfolio');
+    if(!pfCache){
+      const res=await Promise.all([
+        sb("investment_accounts?order=label"),
+        sb("investment_symbols?order=symbol"),
+        sb("investment_lots?order=lot_date")
+      ]);
+      pfCache={accounts:res[0],symbols:res[1],lots:res[2]};
+      dcSet('portfolio',pfCache);
+    }
+    const accounts=pfCache.accounts;
+    const symbols=pfCache.symbols;
+    // Shallow-copy lots so in-place mutations (market_value, ann_return) don't corrupt the cache
+    const lots=pfCache.lots.map(l=>({...l}));
     const body=document.getElementById("pfBody");body.innerHTML="";
 
     // Build lookup maps
@@ -212,7 +221,7 @@ async function renderPortfolio(el){
             try{
               await applyPriceUpdate(sym,nv,source,oldPrice,oldAsOf);
               symObj.latest_price=nv;symObj.price_as_of=nd;symObj.price_source=source;
-              renderPortfolio(el);
+              dcInvalidatePortfolio();renderPortfolio(el);
             }catch(err){alert("Error saving price: "+err.message);renderPricesCard()}
           };
           apiBt.addEventListener("click",async e=>{
@@ -467,7 +476,7 @@ async function renderPortfolio(el){
               lot.shares=newShares;lot.price_exec=newPrice;lot.cost_basis=newCost;
               const si=symInfo[sym]||{};const price=parseFloat(si.latest_price||0);
               lot.market_value=price>0?newShares*price:newCost;
-              renderPortfolio(el);
+              dcInvalidatePortfolio();renderPortfolio(el);
             }catch(err){alert("Error saving: "+err.message);renderHoldings()}
           };
           inp.addEventListener("blur",commit);
@@ -486,7 +495,7 @@ async function renderPortfolio(el){
             const sLots=(lotMap[`${acctId}|${sym}`]||[]).filter(l=>!l.sell_date);
             const lot=sLots[li];if(!lot)return;
             const filter=lot.id?`investment_lots?id=eq.${lot.id}`:`investment_lots?account_id=eq.${encodeURIComponent(acctId)}&symbol=eq.${encodeURIComponent(sym)}&lot_date=eq.${lot.lot_date}&shares=eq.${lot.shares}&price_exec=eq.${lot.price_exec}`;
-            sb(filter,{method:"DELETE"}).then(()=>renderPortfolio(el)).catch(err=>alert("Delete failed: "+err.message));
+            sb(filter,{method:"DELETE"}).then(()=>{dcInvalidatePortfolio();renderPortfolio(el)}).catch(err=>alert("Delete failed: "+err.message));
           }else{
             btn.dataset.confirm="1";btn.style.color="var(--r)";btn.textContent="Del?";
             setTimeout(()=>{if(btn.isConnected){delete btn.dataset.confirm;btn.style.color="rgba(255,255,255,0.15)";btn.textContent="✕"}},3000);
@@ -512,7 +521,7 @@ async function renderPortfolio(el){
             const cb=Math.round(sh*pr*100)/100;
             try{
               await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:sym,lot_date:dt,shares:sh,price_exec:pr,cost_basis:cb})});
-              renderPortfolio(el);
+              dcInvalidatePortfolio();renderPortfolio(el);
             }catch(err){alert("Error: "+err.message)}
           });
         });
@@ -587,7 +596,7 @@ async function renderPortfolio(el){
             const cb=Math.round(sh*pr*100)/100;
             await sb("investment_lots",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({account_id:acctId,symbol:symVal,lot_date:dt,shares:sh,price_exec:pr,cost_basis:cb})});
             addHoldForm.style.display="none";addHoldBtn.textContent="+ Add Holdings";
-            renderPortfolio(el);
+            dcInvalidatePortfolio();renderPortfolio(el);
           }catch(err){alert("Error: "+err.message)}
         });
       });
@@ -699,7 +708,7 @@ async function renderPortfolio(el){
                 if(!proposals.length){
                   importLotsForm.style.display="none";importLotsBtn.innerHTML="&#x2191; Import Lots";
                   if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
-                  renderPortfolio(el);return;
+                  dcInvalidatePortfolio();renderPortfolio(el);return;
                 }
                 // Show price confirmation UI
                 const fmtP=p=>p>0?`$${p.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}`:"—";
@@ -722,7 +731,7 @@ async function renderPortfolio(el){
                   }
                   importLotsForm.style.display="none";importLotsBtn.innerHTML="&#x2191; Import Lots";
                   if(typeof pfState!=="undefined")pfState.expandedAcct=acctId;
-                  renderPortfolio(el);
+                  dcInvalidatePortfolio();renderPortfolio(el);
                 };
                 document.getElementById("pfIlConfirmPrices").addEventListener("click",()=>finishImport(true));
                 document.getElementById("pfIlSkipPrices").addEventListener("click",()=>finishImport(false));

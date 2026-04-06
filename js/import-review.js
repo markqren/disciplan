@@ -36,7 +36,7 @@ function renderReviewTable(container,candidates){
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
       const viewBtn=h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
-        state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
+        dcInvalidateTxns();state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
       }},"View in Ledger \u2192");
       sumEl.append(viewBtn);
       container.append(sumEl);
@@ -428,7 +428,7 @@ function renderEmailReviewTable(container,candidates){
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Committed ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
       sumEl.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
-        state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
+        dcInvalidateTxns();state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
       }},"View in Ledger \u2192"));
       container.append(sumEl);
       saveBtn.textContent="Saved";
@@ -556,7 +556,7 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
       sumEl.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
-        state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
+        dcInvalidateTxns();state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
       }},"View in Ledger \u2192"));
       container.append(sumEl);
       saveBtn.textContent="Saved";

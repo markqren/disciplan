@@ -134,7 +134,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.0.1</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.1.1</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
   </div>
@@ -269,6 +269,11 @@ async function init(){
   document.getElementById("refreshBtn").addEventListener("click",function(){
     this.classList.add("spinning");
     this.addEventListener("animationend",()=>this.classList.remove("spinning"),{once:true});
+    // Invalidate this tab's cache so refresh always fetches fresh data (FEA-89)
+    if(state.tab==="income"&&state.year==="all")dcDel('crossyear');
+    else if(state.tab==="income")dcDel('is_'+state.year);
+    else if(state.tab==="balance")dcDel('bs');
+    else if(state.tab==="portfolio")dcDel('portfolio');
     renderContent();
   });
   // Online/offline reactivity (FEA-23)

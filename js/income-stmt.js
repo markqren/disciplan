@@ -7,7 +7,9 @@ async function renderIS(el){
   ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;history.replaceState(null,null,y==="all"?"#income-all":"#income");renderContent()}},y==="all"?"All":String(y));yt.append(b)});
 
   try{
-    const data=await sbRPC("get_income_statement",{p_year:state.year});
+    const cacheKey='is_'+state.year;
+    let data=dcGet(cacheKey);
+    if(!data){data=await sbRPC("get_income_statement",{p_year:state.year});dcSet(cacheKey,data)}
     const body=document.getElementById("isBody");body.innerHTML="";
 
     // Process monthly data

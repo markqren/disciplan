@@ -7,7 +7,8 @@ async function renderCrossYear(el){
 
   try{
     const years=[2017,2018,2019,2020,2021,2022,2023,2024,2025,2026];
-    const results=await Promise.all(years.map(y=>sbRPC("get_income_statement",{p_year:y})));
+    let results=dcGet('crossyear');
+    if(!results){results=await Promise.all(years.map(y=>sbRPC("get_income_statement",{p_year:y})));dcSet('crossyear',results)}
     const body=document.getElementById("isBody");body.innerHTML="";
 
     const yearData=years.map((y,i)=>{

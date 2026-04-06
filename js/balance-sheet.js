@@ -2,12 +2,18 @@ async function renderBS(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Balance Sheet</h2><p class="sub">Loading...</p></div><div id="bsBody"></div>`;
   try{
     // Fetch live ledger balances, accounts metadata, and snapshots in parallel
-    const [ledgerBals,accts,snaps,creditBals]=await Promise.all([
-      sbRPC("get_ledger_balances"),
-      sb("accounts?order=display_order"),
-      sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc"),
-      sbRPC("get_credit_balances")
-    ]);
+    let bsCache=dcGet('bs');
+    if(!bsCache){
+      const res=await Promise.all([
+        sbRPC("get_ledger_balances"),
+        sb("accounts?order=display_order"),
+        sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc"),
+        sbRPC("get_credit_balances")
+      ]);
+      bsCache={ledgerBals:res[0],accts:res[1],snaps:res[2],creditBals:res[3]};
+      dcSet('bs',bsCache);
+    }
+    const {ledgerBals,accts,snaps,creditBals}=bsCache;
     const body=document.getElementById("bsBody");body.innerHTML="";
 
     // Build account type lookup from accounts table
