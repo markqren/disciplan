@@ -9,7 +9,7 @@
 ### v2.1 — Apr 4, 2026
 
 #### v2.1.1
-<sub>Pending deploy</sub>
+<sub>Deployed 2026-04-06 18:52 UTC</sub>
 
 ##### Features
 - **FEA-93: Subscription History Drilldown** — Clicking any row in the IS Subscriptions card (or the 🔄 badge on a subscription transaction in the Ledger) opens a modal showing the full transaction history for that merchant. Merchant matching uses `normalizeMerchant()` — strips trailing `(Month Year)` date suffixes, strips common prefixes (SQ \*, TST\*, etc.), lowercase first 2 words — so all variants of "Spotify (Jan 2026)", "Spotify (Feb 2026)" etc. group together. Modal shows 4 KPIs (total spend, occurrence count, monthly average `total / months_since_first`, first charged date), a scrollable transaction table (date, description, amount, payment type), and a footer with count + last charged date. Clicking any row opens `openLedgerEditModal` for that transaction. 🔄 badge click uses `stopPropagation` to avoid opening the edit modal for the parent row.
