@@ -90,15 +90,7 @@ Personal        → Clothes, Tech
 Parent totals INCLUDE children. Total Expenses sums parents only (no double-counting).
 
 ### Category Color Map
-```javascript
-const CC = {
-  entertainment:"#E07A5F", food:"#F2CC8F", groceries:"#E9C46A", restaurant:"#F4A261",
-  home:"#4A6FA5", rent:"#5B8DB8", furniture:"#7FB3D8", health:"#D4A373",
-  personal:"#3D405B", clothes:"#52556E", tech:"#6B6F82", transportation:"#81B29A",
-  utilities:"#6B9AC4", financial:"#CB997E", other:"#9B8EA0", income:"#2A9D8F",
-  investment:"#264653"
-};
-```
+See `js/constants.js:CC`. (entertainment, food, home, personal, transportation, utilities, financial, income, investment, and their subcategories.)
 
 ### Currency
 All amounts stored and displayed in USD. Legacy CAD transactions converted at 0.73 rate during import.
@@ -140,8 +132,8 @@ All amounts stored and displayed in USD. Legacy CAD transactions converted at 0.
 - **Subcategories**: Collapsed by default with toggle arrows.
 - **Unicode in comment separators**: The `index.html` section headers use `●` (U+25CF, multi-byte UTF-8) in comment lines like `// ●●●●...`. The Edit tool's string matching can fail on these characters. **Workaround**: Use Python file manipulation or `sed` with line numbers to insert/edit near these separator lines. Never try to match separator lines directly with the Edit tool. Use `grep -n` to find exact line numbers first, then insert relative to ASCII-only anchor lines (e.g., `// INCOME STATEMENT`).
 
-## Current Payment Types (39 total)
-Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, eTrade IRA, Kraken, HSA Invest, Apple, AMEX US, AMEX Rose Gold, Bilt, Uber, Capital One, Chase Sapphire, Chase Freedom, Chase Aeroplan, Chase United, Venmo Credit, TD Visa, Cash - USD, Cash - CAD, Poker Stars, Venmo, Tony, Kevin, Google, Delta, Bonus, Laundry, Wageworks, Poker, Rent, Basketball, HSA, FSA, Ski Lease, Credits, Transfer, Home Trust, Clipper, Presto, AMEX
+## Payment Types
+See `js/constants.js:PTS` (39 total).
 
 ---
 
@@ -160,10 +152,9 @@ Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, 
 - One task per subagent for focused execution
 
 ## 3. Self-Improvement Loop
-- After ANY correction from Mark: update `tasks/lessons.md` with the pattern
+- After ANY correction from Mark: update memory (`/memory/`) with the pattern
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
-- Review lessons at session start for relevant project
 
 ## 4. Verification Before Done
 - Never mark a task complete without proving it works
@@ -192,12 +183,11 @@ Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, 
 
 ## Task Management
 
-1. **Plan First**: Write plan to `tasks/todo.md` with checkable items
+1. **Plan First**: Use plan mode or outline steps before implementing
 2. **Verify Plans**: Check in with Mark before starting implementation
 3. **Track Progress**: Mark items complete as you go
 4. **Explain Changes**: High-level summary at each step
-5. **Document Results**: Add review section to `tasks/todo.md`
-6. **Capture Lessons**: Update `tasks/lessons.md` after corrections
+5. **Capture Lessons**: Update memory (`/memory/`) after corrections
 
 ## Core Principles
 

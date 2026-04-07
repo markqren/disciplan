@@ -9,6 +9,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| INF-07b | **CLAUDE.md + MEMORY.md token trim** — Removed inline CC color map + payment types list from `CLAUDE.md` (replaced with `js/constants.js` pointers). Fixed dead `tasks/` references. Condensed Roadmap Workflow memory; removed duplicate Editing Gotchas memory. ~300 tokens saved per session. | Infra → Done | Apr 7 |
 | INF-07 | **Dual-Roadmap System** — Renamed `disciplan-roadmap.md` → `ROADMAP.md` (master, GitHub-only). Created `roadmap/ACTIVE.md` (Next Up + Future, ~2K tokens), `roadmap/RELEASES.md` (history archive), `roadmap/COMPLETED.md` (118 items, grep-only). `ROADMAP.md` added to `.claudeignore`. 84% token reduction in Claude Code context per session. | Infra → Done | Apr 7 |
 | FEA-73 | **Income Tax Tracking in IS** — Collapsible Tax Payments card per year: 3 KPIs (YTD paid, effective rate %, count), monthly bar + YTD line chart, drilldown table with edit click-through. Cross-year: annual tax bar + effective rate line chart, Tax/Tax% columns in detail table. Detection: `category_id=financial` + `/\btax\b|\birs\b|\bftb\b/i`. Cached as `tax_all`. | Feature → Done | Apr 7 |
 | FEA-93 | **Subscription History Drilldown** — Clicking a subscription row in IS or 🔄 badge in Ledger opens a modal with merchant history. KPIs: total spend, occurrence count, monthly avg, first charged. Scrollable table with click-through to edit modal. `normalizeMerchant()` groups all date-suffixed variants. | Feature → Done | Apr 6 |
