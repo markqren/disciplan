@@ -19,6 +19,7 @@
 
 ##### Infrastructure
 - **INF-07: Dual-Roadmap System** — Renamed `disciplan-roadmap.md` → `ROADMAP.md` (master, GitHub-only). Created `roadmap/` directory with three split files: `ACTIVE.md` (Next Up + Future, ~2K tokens), `RELEASES.md` (v0.5–v2.1 history, archive), `COMPLETED.md` (118 items, grep-only). Added `ROADMAP.md` to `.claudeignore` so Claude only loads the compact splits. Updated `CLAUDE.md` file map and workflow rules. Updated `README.md` with roadmap navigation. **84% token reduction** in Claude Code context per session (12.5K → 2K tokens for roadmap).
+- **FEA-90: Year-over-Year Category Comparison** — Clicking any category column header in the Annual Detail table opens a modal showing that category's spending across all years. Bar chart (category color from `CC`), 3 KPIs (total all-time, avg/year, peak year). No new API calls — uses already-fetched `yearData`. Canvas ID keyed by `catId` to avoid chart conflicts.
 - **INF-07b: CLAUDE.md + MEMORY.md token trim** — Removed inline CC color map (17 lines) and payment types list from `CLAUDE.md`; replaced with pointers to `js/constants.js`. Fixed dead `tasks/` references in Self-Improvement Loop and Task Management sections. Condensed "Roadmap Workflow" memory entry (removed duplication with `CLAUDE.md`); removed "Editing Gotchas" memory entry (already in `CLAUDE.md:Known Patterns`). ~300 tokens saved per session.
 
 ---

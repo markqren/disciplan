@@ -1,3 +1,29 @@
+function showCatYoY(catId,yearData){
+  const label=catId[0].toUpperCase()+catId.slice(1);
+  const rows=yearData.filter(d=>(d.cats[catId]||0)>0);
+  if(!rows.length)return;
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"520px"}});
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}});
+  hdr.append(h("div",{},[h("h3",{style:{margin:0}},label),h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",marginTop:"4px",fontFamily:"var(--mono)"}},"Year-over-year spending")]));
+  hdr.append(h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"✕"));
+  modal.append(hdr);
+  const total=rows.reduce((s,d)=>s+(d.cats[catId]||0),0);
+  const avg=total/rows.length;
+  const maxRow=rows.reduce((a,b)=>(b.cats[catId]||0)>(a.cats[catId]||0)?b:a);
+  const kpis=h("div",{class:"g3",style:{marginBottom:"14px"}});
+  kpis.append(statCard("💵","total",fmtN(total),"var(--b)"));
+  kpis.append(statCard("📅","avg/year",fmtN(avg),"var(--y)"));
+  kpis.append(statCard("📈","peak year",String(maxRow.year),"var(--r)"));
+  modal.append(kpis);
+  const chartWrap=h("div",{class:"chrt"});
+  chartWrap.append(h("canvas",{id:"catYoY_"+catId}));
+  modal.append(chartWrap);
+  bg.append(modal);document.body.append(bg);
+  const color=CC[catId]||"rgba(129,178,154,0.7)";
+  setTimeout(()=>makeChart("catYoY_"+catId,{type:"bar",data:{labels:rows.map(d=>d.year),datasets:[{label,data:rows.map(d=>Math.round(d.cats[catId]||0)),backgroundColor:color,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
+}
+
 async function renderCrossYear(el){
   el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px">
     <div><h2>Income Statement</h2><p class="sub">Cross-year summary · USD · All Years</p></div>
@@ -69,7 +95,7 @@ async function renderCrossYear(el){
     const tblCard=h("div",{class:"cd"});
     const cyExpCats=PARENT_CATS;
     let thtml=`<h3>Annual Detail</h3><div style="overflow-x:auto"><table><thead><tr><th>Year</th><th class="r">Income</th><th class="r">Expenses</th><th class="r">Net</th><th class="r">Rate</th>`;
-    cyExpCats.forEach(c=>thtml+=`<th class="r hide-m">${c[0].toUpperCase()+c.slice(1,5)}</th>`);
+    cyExpCats.forEach(c=>thtml+=`<th class="r hide-m" data-cat="${c}" style="cursor:pointer" title="Year-over-year trend">${c[0].toUpperCase()+c.slice(1,5)}</th>`);
     thtml+=`<th class="r hide-m" style="color:#264653">G/L</th>`;
     if(hasTax)thtml+=`<th class="r hide-m" style="color:rgba(224,122,95,0.8)">Tax</th><th class="r hide-m" style="color:rgba(242,204,143,0.7)">Tax%</th>`;
     thtml+=`</tr></thead><tbody>`;
@@ -83,5 +109,8 @@ async function renderCrossYear(el){
     thtml+=`</tbody></table></div>`;
     tblCard.innerHTML=thtml;
     body.append(tblCard);
+    tblCard.querySelectorAll("th[data-cat]").forEach(th=>{
+      th.addEventListener("click",()=>showCatYoY(th.dataset.cat,yearData));
+    });
   }catch(e){document.getElementById("isBody").innerHTML=`<div class="cd" style="color:var(--r)">Error: ${e.message}</div>`}
 }
