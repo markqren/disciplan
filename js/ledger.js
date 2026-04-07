@@ -1,5 +1,6 @@
 function openLedgerEditModal(txn,onSaved){
-  const _onSaved=()=>{dcInvalidateTxns();if(onSaved)onSaved()};
+  const _orig=onSaved;
+  const _onSaved=()=>{dcInvalidateTxns();if(_orig)_orig()};
   onSaved=_onSaved;
   let seManual=false;
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
@@ -1114,7 +1115,8 @@ async function renderLedger(el){
 }
 
 function openGroupEditModal(gid,members,summary,override,onSaved){
-  const _onSaved=()=>{dcInvalidateTxns();if(onSaved)onSaved()};
+  const _orig=onSaved;
+  const _onSaved=()=>{dcInvalidateTxns();if(_orig)_orig()};
   onSaved=_onSaved;
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   const modal=h("div",{class:"modal",style:{maxWidth:"560px"}});

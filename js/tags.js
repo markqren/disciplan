@@ -47,6 +47,8 @@ async function renderTags(el){
         dateEl.innerHTML=`<input type="date" class="td-start" value="${tag.start_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px"> – <input type="date" class="td-end" value="${tag.end_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px">`;
         dateEl.style.cursor="default";
         const startIn=dateEl.querySelector(".td-start"),endIn=dateEl.querySelector(".td-end");
+        startIn.addEventListener("click",e=>e.stopPropagation());
+        endIn.addEventListener("click",e=>e.stopPropagation());
         let saving=false;
         const save=async()=>{
           if(saving)return;
@@ -218,6 +220,8 @@ async function showTagDetail(tag){
       txtEl.innerHTML=`<input type="date" class="tmd-s" value="${tag.start_date}" style="font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:2px 4px;width:125px"> – <input type="date" class="tmd-e" value="${tag.end_date}" style="font-size:12px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:2px 4px;width:125px">`;
       mdEl.style.cursor="default";
       const sI=txtEl.querySelector(".tmd-s"),eI=txtEl.querySelector(".tmd-e");
+      sI.addEventListener("click",e=>e.stopPropagation());
+      eI.addEventListener("click",e=>e.stopPropagation());
       let saving=false;
       const doSave=async()=>{
         if(saving)return;
