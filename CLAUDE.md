@@ -46,11 +46,13 @@ disciplan/
 ├── js/                  # 18 JS modules (see File Map above)
 ├── sw.js                # Service Worker (caches all modules)
 ├── CLAUDE.md            # This file
-├── ROADMAP.md           # Master roadmap (GitHub-only; blocked by .claudeignore)
-├── roadmap/
-│   ├── ACTIVE.md        # Next Up + Future (read this for feature context)
-│   ├── RELEASES.md      # v0.5–v2.1 release history (archive)
-│   └── COMPLETED.md     # 118 completed items (grep FEA-NNN here)
+├── ROADMAP.md           # Generated artifact — DO NOT edit directly (blocked by .claudeignore)
+├── roadmap/             # Source of truth — edit these, then run build-roadmap.sh
+│   ├── ACTIVE.md        # Next Up + Future (primary context for feature work)
+│   ├── RELEASES.md      # v0.5–v2.1 release history (add notes here)
+│   └── COMPLETED.md     # 133 completed items (grep FEA-NNN here)
+├── scripts/
+│   └── build-roadmap.sh # Regenerates ROADMAP.md from splits
 ├── tasks/
 │   ├── todo.md          # Current session task tracking
 │   └── lessons.md       # Accumulated learnings
@@ -178,7 +180,7 @@ See `js/constants.js:PTS` (39 total).
 - **Always pull latest `index.html` from git before editing** — the file changes frequently
 - **Validate accrual math** against known values (e.g., Japan tag = ~$6,979)
 - **Test mobile** — the app must work on phone. Use `hide-m` class for optional columns.
-- **Update `ROADMAP.md`** when completing items — move to Completed section with date, then sync splits: regenerate `roadmap/ACTIVE.md` (remove completed item) and add row to `roadmap/COMPLETED.md`
+- **Update roadmap splits when completing items**: (1) add release note to `roadmap/RELEASES.md` under current version, (2) move item from `roadmap/ACTIVE.md` to `roadmap/COMPLETED.md`, (3) run `bash scripts/build-roadmap.sh` to regenerate `ROADMAP.md`. Never edit `ROADMAP.md` directly.
 - **Token estimate in release notes** — every release note bullet must end with `(~X,XXX tokens)` estimating the implementation cost. Estimate: files read × lines × ~4 tokens/line + overhead. Round to nearest 500.
 - **Deployment** — Netlify auto-deploys are disabled via `ignore = "exit 0"` in `netlify.toml`. Each push to `main` does NOT trigger a deploy. To deploy manually, run: `npx netlify-cli deploy --prod`. This conserves Netlify free tier credits — only deploy when Mark explicitly says "deploy" or "ship it". Continue to batch changes locally and only commit+push at session end.
 

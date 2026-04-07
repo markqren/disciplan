@@ -1,8 +1,8 @@
 <!--
-  ⚠️  Auto-synced from ROADMAP.md — edit the master file, not this split.
-  Last synced: 2026-04-07
-  Source: ../ROADMAP.md § "Next Up" + "Future"
-  Usage: Claude reads this by default. ~2K tokens.
+  ✅ SOURCE OF TRUTH — edit this file directly.
+  After editing: run `bash scripts/build-roadmap.sh` to regenerate ROADMAP.md.
+  ROADMAP.md is a generated artifact — never edit it directly.
+  Usage: Primary context for feature work. ~2K tokens.
 -->
 
 # Active Roadmap
