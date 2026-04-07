@@ -179,6 +179,7 @@ See `js/constants.js:PTS` (39 total).
 - **Validate accrual math** against known values (e.g., Japan tag = ~$6,979)
 - **Test mobile** — the app must work on phone. Use `hide-m` class for optional columns.
 - **Update `ROADMAP.md`** when completing items — move to Completed section with date, then sync splits: regenerate `roadmap/ACTIVE.md` (remove completed item) and add row to `roadmap/COMPLETED.md`
+- **Token estimate in release notes** — every release note bullet must end with `(~X,XXX tokens)` estimating the implementation cost. Estimate: files read × lines × ~4 tokens/line + overhead. Round to nearest 500.
 - **Deployment** — Netlify auto-deploys are disabled via `ignore = "exit 0"` in `netlify.toml`. Each push to `main` does NOT trigger a deploy. To deploy manually, run: `npx netlify-cli deploy --prod`. This conserves Netlify free tier credits — only deploy when Mark explicitly says "deploy" or "ship it". Continue to batch changes locally and only commit+push at session end.
 
 ## Task Management
