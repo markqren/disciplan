@@ -118,6 +118,19 @@ async function showSubHistory(merchantKey, sampleDesc){
   }catch(e){body.innerHTML=`<p style="color:var(--r);text-align:center;padding:24px">Error: ${e.message}</p>`}
 }
 
+// Tax transaction detection (FEA-73)
+const TAX_RE=/\btax\b|\birs\b|\bftb\b/i;
+async function fetchAllTaxTxns(){
+  let rows=dcGet('tax_all');
+  if(!rows){
+    // Fetch all financial-category transactions; filter client-side by description
+    rows=await sb("transactions?category_id=eq.financial&order=date.asc&select=id,date,description,amount_usd,payment_type");
+    rows=rows.filter(t=>TAX_RE.test(t.description));
+    dcSet('tax_all',rows);
+  }
+  return rows;
+}
+
 let creditNames=[];
 let _linkScanDone=false;
 async function fetchCreditNames(){

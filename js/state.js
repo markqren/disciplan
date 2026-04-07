@@ -8,7 +8,7 @@ function dcGet(k){return Object.prototype.hasOwnProperty.call(_dc,k)?_dc[k]:null
 function dcSet(k,v){_dc[k]=v}
 function dcDel(...keys){keys.forEach(k=>delete _dc[k])}
 // Call after any transaction mutation (invalidates IS, cross-year, BS)
-function dcInvalidateTxns(){['is_2017','is_2018','is_2019','is_2020','is_2021','is_2022','is_2023','is_2024','is_2025','is_2026','crossyear','bs'].forEach(k=>delete _dc[k])}
+function dcInvalidateTxns(){['is_2017','is_2018','is_2019','is_2020','is_2021','is_2022','is_2023','is_2024','is_2025','is_2026','crossyear','bs','tax_all'].forEach(k=>delete _dc[k])}
 // Call after any portfolio mutation (lots, prices)
 function dcInvalidatePortfolio(){delete _dc['portfolio']}
 

@@ -1,12 +1,20 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 6, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Apr 7, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 ## 🚀 Releases
 
 ### v2.1 — Apr 4, 2026
+
+#### v2.1.2
+<sub>Pending deploy</sub>
+
+##### Features
+- **FEA-73: Income Tax Tracking in IS** — Collapsible Tax Payments card in the per-year Income Statement view. Shows 3 KPIs (YTD tax paid, effective rate = tax/gross income %, payment count), a monthly bar chart with running YTD line overlay (dual Y-axis), and a date-descending drilldown table (click any row to open the edit modal). Detection uses `category_id=financial` + regex `/\btax\b|\birs\b|\bftb\b/i` client-side — no schema changes required. Cross-year "All" view gains an Income Tax chart (bar = annual tax paid, line = effective rate %) and Tax + Tax% columns in the Annual Detail table (both conditionally hidden if no tax data exists). Tax data cached as `_dc['tax_all']` and included in `dcInvalidateTxns()`.
+
+---
 
 #### v2.1.1
 <sub>Deployed 2026-04-06 18:52 UTC</sub>
@@ -260,7 +268,6 @@
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
 | UI-01 | **IS Unrealized G/L Card + Ledger Filter Compaction** | UI | **High** | Investment as standalone 5th KPI card ("Unrealized G/L") in IS, separate from expenses/savings rate. `.g5` grid for 5-column stats. Detail table row with per-month drilldown. Cross-year G/L column. Remove "Show Inv" toggle. Ledger filter buttons condensed to emoji-only with tooltips. |
-| FEA-73 | **Income Tax Tracking in IS** | Feature | Medium | Collapsible section in the Income Statement tab showing income tax payments over time. Per-year view: bar chart of monthly tax payments (federal, state, etc.) with running YTD total. Cross-year "All" view: annual tax totals as bar chart with effective tax rate overlay (taxes paid / gross income %). Drilldown table showing individual tax transactions. Uses existing transaction data — filter by category or description pattern to identify tax payments. Could also show estimated vs actual comparisons if tax estimates are tracked. |
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
 | INF-05 | **Supabase RLS Policies** | Infra | Medium | Auth is Phase 1 only — no Row Level Security on transactions or other tables. The anon key is visible in source, meaning anyone inspecting the page can read/write all data via the REST API. Add RLS policies (`user_id = auth.uid()`) to: `transactions`, `tags`, `accounts`, `balance_snapshots`, `pending_imports`, `cashback_redemptions`, `investment_lots`, `investment_symbols`, `investment_accounts`, and `group_overrides`. Not urgent for single-user but becomes critical if sharing the URL or adding users. **Depends on:** FEA-10 (auth, done). |
 | FEA-88 | **Import Merchant Patterns RPC** | Feature | Medium | `fetchMerchantPatterns()` pulls ALL transactions (description + category_id) on every CSV import to build a frequency table for AI categorization context. At 12K+ rows this is a large payload. Replace with a Supabase RPC that returns aggregated patterns server-side: `SELECT description, category_id, COUNT(*) FROM transactions GROUP BY 1,2 HAVING COUNT(*) > 2 ORDER BY 3 DESC LIMIT 200`. Reduces import startup time and network transfer. |
@@ -277,6 +284,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-73 | **Income Tax Tracking in IS** — Collapsible Tax Payments card per year: 3 KPIs (YTD paid, effective rate %, count), monthly bar + YTD line chart, drilldown table with edit click-through. Cross-year: annual tax bar + effective rate line chart, Tax/Tax% columns in detail table. Detection: `category_id=financial` + `/\btax\b|\birs\b|\bftb\b/i`. Cached as `tax_all`. | Feature → Done | Apr 7 |
 | FEA-93 | **Subscription History Drilldown** — Clicking a subscription row in IS or 🔄 badge in Ledger opens a modal with merchant history. KPIs: total spend, occurrence count, monthly avg, first charged. Scrollable table with click-through to edit modal. `normalizeMerchant()` groups all date-suffixed variants. | Feature → Done | Apr 6 |
 | FEA-89 | **Lazy Tab Data Caching** — In-memory `_dc` cache prevents redundant API calls on tab switches. IS (per year), cross-year IS, Balance Sheet, and Portfolio each cache their fetch results. ↻ invalidates current tab only. Mutations call `dcInvalidateTxns()` or `dcInvalidatePortfolio()` to keep data fresh after edits. | Feature → Done | Apr 6 |
 | FEA-11 | **Daily AI Finance Insight Newsletter** — `daily-insight` Edge Function sends a daily email (8am PT) via Postmark with Claude-written insight, QuickChart chart, and feedback loop. Replies rated `X/10` update `insight_log`; substantive comments distilled into `insight_context` principles by Haiku. Foundational learnings accumulate across emails. Trained on 15 insight types before launch. | Feature → Done | Apr 4 |

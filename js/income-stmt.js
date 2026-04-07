@@ -368,6 +368,68 @@ async function renderIS(el){
         subCard.append(subBody);body.append(subCard);
       }
     }catch(subErr){console.warn("Subscription card error:",subErr)}
+
+    // Tax payments card (FEA-73)
+    try{
+      const allTax=await fetchAllTaxTxns();
+      const yearTax=allTax.filter(t=>t.date.startsWith(String(state.year)));
+      if(yearTax.length){
+        const ytd=yearTax.reduce((s,t)=>s+parseFloat(t.amount_usd),0);
+        const effRate=totI>0?(ytd/totI*100):0;
+
+        // Monthly totals + running YTD
+        const moAmts={};for(let m=1;m<=12;m++)moAmts[String(m).padStart(2,"0")]=0;
+        for(const t of yearTax){moAmts[t.date.slice(5,7)]+=parseFloat(t.amount_usd)}
+        let run=0;const ytdLine=Object.values(moAmts).map(v=>{run+=v;return Math.round(run)});
+
+        const taxCard=h("div",{class:"cd"});
+        let taxExp=false;
+        const taxArrow=h("span",{style:{color:"rgba(255,255,255,0.3)",marginRight:"8px",fontSize:"12px"}},"\u25B8");
+        const taxHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"},onClick:()=>{
+          taxExp=!taxExp;taxBody.style.display=taxExp?"block":"none";taxArrow.textContent=taxExp?"\u25BE":"\u25B8";
+        }});
+        taxHdr.append(h("h3",{style:{margin:0,display:"flex",alignItems:"center"}},[taxArrow,"Tax Payments"]));
+        taxHdr.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},`${fmtN(ytd)} YTD \u00b7 ${effRate.toFixed(1)}% effective`));
+        taxCard.append(taxHdr);
+
+        const taxBody=h("div",{style:{display:"none",marginTop:"14px"}});
+
+        // KPIs
+        const kpis=h("div",{class:"g3",style:{marginBottom:"12px"}});
+        kpis.append(statCard("\uD83D\uDCB8","YTD paid",fmtN(ytd),"var(--r)"));
+        kpis.append(statCard("\uD83D\uDCCA","effective rate",effRate.toFixed(1)+"%","var(--y)"));
+        kpis.append(statCard("\uD83D\uDD22","payments",String(yearTax.length),"rgba(255,255,255,0.5)"));
+        taxBody.append(kpis);
+
+        // Chart: monthly bar + YTD running total line
+        const chartWrap=h("div",{style:{marginBottom:"14px"}});
+        chartWrap.innerHTML=`<div class="chrt" style="height:200px"><canvas id="taxChart"></canvas></div>`;
+        taxBody.append(chartWrap);
+        setTimeout(()=>makeChart("taxChart",{type:"bar",data:{labels:ML,datasets:[
+          {label:"Monthly",data:Object.values(moAmts).map(v=>Math.round(v)),backgroundColor:"rgba(224,122,95,0.65)",borderRadius:4},
+          {label:"YTD Total",data:ytdLine,type:"line",borderColor:"#F2CC8F",backgroundColor:"transparent",borderWidth:2,pointRadius:2,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
+        ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:10},usePointStyle:true,pointStyleWidth:12}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.5)",callback:v=>fmtN(v)},grid:{display:false}}}}}),100);
+
+        // Drilldown table (date desc)
+        const tWrap=h("div",{style:{overflowX:"auto"}});
+        const tbl=h("table");
+        tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th class="r">Amount</th><th class="hide-m">Payment</th></tr></thead>`;
+        const tbody=document.createElement("tbody");
+        for(const t of [...yearTax].sort((a,b)=>b.date.localeCompare(a.date))){
+          const tr=h("tr",{style:{cursor:"pointer"},onClick:async()=>{
+            const full=await sb(`transactions?id=eq.${t.id}&select=*`);
+            if(full.length)openLedgerEditModal(full[0],()=>{});
+          }});
+          tr.innerHTML=`<td class="m" style="color:rgba(255,255,255,0.5);white-space:nowrap">${fmtD(t.date)}</td>`
+            +`<td style="color:rgba(255,255,255,0.8);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>`
+            +`<td class="r m" style="color:rgba(255,255,255,0.75)">${fmtF(t.amount_usd)}</td>`
+            +`<td class="hide-m" style="color:rgba(255,255,255,0.4);font-size:11px">${t.payment_type||""}</td>`;
+          tbody.append(tr);
+        }
+        tbl.append(tbody);tWrap.append(tbl);taxBody.append(tWrap);
+        taxCard.append(taxBody);body.append(taxCard);
+      }
+    }catch(taxErr){console.warn("Tax card error:",taxErr)}
   }catch(e){document.getElementById("isBody").innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);color:var(--r)">Error loading: ${e.message}</div>`}
 }
 
