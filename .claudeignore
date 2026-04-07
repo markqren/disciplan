@@ -2,3 +2,13 @@
 *.sql
 node_modules/
 .git/
+
+# Master roadmap — GitHub-only. Claude reads roadmap/ splits instead.
+ROADMAP.md
+
+# Large reference files rarely needed
+references/
+
+# Archive
+*.old.md
+archive/

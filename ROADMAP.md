@@ -14,6 +14,9 @@
 ##### Features
 - **FEA-73: Income Tax Tracking in IS** — Collapsible Tax Payments card in the per-year Income Statement view. Shows 3 KPIs (YTD tax paid, effective rate = tax/gross income %, payment count), a monthly bar chart with running YTD line overlay (dual Y-axis), and a date-descending drilldown table (click any row to open the edit modal). Detection uses `category_id=financial` + regex `/\btax\b|\birs\b|\bftb\b/i` client-side — no schema changes required. Cross-year "All" view gains an Income Tax chart (bar = annual tax paid, line = effective rate %) and Tax + Tax% columns in the Annual Detail table (both conditionally hidden if no tax data exists). Tax data cached as `_dc['tax_all']` and included in `dcInvalidateTxns()`.
 
+##### Infrastructure
+- **INF-07: Dual-Roadmap System** — Renamed `disciplan-roadmap.md` → `ROADMAP.md` (master, GitHub-only). Created `roadmap/` directory with three split files: `ACTIVE.md` (Next Up + Future, ~2K tokens), `RELEASES.md` (v0.5–v2.1 history, archive), `COMPLETED.md` (118 items, grep-only). Added `ROADMAP.md` to `.claudeignore` so Claude only loads the compact splits. Updated `CLAUDE.md` file map and workflow rules. Updated `README.md` with roadmap navigation. **84% token reduction** in Claude Code context per session (12.5K → 2K tokens for roadmap).
+
 ---
 
 #### v2.1.1
@@ -284,6 +287,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| INF-07 | **Dual-Roadmap System** — Renamed `disciplan-roadmap.md` → `ROADMAP.md` (master, GitHub-only). Created `roadmap/ACTIVE.md` (Next Up + Future, ~2K tokens), `roadmap/RELEASES.md` (history archive), `roadmap/COMPLETED.md` (118 items, grep-only). `ROADMAP.md` added to `.claudeignore`. 84% token reduction in Claude Code context per session. | Infra → Done | Apr 7 |
 | FEA-73 | **Income Tax Tracking in IS** — Collapsible Tax Payments card per year: 3 KPIs (YTD paid, effective rate %, count), monthly bar + YTD line chart, drilldown table with edit click-through. Cross-year: annual tax bar + effective rate line chart, Tax/Tax% columns in detail table. Detection: `category_id=financial` + `/\btax\b|\birs\b|\bftb\b/i`. Cached as `tax_all`. | Feature → Done | Apr 7 |
 | FEA-93 | **Subscription History Drilldown** — Clicking a subscription row in IS or 🔄 badge in Ledger opens a modal with merchant history. KPIs: total spend, occurrence count, monthly avg, first charged. Scrollable table with click-through to edit modal. `normalizeMerchant()` groups all date-suffixed variants. | Feature → Done | Apr 6 |
 | FEA-89 | **Lazy Tab Data Caching** — In-memory `_dc` cache prevents redundant API calls on tab switches. IS (per year), cross-year IS, Balance Sheet, and Portfolio each cache their fetch results. ↻ invalidates current tab only. Mutations call `dcInvalidateTxns()` or `dcInvalidatePortfolio()` to keep data fresh after edits. | Feature → Done | Apr 6 |

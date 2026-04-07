@@ -46,7 +46,11 @@ disciplan/
 ├── js/                  # 18 JS modules (see File Map above)
 ├── sw.js                # Service Worker (caches all modules)
 ├── CLAUDE.md            # This file
-├── disciplan-roadmap.md # Feature/bug tracker (canonical)
+├── ROADMAP.md           # Master roadmap (GitHub-only; blocked by .claudeignore)
+├── roadmap/
+│   ├── ACTIVE.md        # Next Up + Future (read this for feature context)
+│   ├── RELEASES.md      # v0.5–v2.1 release history (archive)
+│   └── COMPLETED.md     # 118 completed items (grep FEA-NNN here)
 ├── tasks/
 │   ├── todo.md          # Current session task tracking
 │   └── lessons.md       # Accumulated learnings
@@ -183,7 +187,7 @@ Chase Chequing, Chase Savings, AMEX Chequing, Charles Schwab, Vanguard, eTrade, 
 - **Always pull latest `index.html` from git before editing** — the file changes frequently
 - **Validate accrual math** against known values (e.g., Japan tag = ~$6,979)
 - **Test mobile** — the app must work on phone. Use `hide-m` class for optional columns.
-- **Update `disciplan-roadmap.md`** when completing items — move to Completed section with date
+- **Update `ROADMAP.md`** when completing items — move to Completed section with date, then sync splits: regenerate `roadmap/ACTIVE.md` (remove completed item) and add row to `roadmap/COMPLETED.md`
 - **Deployment** — Netlify auto-deploys are disabled via `ignore = "exit 0"` in `netlify.toml`. Each push to `main` does NOT trigger a deploy. To deploy manually, run: `npx netlify-cli deploy --prod`. This conserves Netlify free tier credits — only deploy when Mark explicitly says "deploy" or "ship it". Continue to batch changes locally and only commit+push at session end.
 
 ## Task Management

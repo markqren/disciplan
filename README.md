@@ -2,6 +2,15 @@
 
 Accrual-based personal finance tracker. Single-page app connecting to Supabase backend.
 
+## 📋 Roadmap
+
+- **[ROADMAP.md](./ROADMAP.md)** — Master roadmap (consolidated, human-readable)
+- **[roadmap/ACTIVE.md](./roadmap/ACTIVE.md)** — Next Up + Future (what's planned)
+- **[roadmap/RELEASES.md](./roadmap/RELEASES.md)** — v0.5–v2.1 release history
+- **[roadmap/COMPLETED.md](./roadmap/COMPLETED.md)** — 118 completed items (searchable)
+
+**Editing:** Always edit `ROADMAP.md`. The `roadmap/` split files sync on the next Claude Code session.
+
 ## Deploy
 
 Hosted on Netlify. To update:
