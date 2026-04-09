@@ -29,8 +29,8 @@ const SB_URL          = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRON_SECRET     = Deno.env.get("CRON_SECRET");
 
-const TO_EMAIL    = "markren@pinterest.com";
-const REPLY_TO    = "5ec68b0a35fa4f3784a22d2cdc5579cf@inbound.postmarkapp.com";
+const TO_EMAIL    = "mark@disciplan.dev";
+const REPLY_TO    = "8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com";
 const APP_URL     = "https://disciplan.netlify.app";
 const MODEL       = "claude-sonnet-4-6";
 
