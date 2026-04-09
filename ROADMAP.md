@@ -10,8 +10,8 @@
 
 ### v2.1 — Apr 4, 2026
 
-#### v2.1.4
-<sub>Deployed 2026-04-09 05:10 UTC</sub>
+#### v2.1.3
+<sub>Deployed TBD</sub>
 
 ##### Features
 - **FEA-11 feedback loop end-to-end** — Reply-to-rate working: `In-Reply-To` header now correctly parsed (strips `@smtp.postmarkapp.com` domain suffix that Postmark appends to Message-IDs). Ratings and comments land in `insight_log`, and substantive comments are distilled into `insight_context` principles via Claude Haiku. First live feedback recorded: `income_breakdown` 7/10 — "Some of the insights could go deeper (i.e. what is the Y|Y rate, CAGR etc)". (~2,000 impl tokens / ~$0.03 session)
@@ -19,21 +19,12 @@
 ##### Bug Fixes
 - **BUG-26b: Monthly expense totals under-counted vs IS tab** — `fmtMonthlyExpenses` showed only 11 categories, silently omitting `furniture`, `clothes`, `utilities`, `financial`. Switched to parent-level rollup (food = food+groceries+restaurant, home = home+rent+furniture, personal = personal+clothes+tech) matching IS tab logic exactly. Added Total column. (~1,000 tokens)
 - **BUG-26c: Large-transaction service period not shown** — `fmtLargeTransactions` filtered by `date` (booking date) with no service period info, so Claude misattributed past-service transactions (e.g. Taiwan Airbnb logged Apr 7, service was 2025) to current month. Added `service_start → service_end` to display when service differs from log date. (~500 tokens)
-- **Data source: switched from paginated raw-txn fetch to `get_income_statement` RPC** — Replaced TypeScript accrual reimplementation + paginated transaction loops with 3 RPC calls (one per year). RPC uses the same `daily_accruals` view the IS tab uses — correct by construction, no pagination risk. (~2,000 tokens)
+- **BUG-26d: Data source switched to `get_income_statement` RPC** — Replaced TypeScript accrual reimplementation + paginated transaction loops with 3 RPC calls (one per year). RPC uses the same `daily_accruals` view the IS tab uses — correct by construction, no pagination risk. (~2,000 tokens)
+- **BUG-28: IS Monthly Detail drilldown modal not appearing** — `showISDrilldown` built and wired the modal elements correctly but never appended them to the DOM — the final `bg.append(modal); document.body.append(bg)` lines were missing. Clicking any monthly cell now shows the drilldown popup. (~3,500 impl tokens / ~$0.05 session)
 
 ##### UI
 - **Outfit font in email header** — Added Google Fonts `@import` for Outfit + JetBrains Mono; applied to "the disciplan" header span and "DAILY INSIGHT" badge. Renders correctly in Apple Mail / iOS Mail; falls back to system sans-serif in Gmail. (~200 tokens)
-
----
-
-#### v2.1.3
-<sub>Deployed TBD</sub>
-
-##### UI Updates
 - **Email import inbound address updated to new Postmark account (disciplan.dev)** — Updated hardcoded fallback in `entry.js`, comment in `inbound-email/index.ts`, and `preferences` table row `inbound_email_address` in Supabase. The Entry tab now shows `8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com` and `daily-insight` REPLY_TO matches. (~500 impl tokens / ~$0.01 session)
-
-##### Bug Fixes
-- **BUG-28: IS Monthly Detail drilldown modal not appearing** — `showISDrilldown` built and wired the modal elements correctly but never appended them to the DOM — the final `bg.append(modal); document.body.append(bg)` lines were missing. Clicking any monthly cell now shows the drilldown popup. (~3,500 impl tokens / ~$0.05 session)
 
 ---
 
