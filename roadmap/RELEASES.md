@@ -24,8 +24,8 @@
 - **BUG-28: IS Monthly Detail drilldown modal not appearing** — `showISDrilldown` built and wired the modal elements correctly but never appended them to the DOM — the final `bg.append(modal); document.body.append(bg)` lines were missing. Clicking any monthly cell now shows the drilldown popup. (~3,500 impl tokens / ~$0.05 session)
 
 ##### UI
-- **Outfit font in email header** — Added Google Fonts `@import` for Outfit + JetBrains Mono; applied to "the disciplan" header span and "DAILY INSIGHT" badge. Renders correctly in Apple Mail / iOS Mail; falls back to system sans-serif in Gmail. (~200 tokens)
-- **Email import inbound address updated to new Postmark account (disciplan.dev)** — Updated hardcoded fallback in `entry.js`, comment in `inbound-email/index.ts`, and `preferences` table row `inbound_email_address` in Supabase. The Entry tab now shows `8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com` and `daily-insight` REPLY_TO matches. (~500 impl tokens / ~$0.01 session)
+- **FEA-11 — Outfit font in email header** — Added Google Fonts `@import` for Outfit + JetBrains Mono; applied to "the disciplan" header span and "DAILY INSIGHT" badge. Renders correctly in Apple Mail / iOS Mail; falls back to system sans-serif in Gmail. (~200 tokens)
+- **FEA-11 — Email import inbound address updated to new Postmark account (disciplan.dev)** — Updated hardcoded fallback in `entry.js`, comment in `inbound-email/index.ts`, and `preferences` table row `inbound_email_address` in Supabase. The Entry tab now shows `8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com` and `daily-insight` REPLY_TO matches. (~500 impl tokens / ~$0.01 session)
 
 ---
 
