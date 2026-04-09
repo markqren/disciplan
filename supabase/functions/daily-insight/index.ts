@@ -78,6 +78,14 @@ interface InsightContextRow {
   content: string;
 }
 
+interface ISRow {
+  month: string;        // "2026-04-01"
+  category_id: string;
+  parent_id: string | null;
+  category_label: string;
+  amount: number;
+}
+
 interface InsightResponse {
   insight_type: string;
   subject: string;
@@ -87,81 +95,26 @@ interface InsightResponse {
   chart_config: object;
 }
 
-// ── Date helpers ─────────────────────────────────────────────────────────────
-
-function monthKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-function monthBounds(year: number, month: number): { start: Date; end: Date } {
-  const start = new Date(Date.UTC(year, month, 1));
-  const end   = new Date(Date.UTC(year, month + 1, 0));
-  return { start, end };
-}
-
-function addMonths(d: Date, n: number): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1));
-}
-
-// ── Accrual aggregation ───────────────────────────────────────────────────────
+// ── Monthly maps from IS RPC rows ─────────────────────────────────────────────
 
 type MonthlyMap = Record<string, Record<string, number>>; // month → category → accrual
 
-function computeMonthlyExpenses(txns: Transaction[], numMonths: number): MonthlyMap {
-  const now   = new Date();
-  const result: MonthlyMap = {};
+function buildMonthlyMaps(rows: ISRow[]): { expenses: MonthlyMap; income: Record<string, number> } {
+  const expenses: MonthlyMap = {};
+  const income: Record<string, number> = {};
 
-  for (let m = 0; m < numMonths; m++) {
-    const ref   = addMonths(now, -m);
-    const key   = monthKey(ref);
-    const { start: mStart, end: mEnd } = monthBounds(ref.getUTCFullYear(), ref.getUTCMonth());
-    result[key] = {};
-
-    for (const t of txns) {
-      if (!EXPENSE_CATS.has(t.category_id)) continue;
-      let accrual = 0;
-
-      if (t.daily_cost != null && t.service_start && t.service_end) {
-        const tStart = new Date(t.service_start + "T00:00:00Z");
-        const tEnd   = new Date(t.service_end   + "T00:00:00Z");
-        if (tEnd < mStart || tStart > mEnd) continue;
-        const oStart = tStart > mStart ? tStart : mStart;
-        const oEnd   = tEnd   < mEnd   ? tEnd   : mEnd;
-        const days   = Math.round((oEnd.getTime() - oStart.getTime()) / 86400000) + 1;
-        accrual = t.daily_cost * days;
-      } else if (t.amount_usd > 0) {
-        const td = new Date(t.date + "T00:00:00Z");
-        if (td < mStart || td > mEnd) continue;
-        accrual = t.amount_usd;
-      }
-
-      if (accrual > 0) {
-        result[key][t.category_id] = (result[key][t.category_id] || 0) + accrual;
-      }
+  for (const r of rows) {
+    const mk = r.month.slice(0, 7); // "2026-04"
+    const amt = Number(r.amount) || 0;
+    if (r.category_id === "income") {
+      income[mk] = (income[mk] || 0) + Math.abs(amt);
+    } else if (EXPENSE_CATS.has(r.category_id) && amt > 0) {
+      if (!expenses[mk]) expenses[mk] = {};
+      expenses[mk][r.category_id] = (expenses[mk][r.category_id] || 0) + amt;
     }
   }
 
-  return result;
-}
-
-function computeMonthlyIncome(txns: Transaction[], numMonths: number): Record<string, number> {
-  const now    = new Date();
-  const result: Record<string, number> = {};
-
-  for (let m = 0; m < numMonths; m++) {
-    const ref   = addMonths(now, -m);
-    const key   = monthKey(ref);
-    const { start: mStart, end: mEnd } = monthBounds(ref.getUTCFullYear(), ref.getUTCMonth());
-    result[key] = 0;
-
-    for (const t of txns) {
-      if (t.category_id !== "income") continue;
-      const td = new Date(t.date + "T00:00:00Z");
-      if (td >= mStart && td <= mEnd) result[key] += t.amount_usd;
-    }
-  }
-
-  return result;
+  return { expenses, income };
 }
 
 // ── Data formatting for prompt ────────────────────────────────────────────────
@@ -363,27 +316,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .order("created_at", { ascending: false })
     .limit(20);
 
-  // ── 2. Fetch expense transactions (14 months) ────────────────────────────
-  const fourteenMonthsAgo = new Date();
-  fourteenMonthsAgo.setMonth(fourteenMonthsAgo.getMonth() - 14);
-  const cutoff = fourteenMonthsAgo.toISOString().slice(0, 10);
+  // ── 2. Fetch IS data via RPC for last 2+ years (correct accrual, no pagination needed) ──
+  const currentYear = new Date().getUTCFullYear();
+  const isResults = await Promise.all(
+    [currentYear, currentYear - 1, currentYear - 2].map(y =>
+      supabase.rpc("get_income_statement", { p_year: y })
+    )
+  );
+  const allISRows: ISRow[] = isResults.flatMap(r => (r.data || []) as ISRow[]);
+  const { expenses, income } = buildMonthlyMaps(allISRows);
 
-  const { data: expenseTxns } = await supabase
-    .from("transactions")
-    .select("date,category_id,amount_usd,daily_cost,service_start,service_end")
-    .gte("date", cutoff)
-    .not("category_id", "in", "(income,investment,adjustment)")
-    .order("date", { ascending: false });
-
-  // ── 3. Fetch income transactions (14 months) ─────────────────────────────
-  const { data: incomeTxns } = await supabase
-    .from("transactions")
-    .select("date,category_id,amount_usd")
-    .gte("date", cutoff)
-    .eq("category_id", "income")
-    .order("date", { ascending: false });
-
-  // ── 4. Fetch large recent transactions (last 7 days) ─────────────────────
+  // ── 3. Fetch large recent transactions (last 7 days) ─────────────────────
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const sevenDaysAgoStr = sevenDaysAgo.toISOString().slice(0, 10);
@@ -410,11 +353,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .order("service_end", { ascending: true })
     .limit(20);
 
-  // ── 6. Compute monthly aggregates ─────────────────────────────────────────
-  const expenses = computeMonthlyExpenses(expenseTxns || [], 14);
-  const income   = computeMonthlyIncome(incomeTxns || [], 14);
-
-  // ── 7. Build and send Claude prompt ───────────────────────────────────────
+  // ── 5. Build and send Claude prompt ───────────────────────────────────────
   const prompt = buildPrompt(
     today,
     expenses,
@@ -464,28 +403,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   // ── 8. Create QuickChart short URL ─────────────────────────────────────────
+  // Validate chart config has required top-level fields before sending
+  const cfg = insight.chart_config as Record<string, unknown>;
+  const validChart = cfg && typeof cfg.type === "string" && cfg.data != null;
+  console.log("chart_config valid:", validChart, "type:", cfg?.type);
+
   let chartUrl = "";
-  try {
-    const qcRes = await fetch("https://quickchart.io/chart/create", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chart: insight.chart_config,
-        width: 504,
-        height: 260,
-        backgroundColor: "white",
-      }),
-    });
-    if (qcRes.ok) {
-      const qcData = await qcRes.json();
-      chartUrl = qcData.url || "";
+  if (validChart) {
+    try {
+      const qcRes = await fetch("https://quickchart.io/chart/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chart: insight.chart_config,
+          width: 504,
+          height: 260,
+          backgroundColor: "white",
+        }),
+      });
+      if (qcRes.ok) {
+        const qcData = await qcRes.json();
+        chartUrl = qcData.url || "";
+      } else {
+        console.error("QuickChart HTTP error:", qcRes.status, await qcRes.text());
+      }
+    } catch (e) {
+      console.error("QuickChart error:", e);
     }
-  } catch (e) {
-    console.error("QuickChart error:", e);
+  } else {
+    console.error("Invalid chart_config from Claude:", JSON.stringify(cfg));
   }
 
-  // Fallback: empty 1×1 pixel if chart fails
-  if (!chartUrl) chartUrl = "https://quickchart.io/chart?c=%7B%22type%22%3A%22bar%22%2C%22data%22%3A%7B%7D%7D&w=504&h=260&bkg=white";
+  // Fallback: blank placeholder if chart fails
+  if (!chartUrl) chartUrl = "https://quickchart.io/chart?c=%7B%22type%22%3A%22bar%22%2C%22data%22%3A%7B%22labels%22%3A%5B%5D%2C%22datasets%22%3A%5B%5D%7D%7D&w=504&h=260&bkg=white";
 
   // ── 9. Build and send email ────────────────────────────────────────────────
   const html = buildEmail(insight, chartUrl, costLine);
