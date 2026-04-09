@@ -119,13 +119,30 @@ function buildMonthlyMaps(rows: ISRow[]): { expenses: MonthlyMap; income: Record
 
 // ── Data formatting for prompt ────────────────────────────────────────────────
 
+// Parent-level rollup matching the IS tab (food = food + groceries + restaurant, etc.)
+const PARENT_ROLLUP: Record<string, string[]> = {
+  food:           ["food", "groceries", "restaurant"],
+  home:           ["home", "rent", "furniture"],
+  personal:       ["personal", "clothes", "tech"],
+  health:         ["health"],
+  transportation: ["transportation"],
+  utilities:      ["utilities"],
+  financial:      ["financial"],
+  entertainment:  ["entertainment"],
+  other:          ["other"],
+};
+
 function fmtMonthlyExpenses(map: MonthlyMap): string {
   const months = Object.keys(map).sort().reverse();
-  const cats = ["food","groceries","restaurant","home","rent","health","personal","tech","transportation","entertainment","other"];
-  const header = ["Month", ...cats].join(" | ");
+  const parents = Object.keys(PARENT_ROLLUP);
+  const header = ["Month", ...parents, "Total"].join(" | ");
   const rows = months.map(m => {
-    const vals = cats.map(c => map[m][c] != null ? `$${Math.round(map[m][c])}` : "—");
-    return [m, ...vals].join(" | ");
+    const vals = parents.map(p => {
+      const sum = PARENT_ROLLUP[p].reduce((s, c) => s + (map[m]?.[c] || 0), 0);
+      return sum > 0 ? `$${Math.round(sum)}` : "—";
+    });
+    const total = parents.reduce((s, p) => s + PARENT_ROLLUP[p].reduce((ss, c) => ss + (map[m]?.[c] || 0), 0), 0);
+    return [m, ...vals, `$${Math.round(total)}`].join(" | ");
   });
   return [header, ...rows].join("\n");
 }
@@ -154,11 +171,11 @@ function fmtFeedback(rows: InsightLogRow[]): string {
 
 function fmtLargeTransactions(txns: Transaction[]): string {
   // Group by transaction_group_id, net the amounts
-  const groups: Record<string, { net: number; descs: string[]; cat: string; date: string }> = {};
+  const groups: Record<string, { net: number; descs: string[]; cat: string; date: string; service_start: string | null; service_end: string | null }> = {};
   for (const t of txns) {
     if (Math.abs(t.amount_usd) < 50) continue;
     const key = t.transaction_group_id ? `g${t.transaction_group_id}` : `s${t.date}${t.description}`;
-    if (!groups[key]) groups[key] = { net: 0, descs: [], cat: t.category_id, date: t.date };
+    if (!groups[key]) groups[key] = { net: 0, descs: [], cat: t.category_id, date: t.date, service_start: t.service_start, service_end: t.service_end };
     groups[key].net += t.amount_usd;
     if (t.description) groups[key].descs.push(t.description);
   }
@@ -167,9 +184,12 @@ function fmtLargeTransactions(txns: Transaction[]): string {
     .sort((a, b) => Math.abs(b.net) - Math.abs(a.net))
     .slice(0, 8);
   if (!sorted.length) return "No large transactions this week.";
-  return sorted.map(g =>
-    `$${Math.round(Math.abs(g.net))} | ${g.cat} | "${g.descs.slice(0, 2).join(" / ")}" | ${g.date}`
-  ).join("\n");
+  return sorted.map(g => {
+    const servicePeriod = g.service_start && g.service_end && g.service_start !== g.date
+      ? ` | service: ${g.service_start} → ${g.service_end}`
+      : "";
+    return `$${Math.round(Math.abs(g.net))} | ${g.cat} | "${g.descs.slice(0, 2).join(" / ")}" | logged: ${g.date}${servicePeriod}`;
+  }).join("\n");
 }
 
 function fmtExpiring(txns: Transaction[]): string {
@@ -333,7 +353,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const { data: largeTxns } = await supabase
     .from("transactions")
-    .select("date,description,amount_usd,category_id,transaction_group_id")
+    .select("date,description,amount_usd,category_id,transaction_group_id,service_start,service_end")
     .gte("date", sevenDaysAgoStr)
     .not("category_id", "in", "(income,investment,adjustment)")
     .order("amount_usd", { ascending: false });
