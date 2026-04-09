@@ -262,13 +262,16 @@ Return ONLY valid JSON (no markdown, no explanation):
 function buildEmail(r: InsightResponse, chartUrl: string, costLine: string): string {
   return `<!DOCTYPE html>
 <html>
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:20px;background:#f0f0f0;font-family:'Helvetica Neue',Arial,sans-serif">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');</style>
+</head>
+<body style="margin:0;padding:20px;background:#f0f0f0;font-family:'Outfit','Helvetica Neue',Arial,sans-serif">
 <table width="560" cellpadding="0" cellspacing="0" style="margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.1)">
   <tr>
     <td style="background:#0a0a14;padding:20px 28px">
-      <span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.03em">the disciplan</span>
-      <span style="color:#81B29A;font-size:11px;font-family:monospace;margin-left:10px;letter-spacing:0.05em">DAILY INSIGHT</span>
+      <span style="color:#ffffff;font-size:18px;font-weight:700;letter-spacing:-0.03em;font-family:'Outfit','Helvetica Neue',Arial,sans-serif">the disciplan</span>
+      <span style="color:#81B29A;font-size:11px;font-family:'JetBrains Mono',monospace;margin-left:10px;letter-spacing:0.05em">DAILY INSIGHT</span>
     </td>
   </tr>
   <tr>

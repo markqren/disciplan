@@ -1,6 +1,6 @@
 // FEA-39: Inbound Email → pending_imports Edge Function
 // Receives Postmark webhook, parses email, writes to staging table.
-// Postmark inbound address: 5ec68b0a35fa4f3784a22d2cdc5579cf@inbound.postmarkapp.com
+// Postmark inbound address: 8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -1008,8 +1008,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const headers: Array<{ Name: string; Value: string }> = payload.Headers || [];
     const inReplyToHeader = headers.find((h) => h.Name === "In-Reply-To");
     const rawInReplyTo = inReplyToHeader?.Value || payload.InReplyTo || "";
-    // Postmark message IDs may be wrapped in angle brackets
-    const inReplyTo = rawInReplyTo.replace(/^<|>$/g, "").trim();
+    // Strip angle brackets and @domain — Postmark sends Message-ID as <uuid@smtp.postmarkapp.com>
+    // but stores just the uuid in insight_log.postmark_message_id
+    const inReplyTo = rawInReplyTo.replace(/^<|>$/g, "").split("@")[0].trim();
 
     // Extract rating: match "8/10", "7.5/10", "9 /10", etc.
     const ratingMatch = (textBody || "").match(/(\d+(?:\.\d+)?)\s*\/\s*10/i);
