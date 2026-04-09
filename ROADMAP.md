@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 7, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Apr 8, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,14 @@
 ## 🚀 Releases
 
 ### v2.1 — Apr 4, 2026
+
+#### v2.1.3
+<sub>Deployed TBD</sub>
+
+##### Bug Fixes
+- **BUG-28: IS Monthly Detail drilldown modal not appearing** — `showISDrilldown` built and wired the modal elements correctly but never appended them to the DOM — the final `bg.append(modal); document.body.append(bg)` lines were missing. Clicking any monthly cell now shows the drilldown popup. (~3,500 impl tokens / ~$0.05 session)
+
+---
 
 #### v2.1.2
 <sub>Deployed 2026-04-07 22:43 UTC</sub>

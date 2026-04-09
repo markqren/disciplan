@@ -546,5 +546,5 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
     row.addEventListener("mouseenter",()=>row.style.background=isChild?"rgba(74,111,165,0.06)":"rgba(255,255,255,0.04)");
     row.addEventListener("mouseleave",()=>row.style.background="transparent");
   });
-
+  bg.append(modal);document.body.append(bg);
 }
