@@ -16,6 +16,7 @@
 
 ##### Features
 - **FEA-88: Import Merchant Patterns RPC** — Replaced `fetchMerchantPatterns()` paginated loop (12K+ rows, ~13 round-trips) with a single `get_merchant_patterns` RPC call. Server aggregates `description + category_id` counts, returns top 200 patterns with count ≥ 3. Client normalizes via existing `normalizeMerchant()`. Import startup is now one fast RPC instead of a multi-second paginated fetch. (~500 impl tokens / ~$0.01 session)
+- **FEA-92: Data Integrity Health Check** — New "Data Health" section in Export tab with an on-demand "Run Health Check" button. Runs 4 server-side checks via `run_data_health_check` RPC: (1) orphaned `transaction_group_id` groups with only 1 member, (2) `daily_cost × service_days` diverging from `amount_usd` by > $0.02, (3) tag values in transactions missing from the `tags` table, (4) potential duplicate transactions (same date + description + amount + payment_type). Results show ✓ Clean or ⚠ N issues with expandable detail rows. Duplicates check notes payslip rows may appear intentionally. (~1,500 impl tokens / ~$0.02 session)
 
 ---
 

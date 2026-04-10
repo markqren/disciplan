@@ -15,6 +15,7 @@
 
 ##### Features
 - **FEA-88: Import Merchant Patterns RPC** — Replaced `fetchMerchantPatterns()` paginated loop (12K+ rows, ~13 round-trips) with a single `get_merchant_patterns` RPC call. Server aggregates `description + category_id` counts, returns top 200 patterns with count ≥ 3. Client normalizes via existing `normalizeMerchant()`. Import startup is now one fast RPC instead of a multi-second paginated fetch. (~500 impl tokens / ~$0.01 session)
+- **FEA-92: Data Integrity Health Check** — New "Data Health" section in Export tab with an on-demand "Run Health Check" button. Runs 4 server-side checks via `run_data_health_check` RPC: (1) orphaned `transaction_group_id` groups with only 1 member, (2) `daily_cost × service_days` diverging from `amount_usd` by > $0.02, (3) tag values in transactions missing from the `tags` table, (4) potential duplicate transactions (same date + description + amount + payment_type). Results show ✓ Clean or ⚠ N issues with expandable detail rows. Duplicates check notes payslip rows may appear intentionally. (~1,500 impl tokens / ~$0.02 session)
 
 ---
 
@@ -309,18 +310,18 @@
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
 | INF-05 | **Supabase RLS Policies** | Infra | Medium | Auth is Phase 1 only — no Row Level Security on transactions or other tables. The anon key is visible in source, meaning anyone inspecting the page can read/write all data via the REST API. Add RLS policies (`user_id = auth.uid()`) to: `transactions`, `tags`, `accounts`, `balance_snapshots`, `pending_imports`, `cashback_redemptions`, `investment_lots`, `investment_symbols`, `investment_accounts`, and `group_overrides`. Not urgent for single-user but becomes critical if sharing the URL or adding users. **Depends on:** FEA-10 (auth, done). |
 | FEA-91 | **Full-Text Transaction Search** | Feature | Low | Ledger search uses `ilike` pattern matching which is slow on 12K+ rows. Add `credit.ilike.*q*` to the existing OR filter (allows searching credit sub-accounts). Longer term, add a Supabase full-text search index (`to_tsvector`) on description for faster searches. |
-| FEA-92 | **Data Integrity Health Check** | Feature | Low | Background validation (on-demand or periodic) checking for: orphaned `transaction_group_id` references (groups with only 1 member), transactions where `daily_cost × service_days` diverges from `amount_usd` beyond rounding tolerance, tags referenced in transactions but missing from the `tags` table, and potential duplicate transactions (same date + amount + description + payment_type). Surface results as a "Data Health" indicator or a section in the Export tab. |
 | INF-06 | **Cache Version Key** | Infra | Low | sessionStorage cache keys use prefix `dc_` without versioning. If RPC response shapes change (new columns, renamed fields), stale cached data causes rendering errors on next load. Add a version segment to the prefix (e.g., `dc_v2_`) and bump on schema changes. Trivial to implement. |
 
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (137 items)</summary>
+<summary><strong>✅ Completed</strong> (138 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-92 | **Data Integrity Health Check** — On-demand "Run Health Check" in Export tab. 4 server-side checks via RPC: orphaned groups, accrual math errors, missing tags, potential duplicates. Results show ✓ Clean or ⚠ N issues with expandable detail rows. | Feature → Done | Apr 10 |
 | FEA-88 | **Import Merchant Patterns RPC** — Replaced paginated 12K+ row fetch with a single `get_merchant_patterns` RPC (server-side aggregation, top 200 patterns). Import startup time reduced from multi-second paginated loop to one fast RPC call. | Feature → Done | Apr 10 |
 | BUG-27 | **Tags date picker focus reset** — Card and modal date editors both re-fired their container `click` listener when clicking an input, re-running setup and snapping focus back to the start date. Fixed by adding `stopPropagation` to both date inputs after creation. | Bug → Done | Apr 7 |
 | BUG-26 | **Tags save stack overflow** — `openLedgerEditModal`/`openGroupEditModal` created a `_onSaved` closure over the `onSaved` parameter, then immediately reassigned the parameter to `_onSaved`, making the closure self-referential. Fixed by capturing the original callback as `_orig` before wrapping. | Bug → Done | Apr 7 |

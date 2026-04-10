@@ -9,6 +9,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-92 | **Data Integrity Health Check** — On-demand "Run Health Check" in Export tab. 4 server-side checks via RPC: orphaned groups, accrual math errors, missing tags, potential duplicates. Results show ✓ Clean or ⚠ N issues with expandable detail rows. | Feature → Done | Apr 10 |
 | FEA-88 | **Import Merchant Patterns RPC** — Replaced paginated 12K+ row fetch with a single `get_merchant_patterns` RPC (server-side aggregation, top 200 patterns). Import startup time reduced from multi-second paginated loop to one fast RPC call. | Feature → Done | Apr 10 |
 | BUG-27 | **Tags date picker focus reset** — Card and modal date editors both re-fired their container `click` listener when clicking an input, re-running setup and snapping focus back to the start date. Fixed by adding `stopPropagation` to both date inputs after creation. | Bug → Done | Apr 7 |
 | BUG-26 | **Tags save stack overflow** — `openLedgerEditModal`/`openGroupEditModal` created a `_onSaved` closure over the `onSaved` parameter, then immediately reassigned the parameter to `_onSaved`, making the closure self-referential. Fixed by capturing the original callback as `_orig` before wrapping. | Bug → Done | Apr 7 |
