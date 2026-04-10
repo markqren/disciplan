@@ -33,10 +33,9 @@ async function aiGroupLabels(groups){
 }
 
 async function fetchMerchantPatterns(){
-  let all=[],off=0;
-  while(true){const b=await sb(`transactions?select=description,category_id&limit=1000&offset=${off}`);all=all.concat(b);if(b.length<1000)break;off+=1000}
+  const rows=await sbRPC("get_merchant_patterns");
   const patterns={};
-  for(const t of all){const k=normalizeMerchant(t.description);if(!patterns[k])patterns[k]={};patterns[k][t.category_id]=(patterns[k][t.category_id]||0)+1}
+  for(const r of rows){const k=normalizeMerchant(r.description);if(!patterns[k])patterns[k]={};patterns[k][r.category_id]=(patterns[k][r.category_id]||0)+Number(r.count)}
   return patterns;
 }
 

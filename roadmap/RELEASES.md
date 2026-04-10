@@ -11,6 +11,14 @@
 
 ### v2.1 — Apr 4, 2026
 
+#### v2.1.4
+<sub>Deployed TBD</sub>
+
+##### Features
+- **FEA-88: Import Merchant Patterns RPC** — Replaced `fetchMerchantPatterns()` paginated loop (12K+ rows, ~13 round-trips) with a single `get_merchant_patterns` RPC call. Server aggregates `description + category_id` counts, returns top 200 patterns with count ≥ 3. Client normalizes via existing `normalizeMerchant()`. Import startup is now one fast RPC instead of a multi-second paginated fetch. (~500 impl tokens / ~$0.01 session)
+
+---
+
 #### v2.1.3
 <sub>Deployed 2026-04-09</sub>
 
