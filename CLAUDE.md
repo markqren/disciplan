@@ -19,25 +19,30 @@ Single-page app: `index.html` (shell/CSS/routing/auth ~250 lines) + `js/*.js` mo
 ### File Map
 
 ```
-js/config.js        — Supabase client, auth, sb(), sbRPC(), cache helpers
-js/constants.js     — Categories, colors, payment types, bank profiles, budget targets
-js/helpers.js       — Formatters (fmtF, fmtD, etc.), date utils, parseCSV, h() DOM helper
-js/state.js         — Shared state object, ensureTagExists()
-js/ai-categorize.js — Claude API categorization, merchant patterns
-js/import-engine.js — CSV row transform, duplicate detection, AI result application
-js/payslip-parser.js— Pinterest payslip PDF parsing via pdf.js
-js/linking.js       — Transaction linking, reimbursement auto-scan, Rakuten cashback linking
-js/entry.js         — Entry tab (new transaction form, import section shells)
-js/import-review.js — CSV/email/payslip review tables, edit modals, commit functions
-js/income-stmt.js   — Income Statement tab, IS drilldown modal
-js/balance-sheet.js — Balance Sheet tab, snapshot form
-js/portfolio.js     — Portfolio tab (accounts, symbols, lots drill-down)
-js/tags.js          — Tags tab, tag detail modal
-js/ledger.js        — Ledger tab, edit modal (with reimburse + cashback), batch modals
-js/cashback.js      — Cashback & Rewards tab
-js/cross-year.js    — Cross-year IS summary (All years view)
-js/export.js        — Export tab (TSV, JSON backup)
+File                  Lines  ~Tokens  Notes
+----                  -----  -------  -----
+js/ledger.js           1195   ~4,800  ⚠ LARGE — Ledger tab, edit modal (with reimburse + cashback), batch modals
+js/import-review.js     968   ~3,900  ⚠ LARGE — CSV/email/payslip review tables, edit modals, commit functions
+js/portfolio.js         921   ~3,700  ⚠ LARGE — Portfolio tab (accounts, symbols, lots drill-down)
+js/income-stmt.js       550   ~2,200  ⚠ LARGE — Income Statement tab, IS drilldown modal
+index.html              366   ~1,500  HTML shell, CSS, TABS/routing/auth/init
+js/entry.js             344   ~1,400  Entry tab (new transaction form, import section shells)
+js/payslip-parser.js    279   ~1,100  Pinterest payslip PDF parsing via pdf.js
+js/linking.js           262   ~1,000  Transaction linking, reimbursement auto-scan, Rakuten cashback linking
+js/tags.js              248   ~1,000  Tags tab, tag detail modal
+js/cashback.js          231     ~925  Cashback & Rewards tab
+js/helpers.js           190     ~760  Formatters (fmtF, fmtD, etc.), date utils, parseCSV, h() DOM helper
+js/ai-categorize.js     188     ~750  Claude API categorization, merchant patterns
+js/balance-sheet.js     177     ~710  Balance Sheet tab, snapshot form
+js/import-engine.js     122     ~490  CSV row transform, duplicate detection, AI result application
+js/cross-year.js        116     ~465  Cross-year IS summary (All years view)
+js/config.js             63     ~250  Supabase client, auth, sb(), sbRPC(), cache helpers
+js/constants.js          56     ~225  Categories, colors, payment types, bank profiles, budget targets
+js/export.js             55     ~220  Export tab (TSV, JSON backup)
+js/state.js              54     ~215  Shared state object, ensureTagExists()
 ```
+
+> ⚠ Files marked LARGE (>500 lines): confirm before reading if task may not require the full file.
 
 ### File Structure
 ```

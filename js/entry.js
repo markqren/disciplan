@@ -216,7 +216,7 @@ function renderEntry(el){
   emailCard.append(emailHdr);
 
   const emailBody=h("div",{class:emailOpen?"":"hidden",style:{marginTop:"16px"}});
-  let inboundAddr="5ec68b0a35fa4f3784a22d2cdc5579cf@inbound.postmarkapp.com";
+  let inboundAddr="8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com";
   const setupBar=h("div",{style:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"8px",padding:"12px 14px",marginBottom:"14px"}});
   const addrSpan=h("span",{style:{fontFamily:"var(--mono)",fontSize:"11px",background:"rgba(255,255,255,0.06)",padding:"2px 8px",borderRadius:"4px",userSelect:"all"}},inboundAddr);
   const copyBtn=h("button",{class:"pg-btn",style:{marginLeft:"8px",fontSize:"10px"},onClick:()=>{navigator.clipboard.writeText(inboundAddr);copyBtn.textContent="Copied!";setTimeout(()=>copyBtn.textContent="Copy",1500)}},"Copy");
