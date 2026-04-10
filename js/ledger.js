@@ -929,7 +929,7 @@ async function renderLedger(el){
     if(f.tag)q+=`&tag=eq.${encodeURIComponent(f.tag)}`;
     if(f.dfrom)q+=`&date=gte.${f.dfrom}`;
     if(f.dto)q+=`&date=lte.${f.dto}`;
-    if(f.q){const eq=encodeURIComponent(f.q);let orParts=`description.ilike.*${eq}*,tag.ilike.*${eq}*,payment_type.ilike.*${eq}*`;const num=parseFloat(f.q);if(!isNaN(num)&&String(num)===f.q.trim())orParts+=`,amount_usd.eq.${num}`;q+=`&or=(${orParts})`}
+    if(f.q){const eq=encodeURIComponent(f.q);let orParts=`description.ilike.*${eq}*,tag.ilike.*${eq}*,payment_type.ilike.*${eq}*,credit.ilike.*${eq}*`;const num=parseFloat(f.q);if(!isNaN(num)&&String(num)===f.q.trim())orParts+=`,amount_usd.eq.${num}`;q+=`&or=(${orParts})`}
     const txns=await sb(q);
     // Backfill missing linked group members from other pages
     const pageGroupIds=[...new Set(txns.filter(t=>t.transaction_group_id).map(t=>t.transaction_group_id))];
