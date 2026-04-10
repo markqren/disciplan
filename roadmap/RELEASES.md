@@ -12,7 +12,7 @@
 ### v2.1 — Apr 4, 2026
 
 #### v2.1.3
-<sub>Deployed TBD</sub>
+<sub>Deployed 2026-04-09</sub>
 
 ##### Features
 - **FEA-11 feedback loop end-to-end** — Reply-to-rate working: `In-Reply-To` header now correctly parsed (strips `@smtp.postmarkapp.com` domain suffix that Postmark appends to Message-IDs). Ratings and comments land in `insight_log`, and substantive comments are distilled into `insight_context` principles via Claude Haiku. First live feedback recorded: `income_breakdown` 7/10 — "Some of the insights could go deeper (i.e. what is the Y|Y rate, CAGR etc)". (~2,000 impl tokens / ~$0.03 session)
