@@ -182,8 +182,8 @@ function renderEntry(el){
 
       // AI categorization
       impStatus.textContent="AI categorizing...";
-      const[patterns,samples,subs]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions(),fetchSubscriptions()]);
-      const aiResults=await aiCategorize(candidates,patterns,samples,!!profile.isCheckingAccount,profile.name,subs);
+      const[patterns,samples,subs,rules]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions(),fetchSubscriptions(),fetchAIRules()]);
+      const aiResults=await aiCategorize(candidates,patterns,samples,!!profile.isCheckingAccount,profile.name,subs,rules);
       applyAIResults(candidates,aiResults,subs);
 
       // Duplicate detection

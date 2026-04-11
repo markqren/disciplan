@@ -11,6 +11,14 @@
 
 ### v2.1 — Apr 4, 2026
 
+#### v2.1.5
+<sub>Deployed 2026-04-10</sub>
+
+##### Features
+- **FEA-94: AI Dev Portal** — New dev-only tab accessible at `#ai` (linked from footer). Five sections: (1) **Decision Log** — side-by-side table of AI suggestions vs committed values for CSV imports (`ai_original` jsonb column on `transactions`) and email imports (`final_category_id`, `was_edited` on `pending_imports`), color-coded for category changes (red/green) and description edits (yellow). (2) **Performance Dashboard** — category accuracy %, description acceptance rate, confidence calibration (high/medium/low vs actual accuracy), accuracy breakdown by email source. (3) **Feedback Interface** — freeform notes, one-click "Create Rule" from recent overrides, feedback log from new `ai_feedback` table. (4) **Rules Engine** — CRUD UI for persistent `ai_rules` table; active rules are injected as highest-priority prompt section into `aiCategorize()` on every import. (5) **Synthesis Agent** — "Analyze Feedback" button calls `claude-opus-4-6` with all feedback, overrides, and group label corrections; returns 3–8 structured rule suggestions; user accepts → `ai_rules`; runs logged to `ai_synthesis_runs` table. Covers all three AI features: CSV categorization, email import pipeline, and group label generation. (~8,000 impl tokens / ~$3.10 session)
+
+---
+
 #### v2.1.4
 <sub>Deployed 2026-04-11</sub>
 

@@ -10,6 +10,14 @@
 
 ### v2.1 — Apr 4, 2026
 
+#### v2.1.5
+<sub>Deployed 2026-04-10</sub>
+
+##### Features
+- **FEA-94: AI Dev Portal** — New dev-only tab accessible at `#ai` (linked from footer). Five sections: (1) **Decision Log** — side-by-side table of AI suggestions vs committed values for CSV imports (`ai_original` jsonb column on `transactions`) and email imports (`final_category_id`, `was_edited` on `pending_imports`), color-coded for category changes (red/green) and description edits (yellow). (2) **Performance Dashboard** — category accuracy %, description acceptance rate, confidence calibration (high/medium/low vs actual accuracy), accuracy breakdown by email source. (3) **Feedback Interface** — freeform notes, one-click "Create Rule" from recent overrides, feedback log from new `ai_feedback` table. (4) **Rules Engine** — CRUD UI for persistent `ai_rules` table; active rules are injected as highest-priority prompt section into `aiCategorize()` on every import. (5) **Synthesis Agent** — "Analyze Feedback" button calls `claude-opus-4-6` with all feedback, overrides, and group label corrections; returns 3–8 structured rule suggestions; user accepts → `ai_rules`; runs logged to `ai_synthesis_runs` table. Covers all three AI features: CSV categorization, email import pipeline, and group label generation. (~8,000 impl tokens / ~$3.10 session)
+
+---
+
 #### v2.1.4
 <sub>Deployed 2026-04-11</sub>
 
@@ -319,12 +327,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (141 items)</summary>
+<summary><strong>✅ Completed</strong> (142 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-94 | **AI Dev Portal** — Dev-only `#ai` tab (linked from footer) with Decision Log, Performance Dashboard, Feedback Interface, Rules Engine, and Synthesis Agent (`claude-opus-4-6`). Captures `ai_original` on transactions and feedback columns on email imports. Active `ai_rules` injected into every import prompt. | Feature → Done | Apr 10 |
 | FEA-93 | **CAD/non-USD FX Rate Auto-Fill** — Selecting a non-USD currency in the Entry form auto-populates the FX Rate field with the live rate from `DFX`. Editable override. Hint updated to "Live rate · edit to override". | Feature → Done | Apr 11 |
 | BUG-29 | **Import rows button visually faded when enabled** — Paste-import modal button had `rgba(42,157,143,0.25)` background that never updated on enable. `showPreview` now brightens to `0.7` on success, resets to `0.25` on no-rows. | Bug → Done | Apr 11 |
 | FEA-91 | **Full-Text Transaction Search** — Added `credit.ilike.*q*` to Ledger search OR filter. Searching by credit sub-account (e.g. "Vanguard", "Chase Savings") now works alongside description, tag, and payment_type. | Feature → Done | Apr 10 |

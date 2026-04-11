@@ -317,7 +317,8 @@ async function commitImport(candidates){
     amount_usd:Math.round(c.amount_usd*100)/100,
     payment_type:c.payment_type,tag:(c.tag||"").toLowerCase().trim(),
     daily_cost:c.daily_cost,service_days:c.service_days,credit:c.credit||"",
-    import_batch:batchId,bank_description:c._rawDescription||null,bank_category:c._bankCategory||null
+    import_batch:batchId,bank_description:c._rawDescription||null,bank_category:c._bankCategory||null,
+    ai_original:c._aiOriginal||null
   }));
   // Generate Side B rows for CC payments and track pairs for linking
   const ccPairs=valid.filter(c=>c._isCCPayment&&c._ccPaymentPair);
@@ -903,7 +904,8 @@ async function commitEmailImports(candidates){
   const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
   const now=new Date().toISOString();
   for(const c of valid){
-    await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"committed",committed_at:now})});
+    const wasEdited=!!(c.category_id!==c.ai_category||c.description!==c.ai_description);
+    await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"committed",committed_at:now,final_category_id:c.category_id,final_description:c.description,was_edited:wasEdited})});
   }
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;

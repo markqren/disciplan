@@ -134,7 +134,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.1.4</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.1.5</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
   </div>
@@ -161,6 +161,7 @@ select.inp{cursor:pointer;appearance:auto}
 <script src="js/cashback.js"></script>
 <script src="js/cross-year.js"></script>
 <script src="js/export.js"></script>
+<script src="js/ai-portal.js"></script>
 <script>
 
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
@@ -201,6 +202,7 @@ async function renderContent(){
     else if(state.tab==="ledger")await renderLedger(el);
     else if(state.tab==="cashback")await renderCashback(el);
     else if(state.tab==="export")await renderExport(el);
+    else if(state.tab==="ai")await renderAIPortal(el);
   }catch(e){
     const tabLabel=TABS.find(t=>t[0]===state.tab)?.[1]||state.tab;
     el.innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);text-align:center;padding:48px 24px"><h3 style="color:var(--r);margin-bottom:8px">Failed to load ${tabLabel}</h3><p style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:20px;font-family:var(--mono)">${e.message||String(e)}</p><button class="pg-btn" onclick="renderContent()" style="padding:8px 20px">Retry</button></div>`;
@@ -229,6 +231,7 @@ async function init(){
   const validTabs=TABS.map(t=>t[0]);
   const hash=location.hash.slice(1);
   if(hash==="income-all"){state.tab="income";state.year="all"}
+  else if(hash==="ai"){state.tab="ai"}
   else if(validTabs.includes(hash)){state.tab=hash}
   if(!location.hash)history.replaceState(null,null,"#"+state.tab);
 
@@ -360,7 +363,7 @@ if('serviceWorker' in navigator){
 checkAuthAndInit();
 </script>
 
-<div class="foot">the disciplan · accrual-based personal finance · connected to supabase</div>
+<div class="foot">the disciplan · accrual-based personal finance · connected to supabase · <a href="#ai" style="color:rgba(255,255,255,0.25);text-decoration:none" onmouseover="this.style.color='rgba(255,255,255,0.5)'" onmouseout="this.style.color='rgba(255,255,255,0.25)'">ai portal</a></div>
 
 </body>
 </html>

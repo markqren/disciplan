@@ -7,7 +7,7 @@ const PRECACHE_URLS=[
   '/js/ai-categorize.js','/js/import-engine.js','/js/payslip-parser.js','/js/linking.js',
   '/js/income-stmt.js','/js/portfolio.js','/js/ledger.js','/js/entry.js',
   '/js/import-review.js','/js/balance-sheet.js','/js/tags.js','/js/cashback.js',
-  '/js/cross-year.js','/js/export.js',
+  '/js/cross-year.js','/js/export.js','/js/ai-portal.js',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',

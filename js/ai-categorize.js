@@ -32,6 +32,11 @@ async function aiGroupLabels(groups){
   }catch(e){console.warn("AI group labels failed:",e);return result}
 }
 
+async function fetchAIRules(){
+  try{const rows=await sb("ai_rules?is_active=eq.true&order=created_at.asc");return rows||[]}
+  catch(e){console.warn("fetchAIRules failed:",e);return[]}
+}
+
 async function fetchMerchantPatterns(){
   const rows=await sbRPC("get_merchant_patterns");
   const patterns={};
@@ -49,7 +54,7 @@ async function fetchSubscriptions(){
   catch(e){console.warn("Subscription detection failed:",e);return[]}
 }
 
-async function aiCategorize(candidates,merchantPatterns,sampleDescriptions,isCheckingAccount,profileName,detectedSubs){
+async function aiCategorize(candidates,merchantPatterns,sampleDescriptions,isCheckingAccount,profileName,detectedSubs,aiRules){
   const apiKey=getApiKey();
   if(!apiKey)return null;
   const items=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
@@ -113,7 +118,9 @@ When a candidate matches a detected subscription merchant:
 2. Append month/year: "Merchant Name (Mar 2026)"
 3. Set conf: "high" since this is a known recurring charge
 `:""}
-TRANSACTIONS TO CATEGORIZE AND CLEAN:
+${aiRules&&aiRules.length?`USER-DEFINED RULES (these override all other signals — highest priority):
+${aiRules.map(r=>r.rule_text).join("\n")}
+`:""}TRANSACTIONS TO CATEGORIZE AND CLEAN:
 ${JSON.stringify(items)}
 
 For each transaction, return a JSON array of objects:

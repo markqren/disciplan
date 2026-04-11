@@ -9,6 +9,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-94 | **AI Dev Portal** — Dev-only `#ai` tab (linked from footer) with Decision Log, Performance Dashboard, Feedback Interface, Rules Engine, and Synthesis Agent (`claude-opus-4-6`). Captures `ai_original` on transactions and feedback columns on email imports. Active `ai_rules` injected into every import prompt. | Feature → Done | Apr 10 |
 | FEA-93 | **CAD/non-USD FX Rate Auto-Fill** — Selecting a non-USD currency in the Entry form auto-populates the FX Rate field with the live rate from `DFX`. Editable override. Hint updated to "Live rate · edit to override". | Feature → Done | Apr 11 |
 | BUG-29 | **Import rows button visually faded when enabled** — Paste-import modal button had `rgba(42,157,143,0.25)` background that never updated on enable. `showPreview` now brightens to `0.7` on success, resets to `0.25` on no-rows. | Bug → Done | Apr 11 |
 | FEA-91 | **Full-Text Transaction Search** — Added `credit.ilike.*q*` to Ledger search OR filter. Searching by credit sub-account (e.g. "Vanguard", "Chase Savings") now works alongside description, tag, and payment_type. | Feature → Done | Apr 10 |
