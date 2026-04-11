@@ -16,7 +16,13 @@ function renderEntry(el){
   CATS_LIST.forEach(c=>{const o=h("option",{value:c.id},c.l);if(c.id==="groceries")o.selected=true;catSel.append(o)});
 
   const amtInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"0.00",onInput:e=>{f.amt=e.target.value;updatePreview()}});
-  const curSel=h("select",{class:"inp",onChange:e=>{f.cur=e.target.value;fxRow.style.display=f.cur!=="USD"?"grid":"none";updatePreview()}});
+  const curSel=h("select",{class:"inp",onChange:e=>{
+    f.cur=e.target.value;
+    fxRow.style.display=f.cur!=="USD"?"grid":"none";
+    if(f.cur!=="USD"){const lr=DFX[f.cur]||1;fxInp.value=lr;f.fx=String(lr);}
+    else{fxInp.value="";f.fx="";}
+    updatePreview();
+  }});
   CURS.forEach(c=>curSel.append(h("option",{value:c},c)));
 
   const ssInp=h("input",{class:"inp",type:"date",value:f.ss,onInput:e=>{f.ss=e.target.value;if(!f.seManual){f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se}updatePreview()}});
@@ -29,7 +35,7 @@ function renderEntry(el){
   const fxInp=h("input",{class:"inp",type:"number",step:"0.0001",onInput:e=>{f.fx=e.target.value;updatePreview()}});
   const fxRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
   fxRow.append(field("FX Rate",fxInp));
-  fxRow.append(h("div",{style:{display:"flex",alignItems:"flex-end",paddingBottom:"4px"}},h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)"}},"Leave blank for default rate.")));
+  fxRow.append(h("div",{style:{display:"flex",alignItems:"flex-end",paddingBottom:"4px"}},h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)"}},"Live rate · edit to override")));
 
   const creditSel=buildCreditSelect("");
   const creditRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});

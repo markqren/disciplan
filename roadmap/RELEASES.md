@@ -12,12 +12,16 @@
 ### v2.1 — Apr 4, 2026
 
 #### v2.1.4
-<sub>Deployed TBD</sub>
+<sub>Deployed 2026-04-11</sub>
 
 ##### Features
+- **FEA-93: CAD/non-USD FX rate auto-fill** — Selecting a non-USD currency in the Entry form now auto-populates the FX Rate field with the live rate from `DFX` (fetched from Frankfurter API at startup). Rate is editable. Hint updated to "Live rate · edit to override". Previously the field was blank, making it unclear what rate would be applied. (~500 impl tokens / ~$0.01 session)
 - **FEA-88: Import Merchant Patterns RPC** — Replaced `fetchMerchantPatterns()` paginated loop (12K+ rows, ~13 round-trips) with a single `get_merchant_patterns` RPC call. Server aggregates `description + category_id` counts, returns top 200 patterns with count ≥ 3. Client normalizes via existing `normalizeMerchant()`. Import startup is now one fast RPC instead of a multi-second paginated fetch. (~500 impl tokens / ~$0.01 session)
 - **FEA-91: Ledger search includes credit sub-accounts** — Added `credit.ilike.*q*` to the Ledger search OR filter alongside description, tag, and payment_type. Searching e.g. "Vanguard" or "Chase Savings" now matches transactions by their credit sub-account. (~100 impl tokens / ~$0.00 session)
 - **FEA-92: Data Integrity Health Check** — New "Data Health" section in Export tab with an on-demand "Run Health Check" button. Runs 4 server-side checks via `run_data_health_check` RPC: (1) orphaned `transaction_group_id` groups with only 1 member, (2) `daily_cost × service_days` diverging from `amount_usd` by > $0.02, (3) tag values in transactions missing from the `tags` table, (4) potential duplicate transactions (same date + description + amount + payment_type). Results show ✓ Clean or ⚠ N issues with expandable detail rows. Duplicates check notes payslip rows may appear intentionally. (~1,500 impl tokens / ~$0.02 session)
+
+##### Bug Fixes
+- **BUG-29: Import rows button visually faded when enabled** — The paste-import modal's "Import N rows" button used `background: rgba(42,157,143,0.25)` and never updated it on enable, so the button looked dim/disabled even after a successful parse. `showPreview` now sets the background to `rgba(42,157,143,0.7)` on success and resets to `0.25` on no-rows. (~500 impl tokens / ~$0.00 session)
 
 ---
 

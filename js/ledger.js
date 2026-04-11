@@ -712,7 +712,7 @@ function openPasteModal(onDone){
   function showPreview(){
     previewArea.innerHTML="";
     parsed=parseTSV(ta.value);
-    if(!parsed.length){previewArea.append(h("div",{style:{color:"rgba(255,255,255,0.4)",fontSize:"12px"}},"No valid rows found."));importBtn.disabled=true;return}
+    if(!parsed.length){previewArea.append(h("div",{style:{color:"rgba(255,255,255,0.4)",fontSize:"12px"}},"No valid rows found."));importBtn.disabled=true;importBtn.style.background="rgba(42,157,143,0.25)";return}
     previewArea.append(h("div",{style:{fontSize:"12px",marginBottom:"8px"}},`${parsed.length} row${parsed.length>1?"s":""} parsed`));
     const wrap=h("div",{style:{maxHeight:"240px",overflow:"auto"}});
     const tbl=h("table",{class:"tbl",style:{fontSize:"11px"}});
@@ -727,6 +727,7 @@ function openPasteModal(onDone){
     wrap.append(tbl);
     previewArea.append(wrap);
     importBtn.disabled=false;
+    importBtn.style.background="rgba(42,157,143,0.7)";
     importBtn.textContent=`Import ${parsed.length} row${parsed.length>1?"s":""}`;
   }
 

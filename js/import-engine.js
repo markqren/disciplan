@@ -77,7 +77,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
     if(c._status==="skipped")continue;
     if(c._isCCPayment)continue;
     const ai=byIdx[i];
-    if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc}
+    if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc;c._aiOriginal={cat:ai.cat,conf:ai.conf,desc:ai.desc}}
     else{if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);if(!c.ai_confidence)c.ai_confidence="low"}
     c.service_start=getDefStart(c.category_id,c.date)||c.date;
     c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
