@@ -363,7 +363,7 @@ if('serviceWorker' in navigator){
 checkAuthAndInit();
 </script>
 
-<div class="foot">the disciplan · accrual-based personal finance · connected to supabase · <a href="#ai" style="color:rgba(255,255,255,0.25);text-decoration:none" onmouseover="this.style.color='rgba(255,255,255,0.5)'" onmouseout="this.style.color='rgba(255,255,255,0.25)'">ai portal</a></div>
+<div class="foot">the disciplan · accrual-based personal finance · connected to supabase · <a href="#ai" style="color:rgba(255,255,255,0.25);text-decoration:none" onmouseover="this.style.color='rgba(255,255,255,0.5)'" onmouseout="this.style.color='rgba(255,255,255,0.25)'" onclick="state.tab='ai';history.replaceState(null,null,'#ai');renderTabs();renderContent();return false">ai portal</a></div>
 
 </body>
 </html>
