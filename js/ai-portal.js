@@ -1,5 +1,5 @@
 // ai-portal.js — AI Dev Portal (#ai tab)
-// Sections: Decision Log | Performance | Feedback | Rules | Synthesis Agent
+// Sections: Newsletter | Decision Log | Performance | Feedback | Rules | Synthesis Agent
 
 async function renderAIPortal(el){
   el.innerHTML=`<div style="max-width:900px;margin:0 auto;padding:16px">
@@ -12,8 +12,9 @@ async function renderAIPortal(el){
   </div>`;
 
   const sections=[
-    ["log","Decision Log"],
-    ["perf","Performance"],
+    ["newsletter","Newsletter"],
+    ["log","Import Decisions"],
+    ["perf","Import Performance"],
     ["feedback","Feedback"],
     ["rules","Rules Engine"],
     ["synth","Synthesis Agent"]
@@ -37,7 +38,8 @@ async function renderAIPortal(el){
     const c=document.getElementById("ap-content");
     c.innerHTML=`<div style="text-align:center;padding:32px;color:rgba(255,255,255,0.3);font-size:13px">Loading...</div>`;
     try{
-      if(activeSection==="log")await renderDecisionLog(c);
+      if(activeSection==="newsletter")await renderNewsletter(c);
+      else if(activeSection==="log")await renderDecisionLog(c);
       else if(activeSection==="perf")await renderPerformance(c);
       else if(activeSection==="feedback")await renderFeedback(c);
       else if(activeSection==="rules")await renderRules(c);
@@ -49,6 +51,129 @@ async function renderAIPortal(el){
 
   renderSectionTabs();
   await renderSection();
+}
+
+// ── SECTION 0: Newsletter ────────────────────────────────────────────────────
+
+async function renderNewsletter(el){
+  const[logs,ctxRows]=await Promise.all([
+    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cost_usd,feedback_rating,feedback_comment,feedback_received_at"),
+    sb("insight_context?select=id,content,updated_at")
+  ]);
+  const ctx=ctxRows[0]||null;
+  el.innerHTML="";
+
+  // KPI row
+  const rated=logs.filter(l=>l.feedback_rating!=null);
+  const avgRating=rated.length?Math.round(rated.reduce((s,l)=>s+parseFloat(l.feedback_rating),0)/rated.length*10)/10:null;
+  const totalCost=logs.reduce((s,l)=>s+parseFloat(l.cost_usd||0),0);
+  const ratedPct=logs.length?Math.round(rated.length/logs.length*100):0;
+  const statRow=h("div",{style:{display:"flex",gap:"12px",marginBottom:"20px",flexWrap:"wrap"}});
+  statRow.append(
+    statCard(null,"emails sent",logs.length,"var(--b)"),
+    statCard(null,"rated",ratedPct+"% ("+rated.length+"/"+logs.length+")",ratedPct>=50?"var(--g)":"var(--y)"),
+    statCard(null,"avg rating",avgRating!=null?avgRating+"/10":"n/a",avgRating>=7?"var(--g)":avgRating>=5?"var(--y)":"var(--r)"),
+    statCard(null,"total AI cost","$"+totalCost.toFixed(3),"rgba(255,255,255,0.5)")
+  );
+  el.append(statRow);
+
+  // Rating by insight type
+  const byType={};
+  for(const l of logs){
+    const t=l.insight_type||"unknown";
+    if(!byType[t])byType[t]={ratings:[],count:0};
+    byType[t].count++;
+    if(l.feedback_rating!=null)byType[t].ratings.push(parseFloat(l.feedback_rating));
+  }
+  const typeRows=Object.entries(byType).sort((a,b)=>{
+    const ar=a[1].ratings.length?a[1].ratings.reduce((s,v)=>s+v,0)/a[1].ratings.length:0;
+    const br=b[1].ratings.length?b[1].ratings.reduce((s,v)=>s+v,0)/b[1].ratings.length:0;
+    return br-ar;
+  }).map(([type,s])=>{
+    const avg=s.ratings.length?Math.round(s.ratings.reduce((a,b)=>a+b,0)/s.ratings.length*10)/10:null;
+    const ratingEl=avg!=null?h("span",{style:{color:avg>=7?"var(--g)":avg>=5?"var(--y)":"var(--r)",fontWeight:"600"}},avg+"/10"):h("span",{style:{color:"rgba(255,255,255,0.25)"}},"—");
+    return[type.replace(/_/g," "),s.count,s.ratings.length,ratingEl];
+  });
+  const typeH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px"}},"Performance by Insight Type");
+  el.append(typeH,apDecisionTable([{label:"Type",width:"180px"},{label:"Sent",width:"60px"},{label:"Rated",width:"60px"},{label:"Avg Rating",width:"100px"}],typeRows));
+
+  // Email log
+  const logH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px",marginTop:"20px"}},"Email Log");
+  el.append(logH);
+  const logTbl=h("div",{class:"cd",style:{padding:"0",overflow:"hidden",marginBottom:"20px"}});
+  for(const l of logs){
+    const hasComment=!!(l.feedback_comment&&l.feedback_comment.trim());
+    const row=h("div",{style:{padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+    const top=h("div",{style:{display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap"}});
+    const ratingColor=l.feedback_rating>=7?"var(--g)":l.feedback_rating>=5?"var(--y)":"var(--r)";
+    top.append(
+      h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",width:"85px",flexShrink:"0"}},l.created_at.slice(0,10)),
+      h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",width:"130px",flexShrink:"0"}},l.insight_type.replace(/_/g," ")),
+      h("span",{style:{flex:"1",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},title:l.subject},l.subject||""),
+      l.feedback_rating!=null
+        ?h("span",{style:{fontSize:"13px",fontWeight:"600",color:ratingColor,flexShrink:"0"}},parseFloat(l.feedback_rating)+"/10")
+        :h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.2)",flexShrink:"0"}},"unrated"),
+      h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",flexShrink:"0"}},"$"+parseFloat(l.cost_usd||0).toFixed(4))
+    );
+    row.append(top);
+    if(hasComment){
+      const comment=h("div",{style:{marginTop:"6px",paddingLeft:"225px",fontSize:"12px",color:"rgba(255,255,255,0.55)",fontStyle:"italic",lineHeight:"1.5"}},"\u201C"+l.feedback_comment.trim()+"\u201D");
+      row.append(comment);
+    }
+    logTbl.append(row);
+  }
+  el.append(logTbl);
+
+  // Learned Principles (insight_context)
+  const princH=h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}});
+  princH.append(
+    h("div",{style:{fontWeight:"600",fontSize:"13px"}},"Learned Principles"),
+    ctx?h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)"}},"last updated "+ctx.updated_at.slice(0,10)):h("span",{})
+  );
+  el.append(princH);
+
+  const princCard=h("div",{class:"cd",style:{padding:"16px",marginBottom:"12px"}});
+  if(ctx){
+    // Parse and display principles cleanly (strip --- separators)
+    const lines=ctx.content.split("\n").filter(l=>l.trim()&&l.trim()!=="---");
+    const princText=h("div",{style:{fontSize:"12px",lineHeight:"1.8",fontFamily:"var(--mono)",whiteSpace:"pre-wrap",color:"rgba(255,255,255,0.75)"}},lines.join("\n"));
+    princCard.append(princText);
+  }else{
+    princCard.innerHTML=`<div style="color:rgba(255,255,255,0.3);font-size:13px">No learned principles yet. Principles are built from your email reply feedback.</div>`;
+  }
+
+  // Edit principles button
+  const editBtn=h("button",{class:"pg-btn",style:{fontSize:"11px",padding:"4px 12px",marginTop:"10px"},onClick:()=>openPrinciplesEditor(el,ctx)},"Edit Principles");
+  princCard.append(editBtn);
+  el.append(princCard);
+}
+
+async function openPrinciplesEditor(el,ctx){
+  const existing=ctx?.content||"";
+  const bg=h("div",{style:{position:"fixed",inset:"0",background:"rgba(0,0,0,0.7)",zIndex:"1000",display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}});
+  const modal=h("div",{class:"cd",style:{width:"100%",maxWidth:"700px",maxHeight:"80vh",display:"flex",flexDirection:"column",padding:"20px",gap:"12px"}});
+  modal.innerHTML=`<div style="font-weight:600;font-size:14px">Edit Learned Principles</div>
+    <div style="font-size:11px;color:rgba(255,255,255,0.4)">These are injected into every newsletter generation prompt. Edit carefully — or use the Synthesis Agent to regenerate from feedback.</div>`;
+  const ta=h("textarea",{style:{flex:"1",minHeight:"400px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:"6px",color:"#fff",padding:"12px",fontSize:"12px",fontFamily:"var(--mono)",resize:"vertical",lineHeight:"1.7"}});
+  ta.value=existing;
+  const btnRow=h("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end"}});
+  const cancelBtn=h("button",{class:"pg-btn",style:{opacity:"0.5"},onClick:()=>bg.remove()},"Cancel");
+  const saveBtn=h("button",{class:"pg-btn",onClick:async()=>{
+    saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    const newContent=ta.value;
+    if(ctx){
+      await sb("insight_context?id=eq.principles",{method:"PATCH",body:JSON.stringify({content:newContent,updated_at:new Date().toISOString()})});
+    }else{
+      await sb("insight_context",{method:"POST",body:JSON.stringify({id:"principles",content:newContent})});
+    }
+    bg.remove();
+    await renderNewsletter(el);
+  }},"Save");
+  btnRow.append(cancelBtn,saveBtn);
+  modal.append(ta,btnRow);
+  bg.append(modal);
+  document.body.append(bg);
+  bg.addEventListener("click",e=>{if(e.target===bg)bg.remove()});
 }
 
 // ── SECTION 1: Decision Log ──────────────────────────────────────────────────
