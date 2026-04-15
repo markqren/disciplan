@@ -187,7 +187,7 @@ See `js/constants.js:PTS` (39 total).
 - **Test mobile** — the app must work on phone. Use `hide-m` class for optional columns.
 - **Update roadmap splits when completing items**: (1) add release note to `roadmap/RELEASES.md` under current version, (2) move item from `roadmap/ACTIVE.md` to `roadmap/COMPLETED.md`, (3) run `bash scripts/build-roadmap.sh` to regenerate `ROADMAP.md`. Never edit `ROADMAP.md` directly.
 - **Token estimate in release notes** — every release note bullet must end with `(~X,XXX tokens)` estimating the implementation cost. Estimate: files read × lines × ~4 tokens/line + overhead. Round to nearest 500.
-- **Deployment** — Netlify auto-deploys are disabled via `ignore = "exit 0"` in `netlify.toml`. Each push to `main` does NOT trigger a deploy. To deploy manually, run: `npx netlify-cli deploy --prod`. This conserves Netlify free tier credits — only deploy when Mark explicitly says "deploy" or "ship it". Continue to batch changes locally and only commit+push at session end.
+- **Deployment** — ⚠️ NEVER run `npx netlify-cli deploy --prod` unless Mark has explicitly said "deploy" or "ship it" or "deploy as vX.Y.Z" in the current conversation. Netlify free tier has a hard token budget — unauthorized deploys waste it. The correct workflow is: make changes → commit → push → STOP and wait. Do not deploy speculatively, do not deploy "to be helpful", do not deploy as part of completing a task unless explicitly instructed.
 
 ## Task Management
 
