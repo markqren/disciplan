@@ -195,7 +195,7 @@ See `js/constants.js:PTS` (39 total).
 2. **Verify Plans**: Check in with Mark before starting implementation
 3. **Track Progress**: Mark items complete as you go
 4. **Explain Changes**: High-level summary at each step
-5. **Capture Lessons**: Update memory (`/memory/`) after corrections
+5. **Capture Lessons**: When Mark asks you to remember something, write it to `CLAUDE.md` (committed to the repo) so all agents see it — not just session memory files.
 
 ## Core Principles
 
