@@ -1,12 +1,25 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 11, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Apr 15, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 
 
 ## 🚀 Releases
+
+### v2.2 — Apr 15, 2026
+
+#### v2.2.0
+<sub>Deployed 2026-04-15</sub>
+
+##### Features
+- **FEA-95: Payslip — Connectivity Reimbursement Fund** — Pinterest payslips now parse the "Connectivity Reimbursement Fund" benefit line from both PDF and XLSX formats (searched in Employer Paid Benefits and Post Tax Deductions sections, with fullText fallback for PDF). Generates a `utilities` / Chase Chequing credit transaction (negative amount) in the same payslip group. After commit, auto-links to the AT&T internet charge in the same calendar month: looks for `description ilike *AT&T*` with `service_start = first of month` and `service_end = last of month`; links via `linkToGroup` if found, leaves unlinked otherwise. (~2,500 impl tokens / ~$0.20 session)
+
+##### Bug Fixes
+- **BUG-31: Daily insight cron pg_net timeout** — The `daily-insight` pg_cron job had `timeout_milliseconds:=1000` (1 second). On April 15, slow DNS resolution (172ms) + SSL handshake (115ms) + function response (711ms) totalled 1001ms, causing pg_net to cut the connection mid-execution before Postmark was reached. Updated cron job to `timeout_milliseconds:=5000` via `cron.alter_job`. (<1K impl tokens / ~$0.05 session)
+
+---
 
 ### v2.1 — Apr 4, 2026
 
@@ -95,6 +108,9 @@
 
 ---
 
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v2.0)</summary>
+
 ### v2.0 — Apr 3, 2026
 
 #### v2.0.1
@@ -116,9 +132,6 @@
 - **INF-02: Modular JS Split** — Split monolithic `index.html` (~3,800 lines) into 18 focused JS modules under `js/`. `index.html` reduced to ~250 lines (HTML shell, CSS, routing, auth). No build step — plain `<script>` tags with global scope. Each tab is its own file (30–500 lines), enabling ~90% token reduction in Claude Code per focused task. Added `CLAUDE.md` developer context and `.claudeignore`. Service Worker updated to v2.0.0 to cache all 18 modules.
 
 ---
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v1.2)</summary>
 
 ### v1.2 — Apr 1, 2026
 
@@ -331,12 +344,14 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (142 items)</summary>
+<summary><strong>✅ Completed</strong> (144 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-95 | **Payslip — Connectivity Reimbursement Fund** — Pinterest payslips now parse the "Connectivity Reimbursement Fund" benefit line (PDF + XLSX, Employer Paid Benefits and Post Tax Deductions sections). Generates a `utilities` / Chase Chequing credit in the same payslip group. Auto-links to the AT&T internet charge in the same calendar month on commit. | Feature → Done | Apr 15 |
+| BUG-31 | **Daily insight cron pg_net timeout** — `daily-insight` pg_cron job had `timeout_milliseconds:=1000`. Slow DNS (172ms) + SSL (115ms) + function response (711ms) = 1001ms caused pg_net to cut the connection before Postmark was reached. Updated to `timeout_milliseconds:=5000` via `cron.alter_job`. | Bug → Done | Apr 15 |
 | FEA-94 | **AI Dev Portal** — Dev-only `#ai` tab (linked from footer) with Decision Log, Performance Dashboard, Feedback Interface, Rules Engine, and Synthesis Agent (`claude-opus-4-6`). Captures `ai_original` on transactions and feedback columns on email imports. Active `ai_rules` injected into every import prompt. | Feature → Done | Apr 10 |
 | FEA-93 | **CAD/non-USD FX Rate Auto-Fill** — Selecting a non-USD currency in the Entry form auto-populates the FX Rate field with the live rate from `DFX`. Editable override. Hint updated to "Live rate · edit to override". | Feature → Done | Apr 11 |
 | BUG-29 | **Import rows button visually faded when enabled** — Paste-import modal button had `rgba(42,157,143,0.25)` background that never updated on enable. `showPreview` now brightens to `0.7` on success, resets to `0.25` on no-rows. | Bug → Done | Apr 11 |

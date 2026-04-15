@@ -9,6 +9,19 @@
 
 ## 🚀 Releases
 
+### v2.2 — Apr 15, 2026
+
+#### v2.2.0
+<sub>Deployed 2026-04-15</sub>
+
+##### Features
+- **FEA-95: Payslip — Connectivity Reimbursement Fund** — Pinterest payslips now parse the "Connectivity Reimbursement Fund" benefit line from both PDF and XLSX formats (searched in Employer Paid Benefits and Post Tax Deductions sections, with fullText fallback for PDF). Generates a `utilities` / Chase Chequing credit transaction (negative amount) in the same payslip group. After commit, auto-links to the AT&T internet charge in the same calendar month: looks for `description ilike *AT&T*` with `service_start = first of month` and `service_end = last of month`; links via `linkToGroup` if found, leaves unlinked otherwise. (~2,500 impl tokens / ~$0.20 session)
+
+##### Bug Fixes
+- **BUG-31: Daily insight cron pg_net timeout** — The `daily-insight` pg_cron job had `timeout_milliseconds:=1000` (1 second). On April 15, slow DNS resolution (172ms) + SSL handshake (115ms) + function response (711ms) totalled 1001ms, causing pg_net to cut the connection mid-execution before Postmark was reached. Updated cron job to `timeout_milliseconds:=5000` via `cron.alter_job`. (<1K impl tokens / ~$0.05 session)
+
+---
+
 ### v2.1 — Apr 4, 2026
 
 #### v2.1.5
@@ -96,6 +109,9 @@
 
 ---
 
+<details>
+<summary><strong>Previous Releases</strong> (v0.5.0–v2.0)</summary>
+
 ### v2.0 — Apr 3, 2026
 
 #### v2.0.1
@@ -117,9 +133,6 @@
 - **INF-02: Modular JS Split** — Split monolithic `index.html` (~3,800 lines) into 18 focused JS modules under `js/`. `index.html` reduced to ~250 lines (HTML shell, CSS, routing, auth). No build step — plain `<script>` tags with global scope. Each tab is its own file (30–500 lines), enabling ~90% token reduction in Claude Code per focused task. Added `CLAUDE.md` developer context and `.claudeignore`. Service Worker updated to v2.0.0 to cache all 18 modules.
 
 ---
-
-<details>
-<summary><strong>Previous Releases</strong> (v0.5.0–v1.2)</summary>
 
 ### v1.2 — Apr 1, 2026
 

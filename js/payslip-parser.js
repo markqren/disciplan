@@ -112,9 +112,20 @@ function parsePayslipPage(lines,fullText){
   // RSU detection: RSU Gain followed by a date
   const isRSU=!!fullText.match(/RSU Gain\s+\d{2}\/\d{2}\/\d{4}/);
 
+  // Connectivity Reimbursement Fund: try lines first, then fullText fallback
+  let connectivityReimb=0;
+  for(const ln of lines){
+    const m=ln.match(/Connect\w*\s+Reimbursement(?:\s+Fund)?\s+([\d,.]+)/i);
+    if(m){connectivityReimb=pn(m[1]);break;}
+  }
+  if(!connectivityReimb){
+    const m=fullText.match(/Connect\w*\s+Reimbursement(?:\s+Fund)?[^\d]*([\d,.]+)/i);
+    if(m)connectivityReimb=pn(m[1]);
+  }
+
   return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay,netPay,
     earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,isRSU,isSkip:false};
+    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false};
 }
 
 async function parsePayslipPDF(file){
@@ -141,7 +152,7 @@ async function parsePayslipXLSX(file){
 
   let ppb=null,ppe=null,cd=null;
   let grossPay=0,earningsTotal=0,preTaxTotal=0,employeeTaxTotal=0,postTaxTotal=0,netPay=0;
-  let gtl=0,preTax401k=0,deferral401k=0,fsa=0,match401k=0,rsuOffset=0;
+  let gtl=0,preTax401k=0,deferral401k=0,fsa=0,match401k=0,rsuOffset=0,connectivityReimb=0;
   let isRSU=false;
   const SECTIONS=["Earnings","Employee Taxes","Pre Tax Deductions","Post Tax Deductions","Employer Paid Benefits"];
   let section=null;
@@ -192,6 +203,10 @@ async function parsePayslipXLSX(file){
       }
       if(section==="Employer Paid Benefits"){
         if(/(?:Company|Employer)\s+Match/i.test(desc)&&amt!=null)match401k=amt;
+        if(/Connect\w*\s+Reimbursement/i.test(desc)&&amt!=null)connectivityReimb=amt;
+      }
+      if(section==="Post Tax Deductions"){
+        if(/Connect\w*\s+Reimbursement/i.test(desc)&&amt!=null)connectivityReimb=amt;
       }
     }
   }
@@ -199,7 +214,7 @@ async function parsePayslipXLSX(file){
   if(!ppb||!ppe||!cd||grossPay===0)return[];
   return[{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,
     grossPay,netPay,earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,isRSU,isSkip:false}];
+    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false}];
 }
 
 function generatePayslipTransactions(pages,enteredDate){
@@ -271,6 +286,12 @@ function generatePayslipTransactions(pages,enteredDate){
           description:"401K Match",category_id:"income",
           amount_usd:-p.match401k,payment_type:"Vanguard",
           _group:grp,_source:"401k_match",_pageData:p});
+      }
+      if(p.connectivityReimb>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Connectivity Reimbursement Fund",category_id:"utilities",
+          amount_usd:-p.connectivityReimb,payment_type:"Chase Chequing",
+          _group:grp,_source:"connectivity_reimb",_pageData:p});
       }
     }
   }

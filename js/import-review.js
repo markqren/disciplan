@@ -960,6 +960,27 @@ async function commitPayslipImport(candidates){
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   valid.forEach(c=>c._status="committed");
+  // Auto-link Connectivity Reimbursement Fund to AT&T internet charge in same calendar month
+  const connIndices=valid.map((c,i)=>c._source==="connectivity_reimb"?i:-1).filter(i=>i>=0);
+  for(const ci of connIndices){
+    if(!created[ci])continue;
+    const ss=valid[ci].service_start;
+    const monthStart=ss.slice(0,8)+"01";
+    const lastDay=new Date(new Date(monthStart+"T12:00:00Z").setMonth(new Date(monthStart+"T12:00:00Z").getMonth()+1,0));
+    const monthEnd=lastDay.toISOString().slice(0,10);
+    try{
+      const [attMatches,connFresh]=await Promise.all([
+        sb(`transactions?description=ilike.*AT%26T*&service_start=eq.${monthStart}&service_end=eq.${monthEnd}&category_id=eq.utilities&amount_usd=gt.0&select=id,transaction_group_id,description&limit=1`),
+        sb(`transactions?id=eq.${created[ci].id}&select=id,transaction_group_id&limit=1`)
+      ]);
+      if(attMatches.length&&connFresh.length){
+        await linkToGroup(connFresh[0],attMatches[0]);
+        console.log(`Connectivity: auto-linked to "${attMatches[0].description}" (${monthStart}–${monthEnd})`);
+      }else{
+        console.log(`Connectivity: no AT&T charge found for ${monthStart}–${monthEnd}, left unlinked`);
+      }
+    }catch(e){console.error("Connectivity auto-link:",e)}
+  }
   return{
     count:valid.length,
     imported:valid,
