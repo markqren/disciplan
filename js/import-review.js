@@ -990,6 +990,10 @@ async function commitPayslipImport(candidates){
         sb(`transactions?id=eq.${created[ci].id}&select=id,transaction_group_id&limit=1`)
       ]);
       if(attMatches.length&&connFresh.length){
+        // Stretch service period to match AT&T's full month, then link
+        const connAmt=valid[ci].amount_usd;
+        const sd=Math.round((new Date(monthEnd+"T12:00:00Z")-new Date(monthStart+"T12:00:00Z"))/864e5)+1;
+        await sb(`transactions?id=eq.${connFresh[0].id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({service_start:monthStart,service_end:monthEnd,service_days:sd,daily_cost:Math.round(connAmt/sd*10000)/10000})});
         await linkToGroup(connFresh[0],attMatches[0]);
         console.log(`Connectivity: auto-linked to "${attMatches[0].description}" (${monthStart}–${monthEnd})`);
       }else{

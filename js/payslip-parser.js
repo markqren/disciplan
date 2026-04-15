@@ -288,10 +288,11 @@ function generatePayslipTransactions(pages,enteredDate){
           _group:grp,_source:"401k_match",_pageData:p});
       }
       if(p.connectivityReimb>0){
+        // Standalone group — will be linked to AT&T bill alone (not merged into payroll group)
         txns.push({date:enteredDate,service_start:ss,service_end:se,
           description:"Connectivity Reimbursement Fund",category_id:"utilities",
           amount_usd:-p.connectivityReimb,payment_type:"Chase Chequing",
-          _group:grp,_source:"connectivity_reimb",_pageData:p});
+          _group:`Connectivity Reimb – ${ss.slice(0,7)}`,_source:"connectivity_reimb",_pageData:p});
       }
     }
   }
