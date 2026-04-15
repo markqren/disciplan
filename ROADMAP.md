@@ -10,6 +10,14 @@
 
 ### v2.2 — Apr 15, 2026
 
+#### v2.2.2
+<sub>Deployed 2026-04-15 (3)</sub>
+
+##### Bug Fixes
+- **BUG-33: GTL incorrectly inflated medical deduction** — GTL (Group Term Life) is IRS imputed income excluded from the Current row's Gross Pay and not reflected in Post Tax Deductions; it has zero cash impact. Removed GTL parsing from both PDF and XLSX parsers and dropped `+gtl` from the medical formula, which was overstating the Medical Insurance Benefits transaction by ~$16.96/payslip. (~300 impl tokens / ~$0.01 session)
+
+---
+
 #### v2.2.1
 <sub>Deployed 2026-04-15 (2)</sub>
 

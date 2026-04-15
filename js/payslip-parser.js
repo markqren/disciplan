@@ -32,7 +32,7 @@ function parsePayslipPage(lines,fullText){
   if(grossPay===0&&empTaxSum===0&&preTaxSum===0&&postTaxSum===0){
     return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay:0,netPay:0,
       earningsTotal:0,employeeTaxTotal:0,preTaxTotal:0,postTaxTotal:0,
-      gtl:0,preTax401k:0,deferral401k:0,fsa:0,match401k:0,rsuOffset:0,isRSU:false,isSkip:true};
+      preTax401k:0,deferral401k:0,fsa:0,match401k:0,rsuOffset:0,isRSU:false,isSkip:true};
   }
 
   // Section totals: try combined-line format first (old layout), then "Total:" lines (new layout)
@@ -66,9 +66,7 @@ function parsePayslipPage(lines,fullText){
   if(!preTaxTotal&&preTaxSum)preTaxTotal=preTaxSum;
   if(!postTaxTotal&&postTaxSum)postTaxTotal=postTaxSum;
 
-  // GTL current amount (earnings item with date range)
-  const gm=fullText.match(/GTL\s+\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4}\s+[\d,.]+\s+[\d,.]+\s+([\d,.]+)/);
-  const gtl=gm?pn(gm[1]):0;
+  // GTL is IRS imputed income — excluded from gross pay and not a real deduction; ignore it
 
   // Use lines (Y-sorted, X-sorted within row) for deduction/benefit parsing — more reliable
   // than fullText which joins raw PDF items and can interleave multi-column values.
@@ -125,7 +123,7 @@ function parsePayslipPage(lines,fullText){
 
   return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay,netPay,
     earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false};
+    preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false};
 }
 
 async function parsePayslipPDF(file){
@@ -152,7 +150,7 @@ async function parsePayslipXLSX(file){
 
   let ppb=null,ppe=null,cd=null;
   let grossPay=0,earningsTotal=0,preTaxTotal=0,employeeTaxTotal=0,postTaxTotal=0,netPay=0;
-  let gtl=0,preTax401k=0,deferral401k=0,fsa=0,match401k=0,rsuOffset=0,connectivityReimb=0;
+  let preTax401k=0,deferral401k=0,fsa=0,match401k=0,rsuOffset=0,connectivityReimb=0;
   let isRSU=false;
   const SECTIONS=["Earnings","Employee Taxes","Pre Tax Deductions","Post Tax Deductions","Employer Paid Benefits"];
   let section=null;
@@ -192,7 +190,6 @@ async function parsePayslipXLSX(file){
       if(section==="Earnings"){
         // Earnings section: Amount is at c[4] (col layout: Description|Dates|Hours|Rate|Amount|...)
         const earningsAmt=c[4]!=null?parseFloat(c[4])||0:null;
-        if(/\bGTL\b/i.test(desc)&&earningsAmt!=null)gtl=earningsAmt;
         if(/RSU\s*Gain/i.test(desc)&&!/Offset/i.test(desc)&&earningsAmt!=null)isRSU=true;
         if(/Connect\w*\s+Reimbursement/i.test(desc)&&earningsAmt!=null)connectivityReimb=earningsAmt;
       }
@@ -239,8 +236,8 @@ function generatePayslipTransactions(pages,enteredDate){
         _group:`${fmtD(ss)} \u2013 ${fmtD(se)} (RSU Vesting)`,_source:"rsu_tax",_pageData:p});
     }else{
       const postTaxNon401k=Math.round((p.postTaxTotal-p.deferral401k-p.rsuOffset)*100)/100;
-      // Medical = preTaxTotal minus pre-tax 401K and FSA (which are separate line items) + non-401K post-tax deductions + GTL
-      const medical=Math.round((p.preTaxTotal-p.preTax401k-p.fsa+postTaxNon401k+p.gtl)*100)/100;
+      // Medical = preTaxTotal minus pre-tax 401K and FSA (which are separate line items) + non-401K post-tax deductions
+      const medical=Math.round((p.preTaxTotal-p.preTax401k-p.fsa+postTaxNon401k)*100)/100;
       const grp=`${fmtD(ss)} \u2013 ${fmtD(se)} (Regular)`;
       txns.push({date:enteredDate,service_start:ss,service_end:se,
         description:"Pinterest Income",category_id:"income",
