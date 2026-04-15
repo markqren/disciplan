@@ -381,6 +381,22 @@ async function commitImport(candidates){
     const insA=inserted[i],insB=inserted[linkedIdx];
     if(insA?.id&&insB?.id)await linkToGroup(insA,insB);
   }
+  // Auto-link AT&T internet charges to existing Connectivity Reimbursement Fund in same month
+  const attCharges=valid.filter(c=>c.description&&/AT&T/i.test(c.description)&&c.category_id==="utilities"&&c.amount_usd>0&&c.service_start&&c.service_end);
+  for(const att of attCharges){
+    const attIdx=valid.indexOf(att);
+    if(!inserted[attIdx])continue;
+    try{
+      const [attFresh,reimbMatches]=await Promise.all([
+        sb(`transactions?id=eq.${inserted[attIdx].id}&select=id,transaction_group_id&limit=1`),
+        sb(`transactions?description=ilike.*Connectivity+Reimbursement*&service_start=gte.${att.service_start.slice(0,8)}01&service_start=lte.${att.service_end}&amount_usd=lt.0&select=id,transaction_group_id,description&limit=1`)
+      ]);
+      if(attFresh.length&&reimbMatches.length){
+        await linkToGroup(attFresh[0],reimbMatches[0]);
+        console.log(`AT&T: auto-linked to "${reimbMatches[0].description}" (${att.service_start}–${att.service_end})`);
+      }
+    }catch(e){console.error("AT&T connectivity auto-link:",e)}
+  }
   valid.forEach(c=>c._status="committed");
   return{
     count:valid.length,
