@@ -214,7 +214,7 @@ async function parsePayslipXLSX(file){
   if(!ppb||!ppe||!cd||grossPay===0)return[];
   return[{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,
     grossPay,netPay,earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    gtl,preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false}];
+    preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false}];
 }
 
 function generatePayslipTransactions(pages,enteredDate){
