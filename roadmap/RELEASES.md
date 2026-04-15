@@ -11,6 +11,14 @@
 
 ### v2.2 — Apr 15, 2026
 
+#### v2.2.1
+<sub>Deployed 2026-04-15 (2)</sub>
+
+##### Bug Fixes
+- **BUG-32: XLSX payslip — Connectivity Reimbursement and GTL not parsed** — Earnings rows in XLSX have 7 columns (`Description | Dates | Hours | Rate | Amount | YTD Hours | YTD Amount`); parser was reading `c[1]` (date string) instead of `c[4]` (amount), causing both Connectivity Reimbursement and GTL to parse as 0. Fixed by reading `earningsAmt = c[4]` for all Earnings section items. (~500 impl tokens / ~$0.02 session)
+
+---
+
 #### v2.2.0
 <sub>Deployed 2026-04-15</sub>
 

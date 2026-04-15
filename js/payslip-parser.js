@@ -190,8 +190,11 @@ async function parsePayslipXLSX(file){
     if(section&&c[0]){
       const desc=c[0],amt=c[1]!=null?parseFloat(c[1])||0:null;
       if(section==="Earnings"){
-        if(/\bGTL\b/i.test(desc)&&amt!=null)gtl=amt;
-        if(/RSU\s*Gain/i.test(desc)&&!/Offset/i.test(desc)&&amt!=null)isRSU=true;
+        // Earnings section: Amount is at c[4] (col layout: Description|Dates|Hours|Rate|Amount|...)
+        const earningsAmt=c[4]!=null?parseFloat(c[4])||0:null;
+        if(/\bGTL\b/i.test(desc)&&earningsAmt!=null)gtl=earningsAmt;
+        if(/RSU\s*Gain/i.test(desc)&&!/Offset/i.test(desc)&&earningsAmt!=null)isRSU=true;
+        if(/Connect\w*\s+Reimbursement/i.test(desc)&&earningsAmt!=null)connectivityReimb=earningsAmt;
       }
       if(section==="Pre Tax Deductions"){
         if(/^401\(k\)$/i.test(desc)&&amt!=null)preTax401k=amt;
