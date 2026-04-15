@@ -178,6 +178,14 @@ const EMAIL_PARSERS: Record<string, EmailParser> = {
     },
     parse: parseRakutenEmail,
   },
+  splitwise: {
+    detect: (from, _subject, text, html) => {
+      const f = from.toLowerCase();
+      const body = (text + html).toLowerCase();
+      return f.includes("splitwise.com") || body.includes("splitwise.com");
+    },
+    parse: parseSplitwiseEmail,
+  },
   // Future parsers: chase_alert, subscription, etc.
 };
 
@@ -422,6 +430,47 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
 }
 
 // ═══════════════════════════════════════════════════════
+// Splitwise Parser
+// ═══════════════════════════════════════════════════════
+
+function parseSplitwiseEmail({ subject: rawSubject, text, html, forwardingNote }: { from: string; subject: string; text: string; html: string; forwardingNote: ForwardingNote | null }): ParsedEmail {
+  const subject = rawSubject.replace(/^Fwd:\s*/i, "").trim();
+  const body = text || html || "";
+
+  // Amount: look for "you owe $X" / "your share: $X" / standalone "$X" in subject then body
+  let amount = 0;
+  for (const pat of [
+    /you owe[^$]*\$([\d,.]+)/i,
+    /your share[^$]*\$([\d,.]+)/i,
+    /\$([\d,.]+)/,
+  ]) {
+    const m = (subject + " " + body).match(pat);
+    if (m) { amount = parseFloat(m[1].replace(/,/g, "")); break; }
+  }
+
+  // Description: prefer expense name in quotes, fall back to raw subject
+  let description = subject;
+  const quoted = subject.match(/['"\u201c\u201d](.+?)['"\u201c\u201d]/);
+  if (quoted) description = quoted[1];
+
+  let paymentType = "Splitwise";
+  if (forwardingNote?.paymentType) paymentType = forwardingNote.paymentType;
+
+  return {
+    date: null,
+    description,
+    amount_usd: amount,
+    category_id: null,
+    payment_type: paymentType,
+    service_start: null,
+    service_end: null,
+    service_days: 1,
+    daily_cost: amount,
+    parsed_data: { raw_subject: subject },
+  };
+}
+
+// ═══════════════════════════════════════════════════════
 // History Lookup
 // ═══════════════════════════════════════════════════════
 
@@ -648,6 +697,7 @@ ${historyBlock}
 
 CONTEXT FOR ${source.toUpperCase()}:
 ${source === "rakuten" ? `This is a Rakuten cashback notification. The amount ($${Math.abs(parsed.amount_usd || 0)}) is cashback EARNED, not the purchase price. The payment_type should always be "Rakuten". The category should be "income" for cashback earned. The description format should be "Rakuten - {StoreName}" matching historical patterns like "Rakuten - Chewy", "Rakuten - Sur la Table", "Rakuten - Vrbo".` : ""}
+${source === "splitwise" ? `This is a Splitwise expense notification. payment_type is always "Splitwise". Extract a clean description from the expense name (strip group names, "added an expense", etc.). Category based on the expense type.` : ""}
 
 DESCRIPTION STYLE GUIDE:
 - Rakuten cashback: "Rakuten - {StoreName}" (e.g., "Rakuten - Vrbo", "Rakuten - Chewy")
