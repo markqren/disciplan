@@ -1,0 +1,29 @@
+name: Weekly Backup
+
+on:
+  schedule:
+    - cron: '0 10 * * 1'  # Every Monday at 10am UTC (2am/3am PT)
+  workflow_dispatch:        # Manual trigger from Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run backup
+        env:
+          BACKUP_DIR: ${{ github.workspace }}/backup_output
+        run: node scripts/backup.js
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: disciplan_backup_${{ github.run_id }}
+          path: backup_output/
+          retention-days: 90
