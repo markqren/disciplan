@@ -9,6 +9,9 @@ ROADMAP.md
 # Large reference files rarely needed
 references/
 
+# Local backups — gitignored, not relevant to coding tasks
+data/backups/
+
 # Archive
 *.old.md
 archive/
