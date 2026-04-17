@@ -23,7 +23,29 @@ jobs:
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
+        id: artifact
         with:
           name: disciplan_backup_${{ github.run_id }}
           path: backup_output/
           retention-days: 90
+
+      - name: Send email notification
+        env:
+          POSTMARK_SERVER_TOKEN: ${{ secrets.POSTMARK_SERVER_TOKEN }}
+          POSTMARK_FROM_EMAIL: ${{ secrets.POSTMARK_FROM_EMAIL }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          SUMMARY=$(cat backup_output/*.csv | wc -l | xargs echo "Total rows (approx):")
+          ARTIFACT_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          DATE=$(date -u +"%Y-%m-%d")
+          curl -s -X POST "https://api.postmarkapp.com/email" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -H "X-Postmark-Server-Token: ${POSTMARK_SERVER_TOKEN}" \
+            -d "{
+              \"From\": \"${POSTMARK_FROM_EMAIL}\",
+              \"To\": \"mark.q.ren2020@gmail.com\",
+              \"Subject\": \"Disciplan backup complete — ${DATE}\",
+              \"TextBody\": \"Your weekly Disciplan backup completed successfully.\n\nDate: ${DATE}\nArtifact retained for 90 days.\n\nDownload: ${ARTIFACT_URL}\n\"
+            }"
