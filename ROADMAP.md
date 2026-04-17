@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Apr 15, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Apr 17, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,14 @@
 ## 🚀 Releases
 
 ### v2.2 — Apr 15, 2026
+
+#### v2.2.3
+<sub>Shipped 2026-04-17</sub>
+
+##### Infrastructure
+- **FEA-96: Automated Supabase Backup** — GitHub Actions workflow runs every Monday at 10am UTC, fetches all 6 tables (`transactions`, `categories`, `tags`, `accounts`, `balance_snapshots`, `portfolio_snapshots`) via paginated REST calls, uploads as a 90-day artifact (~2.5 MB/run). Sends Postmark success email to Gmail. Monthly cron job on Mac downloads the latest artifact to `data/backups/disciplan_backup_YYYYMMDD/` with a native Mac notification on completion. (~2,000 impl tokens / ~$0.08 session)
+
+---
 
 #### v2.2.2
 <sub>Deployed 2026-04-15 (3)</sub>
@@ -360,12 +368,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (144 items)</summary>
+<summary><strong>✅ Completed</strong> (145 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-96 | **Automated Supabase Backup** — GitHub Actions runs weekly, backs up all 6 tables as CSVs (~2.5 MB), uploads 90-day artifact, emails Gmail via Postmark on success. Monthly Mac cron pulls artifact locally with native notification. | Infrastructure → Done | Apr 17 |
 | FEA-95 | **Payslip — Connectivity Reimbursement Fund** — Pinterest payslips now parse the "Connectivity Reimbursement Fund" benefit line (PDF + XLSX, Employer Paid Benefits and Post Tax Deductions sections). Generates a `utilities` / Chase Chequing credit in the same payslip group. Auto-links to the AT&T internet charge in the same calendar month on commit. | Feature → Done | Apr 15 |
 | BUG-31 | **Daily insight cron pg_net timeout** — `daily-insight` pg_cron job had `timeout_milliseconds:=1000`. Slow DNS (172ms) + SSL (115ms) + function response (711ms) = 1001ms caused pg_net to cut the connection before Postmark was reached. Updated to `timeout_milliseconds:=5000` via `cron.alter_job`. | Bug → Done | Apr 15 |
 | FEA-94 | **AI Dev Portal** — Dev-only `#ai` tab (linked from footer) with Decision Log, Performance Dashboard, Feedback Interface, Rules Engine, and Synthesis Agent (`claude-opus-4-6`). Captures `ai_original` on transactions and feedback columns on email imports. Active `ai_rules` injected into every import prompt. | Feature → Done | Apr 10 |

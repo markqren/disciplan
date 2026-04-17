@@ -11,6 +11,14 @@
 
 ### v2.2 — Apr 15, 2026
 
+#### v2.2.3
+<sub>Shipped 2026-04-17</sub>
+
+##### Infrastructure
+- **FEA-96: Automated Supabase Backup** — GitHub Actions workflow runs every Monday at 10am UTC, fetches all 6 tables (`transactions`, `categories`, `tags`, `accounts`, `balance_snapshots`, `portfolio_snapshots`) via paginated REST calls, uploads as a 90-day artifact (~2.5 MB/run). Sends Postmark success email to Gmail. Monthly cron job on Mac downloads the latest artifact to `data/backups/disciplan_backup_YYYYMMDD/` with a native Mac notification on completion. (~2,000 impl tokens / ~$0.08 session)
+
+---
+
 #### v2.2.2
 <sub>Deployed 2026-04-15 (3)</sub>
 

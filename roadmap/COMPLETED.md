@@ -9,6 +9,7 @@
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-96 | **Automated Supabase Backup** — GitHub Actions runs weekly, backs up all 6 tables as CSVs (~2.5 MB), uploads 90-day artifact, emails Gmail via Postmark on success. Monthly Mac cron pulls artifact locally with native notification. | Infrastructure → Done | Apr 17 |
 | FEA-95 | **Payslip — Connectivity Reimbursement Fund** — Pinterest payslips now parse the "Connectivity Reimbursement Fund" benefit line (PDF + XLSX, Employer Paid Benefits and Post Tax Deductions sections). Generates a `utilities` / Chase Chequing credit in the same payslip group. Auto-links to the AT&T internet charge in the same calendar month on commit. | Feature → Done | Apr 15 |
 | BUG-31 | **Daily insight cron pg_net timeout** — `daily-insight` pg_cron job had `timeout_milliseconds:=1000`. Slow DNS (172ms) + SSL (115ms) + function response (711ms) = 1001ms caused pg_net to cut the connection before Postmark was reached. Updated to `timeout_milliseconds:=5000` via `cron.alter_job`. | Bug → Done | Apr 15 |
 | FEA-94 | **AI Dev Portal** — Dev-only `#ai` tab (linked from footer) with Decision Log, Performance Dashboard, Feedback Interface, Rules Engine, and Synthesis Agent (`claude-opus-4-6`). Captures `ai_original` on transactions and feedback columns on email imports. Active `ai_rules` injected into every import prompt. | Feature → Done | Apr 10 |
