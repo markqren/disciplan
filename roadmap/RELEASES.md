@@ -11,6 +11,15 @@
 
 ### v2.3 — Apr 26, 2026
 
+#### v2.3.1
+<sub>Deployed 2026-04-27</sub>
+
+##### Features
+- **FEA-97: Newsletter Hybrid Insight Engine (Phase A/B)** — `daily-insight` Edge Function refactored from a single mega-prompt into a deterministic candidate pipeline (`archetypes.ts`, `selection.ts`, `types.ts`) with ε-greedy stochastic selection (`epsilon=0.15`) over scored candidates. Phase A fixes silent miscounts by reading `EXPENSE_CATS` / `PARENT_ROLLUP` dynamically from the `categories` table. Phase B reworks four archetypes: `tag_recap` (replaces `tag_burn_rate`; historical trip recaps with 1y/2y/3y anniversary boost ±10 days), `category_anomaly` smart-combo drill-down (merchant > tag > description by concentration), `category_trend` deep-dive (12 complete months only, relative-strength gate `≥0.15`, `min_r2=0.10`, excludes `financial`/`other`, multi-chart `chart_configs[]` for parent + child breakdown), `income_breakdown` YoY + 3Y CAGR pivot (requires `day_of_year ≥ 60` and `\|YoY\| ≥ 3%`). New tables: `insight_strategy`, `insight_selection_log`, `principles_pending`. New `insight_log.subject_key` column for structured dedup. Dry-run mode filters history by fixture cutoff so cooldowns evaluate correctly during historical replay; `scripts/replay-newsletter.sh` helper. 8 migrations. (~24,000 impl tokens / ~$1.20 session)
+- **FEA-98: Newsletter Admin Portal v2 + Inbound Feedback Guardrails** — `#ai/Newsletter` tab gains 6 KPI cards (sends, rated %, avg rating, total cost, parse fallbacks, dry-run replays), strategy table (priority weights, cooldowns, monthly caps, last-used reasons), pending principles approval queue (approve/reject inline), recent selection traces, and a dry-run viewer separated from real sends. `inbound-email` function now routes Haiku-distilled principles updates through `principles_pending` (operator approval), auto-rejects updates with >30% length delta or banned override prefixes (`ignore`, `disregard`, `system:`) as prompt-injection defense, and calls `apply_strategy_feedback` RPC to feed ratings into the bandit (clamped to ±0.10 weight delta, bounded `[0.1, 2.0]`). (~6,000 impl tokens / ~$0.30 session)
+
+---
+
 #### v2.3
 <sub>Deployed 2026-04-26</sub>
 
