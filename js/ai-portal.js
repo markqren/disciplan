@@ -56,72 +56,146 @@ async function renderAIPortal(el){
 // ── SECTION 0: Newsletter ────────────────────────────────────────────────────
 
 async function renderNewsletter(el){
-  const[logs,ctxRows]=await Promise.all([
-    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cost_usd,feedback_rating,feedback_comment,feedback_received_at"),
-    sb("insight_context?select=id,content,updated_at")
+  const[allLogs,ctxRows,strategies,pending,selections]=await Promise.all([
+    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cost_usd,feedback_rating,feedback_comment,feedback_received_at,parse_fallback,dry_run"),
+    sb("insight_context?select=id,content,updated_at"),
+    sb("insight_strategy?order=priority_weight.desc&select=*"),
+    sb("principles_pending?status=eq.pending&order=created_at.desc&select=*"),
+    sb("insight_selection_log?order=insight_log_id.desc&limit=10&select=*")
   ]);
   const ctx=ctxRows[0]||null;
+  // Real sends drive KPIs; dry-runs are shown separately and never affect averages.
+  const logs=allLogs.filter(l=>!l.dry_run);
+  const dryLogs=allLogs.filter(l=>l.dry_run);
   el.innerHTML="";
 
-  // KPI row
+  // KPI row (real sends only)
   const rated=logs.filter(l=>l.feedback_rating!=null);
   const avgRating=rated.length?Math.round(rated.reduce((s,l)=>s+parseFloat(l.feedback_rating),0)/rated.length*10)/10:null;
-  const totalCost=logs.reduce((s,l)=>s+parseFloat(l.cost_usd||0),0);
+  const totalCost=allLogs.reduce((s,l)=>s+parseFloat(l.cost_usd||0),0);
   const ratedPct=logs.length?Math.round(rated.length/logs.length*100):0;
+  const fallbackCount=logs.filter(l=>l.parse_fallback).length;
   const statRow=h("div",{style:{display:"flex",gap:"12px",marginBottom:"20px",flexWrap:"wrap"}});
   statRow.append(
     statCard(null,"emails sent",logs.length,"var(--b)"),
     statCard(null,"rated",ratedPct+"% ("+rated.length+"/"+logs.length+")",ratedPct>=50?"var(--g)":"var(--y)"),
     statCard(null,"avg rating",avgRating!=null?avgRating+"/10":"n/a",avgRating>=7?"var(--g)":avgRating>=5?"var(--y)":"var(--r)"),
-    statCard(null,"total AI cost","$"+totalCost.toFixed(3),"rgba(255,255,255,0.5)")
+    statCard(null,"total AI cost","$"+totalCost.toFixed(3),"rgba(255,255,255,0.5)"),
+    statCard(null,"parse fallbacks",fallbackCount,fallbackCount===0?"var(--g)":"var(--r)"),
+    statCard(null,"dry-run replays",dryLogs.length,dryLogs.length>0?"var(--y)":"rgba(255,255,255,0.3)")
   );
   el.append(statRow);
 
-  // Rating by insight type
-  const byType={};
-  for(const l of logs){
-    const t=l.insight_type||"unknown";
-    if(!byType[t])byType[t]={ratings:[],count:0};
-    byType[t].count++;
-    if(l.feedback_rating!=null)byType[t].ratings.push(parseFloat(l.feedback_rating));
+  // Pending principles approval queue (Phase 0 guardrail)
+  if(pending.length){
+    const pendH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px",color:"var(--y)"}},"Pending Principles Updates ("+pending.length+")");
+    el.append(pendH);
+    for(const p of pending){
+      const card=h("div",{class:"cd",style:{padding:"14px",marginBottom:"10px",borderColor:"rgba(242,204,143,0.3)"}});
+      const meta=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",marginBottom:"8px"}},
+        (p.created_at||"").slice(0,16).replace("T"," ")+" UTC · triggered by log #"+(p.triggering_log_id||"?")+" · "+(p.proposed_length_delta>=0?"+":"")+p.proposed_length_delta+" chars");
+      const diffWrap=h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"10px",marginBottom:"10px"}});
+      diffWrap.append(
+        h("div",{style:{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"6px",padding:"10px",fontSize:"11px",fontFamily:"var(--mono)",lineHeight:"1.6",whiteSpace:"pre-wrap",maxHeight:"260px",overflow:"auto",color:"rgba(255,255,255,0.45)"}},(p.current_principles||"").slice(0,3000)),
+        h("div",{style:{background:"rgba(129,178,154,0.05)",border:"1px solid rgba(129,178,154,0.2)",borderRadius:"6px",padding:"10px",fontSize:"11px",fontFamily:"var(--mono)",lineHeight:"1.6",whiteSpace:"pre-wrap",maxHeight:"260px",overflow:"auto",color:"rgba(255,255,255,0.85)"}},(p.proposed_principles||"").slice(0,3000))
+      );
+      card.append(meta,diffWrap);
+      const btnRow=h("div",{style:{display:"flex",gap:"8px"}});
+      const approveBtn=h("button",{class:"pg-btn",onClick:async()=>{
+        approveBtn.disabled=true;approveBtn.textContent="Approving...";
+        await sb("insight_context?id=eq.principles",{method:"PATCH",body:JSON.stringify({content:p.proposed_principles,updated_at:new Date().toISOString()})});
+        await sb(`principles_pending?id=eq.${p.id}`,{method:"PATCH",body:JSON.stringify({status:"approved",reviewed_at:new Date().toISOString(),reviewed_by:"mark"})});
+        await renderNewsletter(el);
+      }},"Approve");
+      const rejectBtn=h("button",{class:"pg-btn",style:{opacity:"0.6"},onClick:async()=>{
+        rejectBtn.disabled=true;
+        await sb(`principles_pending?id=eq.${p.id}`,{method:"PATCH",body:JSON.stringify({status:"rejected",reviewed_at:new Date().toISOString(),reviewed_by:"mark"})});
+        await renderNewsletter(el);
+      }},"Reject");
+      btnRow.append(approveBtn,rejectBtn);
+      card.append(btnRow);
+      el.append(card);
+    }
   }
-  const typeRows=Object.entries(byType).sort((a,b)=>{
-    const ar=a[1].ratings.length?a[1].ratings.reduce((s,v)=>s+v,0)/a[1].ratings.length:0;
-    const br=b[1].ratings.length?b[1].ratings.reduce((s,v)=>s+v,0)/b[1].ratings.length:0;
-    return br-ar;
-  }).map(([type,s])=>{
-    const avg=s.ratings.length?Math.round(s.ratings.reduce((a,b)=>a+b,0)/s.ratings.length*10)/10:null;
-    const ratingEl=avg!=null?h("span",{style:{color:avg>=7?"var(--g)":avg>=5?"var(--y)":"var(--r)",fontWeight:"600"}},avg+"/10"):h("span",{style:{color:"rgba(255,255,255,0.25)"}},"—");
-    return[type.replace(/_/g," "),s.count,s.ratings.length,ratingEl];
-  });
-  const typeH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px"}},"Performance by Insight Type");
-  el.append(typeH,apDecisionTable([{label:"Type",width:"180px"},{label:"Sent",width:"60px"},{label:"Rated",width:"60px"},{label:"Avg Rating",width:"100px"}],typeRows));
 
-  // Email log
-  const logH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px",marginTop:"20px"}},"Email Log");
+  // Strategy operator table
+  const stratH=h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}});
+  stratH.append(
+    h("div",{style:{fontWeight:"600",fontSize:"13px"}},"Strategy & Performance by Insight Type"),
+    h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)"}},"editable: enabled, cooldown, monthly cap")
+  );
+  el.append(stratH);
+  el.append(renderStrategyTable(strategies,el));
+
+  // Recent selection traces (last 5)
+  if(selections.length){
+    const selH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px",marginTop:"20px"}},"Recent Selection Traces");
+    el.append(selH);
+    const logById=new Map(logs.map(l=>[l.id,l]));
+    const selCard=h("div",{class:"cd",style:{padding:"0",overflow:"hidden",marginBottom:"20px"}});
+    for(const s of selections.slice(0,5)){
+      const log=logById.get(s.insight_log_id);
+      const dateStr=log?(log.created_at||"").slice(0,10):"#"+s.insight_log_id;
+      const row=h("div",{style:{padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
+      const top=h("div",{style:{display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap",fontSize:"12px"}});
+      top.append(
+        h("span",{style:{color:"rgba(255,255,255,0.4)",width:"85px"}},dateStr),
+        h("span",{style:{fontWeight:"600",color:"var(--g)"}},s.selected_type),
+        s.exploration_taken?h("span",{style:{fontSize:"10px",padding:"1px 6px",background:"rgba(242,204,143,0.15)",color:"var(--y)",borderRadius:"3px"}},"exploration"):h("span",{}),
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)"}},s.policy)
+      );
+      row.append(top);
+      const cands=Array.isArray(s.candidates)?s.candidates:[];
+      const eligible=cands.filter(c=>c.passed_gate);
+      const skipped=cands.filter(c=>!c.passed_gate);
+      const candDetail=h("div",{style:{marginTop:"6px",paddingLeft:"95px",fontSize:"11px",color:"rgba(255,255,255,0.5)",lineHeight:"1.6",fontFamily:"var(--mono)"}});
+      const eligList=eligible.map(c=>`${c.insight_type}=${c.score?.toFixed(2)}${c.selected?"*":""}`).join("  ");
+      candDetail.append(h("div",{},"eligible: "+(eligList||"(none)")));
+      if(skipped.length){
+        const skipList=skipped.slice(0,4).map(c=>`${c.insight_type}: ${(c.reason||"").slice(0,40)}`).join(" · ");
+        candDetail.append(h("div",{style:{color:"rgba(255,255,255,0.3)"}},"skipped: "+skipList+(skipped.length>4?` (+${skipped.length-4} more)`:"")));
+      }
+      row.append(candDetail);
+      selCard.append(row);
+    }
+    el.append(selCard);
+  }
+
+  // Email log — toggle to show/hide dry-run replays.
+  let showDry=false;
+  const logH=h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px",marginTop:"20px"}});
+  const logTitle=h("div",{style:{fontWeight:"600",fontSize:"13px"}},"Email Log");
+  const dryToggle=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"2px 8px",opacity:"0.6"},onClick:()=>{showDry=!showDry;dryToggle.textContent=showDry?"hide dry-runs":"show dry-runs ("+dryLogs.length+")";renderRows()}},"show dry-runs ("+dryLogs.length+")");
+  logH.append(logTitle,dryLogs.length?dryToggle:h("span",{}));
   el.append(logH);
   const logTbl=h("div",{class:"cd",style:{padding:"0",overflow:"hidden",marginBottom:"20px"}});
-  for(const l of logs){
-    const hasComment=!!(l.feedback_comment&&l.feedback_comment.trim());
-    const row=h("div",{style:{padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)"}});
-    const top=h("div",{style:{display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap"}});
-    const ratingColor=l.feedback_rating>=7?"var(--g)":l.feedback_rating>=5?"var(--y)":"var(--r)";
-    top.append(
-      h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",width:"85px",flexShrink:"0"}},l.created_at.slice(0,10)),
-      h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",width:"130px",flexShrink:"0"}},l.insight_type.replace(/_/g," ")),
-      h("span",{style:{flex:"1",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},title:l.subject},l.subject||""),
-      l.feedback_rating!=null
-        ?h("span",{style:{fontSize:"13px",fontWeight:"600",color:ratingColor,flexShrink:"0"}},parseFloat(l.feedback_rating)+"/10")
-        :h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.2)",flexShrink:"0"}},"unrated"),
-      h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",flexShrink:"0"}},"$"+parseFloat(l.cost_usd||0).toFixed(4))
-    );
-    row.append(top);
-    if(hasComment){
-      const comment=h("div",{style:{marginTop:"6px",paddingLeft:"225px",fontSize:"12px",color:"rgba(255,255,255,0.55)",fontStyle:"italic",lineHeight:"1.5"}},"\u201C"+l.feedback_comment.trim()+"\u201D");
-      row.append(comment);
+  function renderRows(){
+    logTbl.innerHTML="";
+    const rows=showDry?allLogs:logs;
+    for(const l of rows){
+      const hasComment=!!(l.feedback_comment&&l.feedback_comment.trim());
+      const row=h("div",{style:{padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)",background:l.dry_run?"rgba(242,204,143,0.04)":""}});
+      const top=h("div",{style:{display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap"}});
+      const ratingColor=l.feedback_rating>=7?"var(--g)":l.feedback_rating>=5?"var(--y)":"var(--r)";
+      top.append(
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",width:"85px",flexShrink:"0"}},l.created_at.slice(0,10)),
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",width:"130px",flexShrink:"0"}},l.insight_type.replace(/_/g," ")),
+        h("span",{style:{flex:"1",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},title:l.subject},l.subject||""),
+        l.dry_run?h("span",{style:{fontSize:"10px",padding:"1px 6px",background:"rgba(242,204,143,0.15)",color:"var(--y)",borderRadius:"3px",flexShrink:"0",fontFamily:"var(--mono)"}},"DRY-RUN"):h("span",{}),
+        l.feedback_rating!=null
+          ?h("span",{style:{fontSize:"13px",fontWeight:"600",color:ratingColor,flexShrink:"0"}},parseFloat(l.feedback_rating)+"/10")
+          :h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.2)",flexShrink:"0"}},l.dry_run?"":"unrated"),
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",flexShrink:"0"}},"$"+parseFloat(l.cost_usd||0).toFixed(4))
+      );
+      row.append(top);
+      if(hasComment){
+        const comment=h("div",{style:{marginTop:"6px",paddingLeft:"225px",fontSize:"12px",color:"rgba(255,255,255,0.55)",fontStyle:"italic",lineHeight:"1.5"}},"\u201C"+l.feedback_comment.trim()+"\u201D");
+        row.append(comment);
+      }
+      logTbl.append(row);
     }
-    logTbl.append(row);
   }
+  renderRows();
   el.append(logTbl);
 
   // Learned Principles (insight_context)
@@ -146,6 +220,87 @@ async function renderNewsletter(el){
   const editBtn=h("button",{class:"pg-btn",style:{fontSize:"11px",padding:"4px 12px",marginTop:"10px"},onClick:()=>openPrinciplesEditor(el,ctx)},"Edit Principles");
   princCard.append(editBtn);
   el.append(princCard);
+}
+
+// Strategy operator table — read+write to insight_strategy via PostgREST.
+// Suggest-disable badge: avg < 4 with at least 3 ratings (Phase 4 — never auto-disables).
+function renderStrategyTable(strategies,parentEl){
+  const wrap=h("div",{class:"cd",style:{padding:"0",overflow:"auto",marginBottom:"16px"}});
+  const tbl=h("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:"12px",fontFamily:"var(--mono)"}});
+  const cols=[
+    {label:"On",width:"40px"},
+    {label:"Type",width:"180px"},
+    {label:"Avg",width:"60px"},
+    {label:"Sent",width:"50px"},
+    {label:"Rated",width:"50px"},
+    {label:"Cooldown",width:"90px"},
+    {label:"Mthly Cap",width:"80px"},
+    {label:"Weight",width:"60px"},
+    {label:"Last Used",width:"95px"},
+    {label:"Skip",flex:true}
+  ];
+  const thead=h("tr");
+  cols.forEach(c=>thead.append(h("th",{style:{padding:"8px 10px",textAlign:"left",color:"rgba(255,255,255,0.35)",fontWeight:"500",borderBottom:"1px solid rgba(255,255,255,0.1)",whiteSpace:"nowrap",width:c.flex?"auto":(c.width||"auto")}},c.label)));
+  tbl.append(h("thead",{},thead));
+  const tbody=h("tbody");
+
+  for(const s of strategies){
+    const avg=s.rated_count>0?Math.round(s.rating_sum/s.rated_count*10)/10:null;
+    const suggestDisable=avg!=null&&avg<4&&s.rated_count>=3;
+    const tr=h("tr",{style:{borderBottom:"1px solid rgba(255,255,255,0.04)",opacity:s.enabled?"1":"0.45"}});
+
+    const enabledTd=h("td",{style:{padding:"6px 10px"}});
+    const enabledBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"2px 8px",minWidth:"32px",opacity:s.enabled?"1":"0.4",color:s.enabled?"var(--g)":"rgba(255,255,255,0.5)"},onClick:async()=>{
+      enabledBtn.disabled=true;
+      await sb(`insight_strategy?insight_type=eq.${encodeURIComponent(s.insight_type)}`,{method:"PATCH",body:JSON.stringify({enabled:!s.enabled,updated_at:new Date().toISOString()})});
+      await renderNewsletter(parentEl);
+    }},s.enabled?"on":"off");
+    enabledTd.append(enabledBtn);
+
+    const typeTd=h("td",{style:{padding:"6px 10px"}});
+    typeTd.append(h("span",{},s.insight_type.replace(/_/g," ")));
+    if(suggestDisable){
+      typeTd.append(h("span",{style:{marginLeft:"6px",fontSize:"10px",padding:"1px 5px",background:"rgba(224,122,95,0.15)",color:"var(--r)",borderRadius:"3px",whiteSpace:"nowrap"},title:`Avg ${avg}/10 across ${s.rated_count} ratings`},"suggest disable"));
+    }
+    if(s.notes){
+      typeTd.title=s.notes;
+    }
+
+    const avgTd=h("td",{style:{padding:"6px 10px",color:avg==null?"rgba(255,255,255,0.25)":(avg>=7?"var(--g)":avg>=5?"var(--y)":"var(--r)"),fontWeight:"600"}},avg==null?"—":(avg+"/10"));
+    const sentTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.7)"}},s.sent_count||0);
+    const ratedTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.7)"}},s.rated_count||0);
+
+    const cooldownTd=h("td",{style:{padding:"4px 10px"}});
+    const cooldownInput=h("input",{type:"number",min:"0",max:"60",value:String(s.cooldown_days??0),style:{width:"60px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"4px",color:"#fff",padding:"3px 6px",fontSize:"11px",fontFamily:"var(--mono)"}});
+    cooldownInput.addEventListener("change",async()=>{
+      const v=parseInt(cooldownInput.value,10);
+      if(Number.isNaN(v)||v<0||v>60){cooldownInput.value=s.cooldown_days;return}
+      await sb(`insight_strategy?insight_type=eq.${encodeURIComponent(s.insight_type)}`,{method:"PATCH",body:JSON.stringify({cooldown_days:v,updated_at:new Date().toISOString()})});
+      s.cooldown_days=v;
+    });
+    cooldownTd.append(cooldownInput,h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)",marginLeft:"4px"}},"d"));
+
+    const monthlyTd=h("td",{style:{padding:"4px 10px"}});
+    const monthlyInput=h("input",{type:"number",min:"0",max:"30",value:String(s.monthly_max??""),placeholder:"—",style:{width:"50px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:"4px",color:"#fff",padding:"3px 6px",fontSize:"11px",fontFamily:"var(--mono)"}});
+    monthlyInput.addEventListener("change",async()=>{
+      const v=monthlyInput.value===""?null:parseInt(monthlyInput.value,10);
+      if(v!=null&&(Number.isNaN(v)||v<0||v>30)){monthlyInput.value=s.monthly_max??"";return}
+      await sb(`insight_strategy?insight_type=eq.${encodeURIComponent(s.insight_type)}`,{method:"PATCH",body:JSON.stringify({monthly_max:v,updated_at:new Date().toISOString()})});
+      s.monthly_max=v;
+    });
+    monthlyTd.append(monthlyInput);
+
+    const weightTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.7)"},title:"Set by feedback policy. Bounded to [0.10, 2.00]."},(s.priority_weight??1).toFixed(2));
+    const lastUsedTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.4)",fontSize:"11px"}},s.last_used_at?s.last_used_at.slice(0,10):"never");
+    const skipTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.35)",fontSize:"11px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"260px"},title:s.last_skip_reason||""},(s.last_skip_reason||"").slice(0,40));
+
+    tr.append(enabledTd,typeTd,avgTd,sentTd,ratedTd,cooldownTd,monthlyTd,weightTd,lastUsedTd,skipTd);
+    tbody.append(tr);
+  }
+
+  tbl.append(tbody);
+  wrap.append(tbl);
+  return wrap;
 }
 
 async function openPrinciplesEditor(el,ctx){

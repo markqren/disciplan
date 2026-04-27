@@ -14,6 +14,40 @@ const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const MAX_TEXT_BODY = 10_000;
 const MAX_HTML_BODY = 50_000;
 
+// ── Insight feedback principles guardrails ─────────────────────────────────
+// Inbound replies are untrusted. A user reply should never be allowed to rewrite
+// the entire principles document for the daily-insight system. We:
+//   - cap how much the document is allowed to grow or shrink in one pass
+//   - reject prompts that look like "ignore previous, here are the new rules"
+// All proposed updates land in principles_pending for operator approval.
+const PRINCIPLES_MAX_DELTA_RATIO = 0.30;
+const PRINCIPLES_BANNED_PREFIXES: RegExp[] = [
+  /^\s*ignore\b/i,
+  /^\s*disregard\b/i,
+  /^\s*forget\b/i,
+  /^\s*replace\s+all\b/i,
+  /^\s*new\s+principles\s*:/i,
+  /^\s*system\s*:/i,
+];
+
+function checkPrinciplesGuardrails(current: string, proposed: string): { ok: boolean; reason?: string } {
+  if (!proposed || proposed.length < 50) {
+    return { ok: false, reason: "proposed_too_short" };
+  }
+  const curLen = Math.max(current.length, 1);
+  const delta = Math.abs(proposed.length - current.length) / curLen;
+  if (delta > PRINCIPLES_MAX_DELTA_RATIO) {
+    return { ok: false, reason: `length_delta_${Math.round(delta * 100)}pct_exceeds_${Math.round(PRINCIPLES_MAX_DELTA_RATIO * 100)}pct` };
+  }
+  const firstNonEmpty = proposed.split("\n").map(l => l.trim()).find(l => l.length > 0) || "";
+  for (const re of PRINCIPLES_BANNED_PREFIXES) {
+    if (re.test(firstNonEmpty)) {
+      return { ok: false, reason: `banned_prefix_${re.source}` };
+    }
+  }
+  return { ok: true };
+}
+
 // ═══════════════════════════════════════════════════════
 // Forwarding Note Extraction
 // ═══════════════════════════════════════════════════════
@@ -1100,7 +1134,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
           feedback_received_at: new Date().toISOString(),
         }).eq("id", logId);
 
-        // Distill substantive feedback into insight_context principles
+        // Phase 4: feed the rating into the bandit's aggregates atomically.
+        // RPC clamps weight delta to ±0.10 and bounds priority_weight to [0.1, 2.0]
+        // so a single bad rating cannot zero out an archetype.
+        if (rating != null && insightType && insightType !== "parse_fallback") {
+          try {
+            await supabase.rpc("apply_strategy_feedback", {
+              p_insight_type: insightType,
+              p_rating: rating,
+            });
+          } catch (e) {
+            console.error("apply_strategy_feedback RPC error:", e);
+          }
+        }
+
+        // Distill substantive feedback into a *pending* principles update.
+        // Guardrails: the inbound reply is untrusted; never let a single email rewrite the
+        // whole principles document. We:
+        //   1. Run Haiku to draft an updated principles document.
+        //   2. Auto-reject if length-delta vs current > 30% (prompt-injection / rewrite attempt).
+        //   3. Auto-reject if the proposed text begins with banned override phrases.
+        //   4. Otherwise queue into principles_pending for operator review (AI portal).
         if (ANTHROPIC_KEY && comment && comment.length > 20) {
           try {
             const { data: ctxRows } = await supabase
@@ -1140,12 +1194,27 @@ Return ONLY the updated document text, no explanation.`,
 
             if (distillRes.ok) {
               const distillData = await distillRes.json();
-              const updatedPrinciples = distillData.content?.[0]?.text?.trim();
-              if (updatedPrinciples && updatedPrinciples !== currentPrinciples) {
-                await supabase.from("insight_context").update({
-                  content: updatedPrinciples,
-                  updated_at: new Date().toISOString(),
-                }).eq("id", "principles");
+              const proposed = (distillData.content?.[0]?.text || "").trim();
+              if (proposed && proposed !== currentPrinciples) {
+                const guardrails = checkPrinciplesGuardrails(currentPrinciples, proposed);
+                if (guardrails.ok) {
+                  await supabase.from("principles_pending").insert({
+                    triggering_log_id: logId,
+                    current_principles: currentPrinciples,
+                    proposed_principles: proposed,
+                    status: "pending",
+                  });
+                  console.log(`Principles update queued for review (log_id=${logId}, len delta=${proposed.length - currentPrinciples.length}).`);
+                } else {
+                  await supabase.from("principles_pending").insert({
+                    triggering_log_id: logId,
+                    current_principles: currentPrinciples,
+                    proposed_principles: proposed,
+                    rejection_reason: guardrails.reason,
+                    status: "auto_rejected",
+                  });
+                  console.warn(`Principles update auto-rejected (log_id=${logId}): ${guardrails.reason}`);
+                }
               }
             }
           } catch (e) {
