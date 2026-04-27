@@ -9,6 +9,16 @@
 
 ## 🚀 Releases
 
+### v2.3 — Apr 26, 2026
+
+#### v2.3
+<sub>Deployed 2026-04-26</sub>
+
+##### Bug Fixes
+- **BUG-34: CSV import fails for Chase United (PGRST102 "All object keys must match")** — CC payment Side B rows were missing `ai_original` field, causing PostgREST to reject the bulk insert when both regular rows (with `ai_original`) and CC Side B rows (without) were batched together. Added `ai_original:null` to the Side B row object. (~500 impl tokens / ~$0.01 session)
+
+---
+
 ### v2.2 — Apr 15, 2026
 
 #### v2.2.3

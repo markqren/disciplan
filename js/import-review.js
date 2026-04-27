@@ -340,7 +340,7 @@ async function commitImport(candidates){
           amount_usd:Math.round(p.amount*100)/100,
           payment_type:p.payment_type,tag:(c.tag||"").toLowerCase().trim(),
           daily_cost:p.amount,service_days:1,credit:"",
-          import_batch:batchId,bank_description:null,bank_category:null
+          import_batch:batchId,bank_description:null,bank_category:null,ai_original:null
         });
       }
     }
