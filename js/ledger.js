@@ -309,6 +309,8 @@ function openLedgerEditModal(txn,onSaved){
     const editContent=Array.from(modal.children);
     modal.innerHTML="";
     let cbType="Dollar Value";
+    let cbPaymentType=txn.payment_type||"";
+    let cbCategory=txn.category_id||"income";
 
     const cHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
     const cHdrLeft=h("div");
@@ -358,6 +360,15 @@ function openLedgerEditModal(txn,onSaved){
     descWrap.append(cDesc);
     modal.append(descWrap);
 
+    // Payment type + category (defaults to parent, can be changed)
+    const cbPtSel=h("select",{class:"inp",onChange:()=>{cbPaymentType=cbPtSel.value;updateCPreview()}});
+    if(cbPaymentType&&!PTS.includes(cbPaymentType))cbPtSel.append(h("option",{value:cbPaymentType,selected:true},cbPaymentType));
+    PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===cbPaymentType)o.selected=true;cbPtSel.append(o)});
+    if(!cbPaymentType&&cbPtSel.options.length){cbPaymentType=cbPtSel.options[0].value;cbPtSel.value=cbPaymentType}
+    const cbCatSel=h("select",{class:"inp",onChange:()=>{cbCategory=cbCatSel.value;updateCPreview()}});
+    CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===cbCategory)o.selected=true;cbCatSel.append(o)});
+    modal.append(mRow(mField("Payment Type",cbPtSel),mField("Category",cbCatSel)));
+
     // Preview
     const cPreview=h("div",{class:"preview",style:{marginBottom:"14px"}});
     modal.append(cPreview);
@@ -370,7 +381,7 @@ function openLedgerEditModal(txn,onSaved){
       const desc=cDesc.value||"Cashback";
       cPreview.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Preview</div>
         <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
-        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-dv)} \u00B7 ${txn.payment_type} \u00B7 income</div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-dv)} \u00B7 ${cbPaymentType} \u00B7 ${cbCategory}</div>
         <div style="font-size:11px;color:rgba(242,204,143,0.7);margin-top:4px">\uD83C\uDFC6 Cashback record: ${fmtF(dv)} ${cbType==="Points"?"("+((parseFloat(ptsAmtInp.value)||0).toLocaleString())+" pts)":""}</div>`;
     }
     updateCPreview();
@@ -392,8 +403,8 @@ function openLedgerEditModal(txn,onSaved){
         const newTxn={
           date:txn.date,service_start:ss,service_end:se,
           description:cDesc.value||"Cashback - "+txn.description,
-          category_id:"income",original_amount:amt,currency:"USD",fx_rate:1,
-          amount_usd:amt,payment_type:txn.payment_type,
+          category_id:cbCategory,original_amount:amt,currency:"USD",fx_rate:1,
+          amount_usd:amt,payment_type:cbPaymentType,
           tag:(txn.tag||"").toLowerCase().trim(),
           daily_cost:dc,service_days:serviceDays,credit:""
         };
@@ -412,7 +423,7 @@ function openLedgerEditModal(txn,onSaved){
         const rate=cbType==="Points"?(parseFloat(ptsRateInp.value)||1)/100:1;
         await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({
           date:txn.date,item:cDesc.value||"Cashback - "+txn.description,
-          redemption_amount:redemptionAmount,payment_type:txn.payment_type,
+          redemption_amount:redemptionAmount,payment_type:cbPaymentType,
           cashback_type:cbType,redemption_rate:rate,dollar_value:dv,
           transaction_id:newId||null
         })});

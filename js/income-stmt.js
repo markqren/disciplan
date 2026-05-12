@@ -38,6 +38,9 @@ async function renderIS(el){
     const totI=mData.reduce((s,m)=>s+m.inc,0);
     const totE=mData.reduce((s,m)=>s+m.totE,0);
     const totInv=mData.reduce((s,m)=>s+m.inv,0);
+    const now=new Date();
+    const isCurrentYear=state.year===now.getFullYear();
+    const completedMonths=isCurrentYear?now.getMonth():12;
 
     // Stats
     const stats=h("div",{class:"g5"});
@@ -56,7 +59,7 @@ async function renderIS(el){
       {label:"Income",data:mData.map(m=>Math.round(m.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderRadius:4},
       {label:"Expenses",data:mData.map(m=>[Math.round(m.net),Math.round(m.inc)]),backgroundColor:"rgba(224,122,95,0.75)",borderRadius:4},
       {label:"Net Savings",data:mData.map(m=>Math.round(m.net)),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:4},
-      {label:"Savings Rate",data:mData.map(m=>m.inc>0?Math.round(m.net/m.inc*100):0),type:"line",borderColor:"#F2CC8F",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
+      {label:"Savings Rate",data:mData.map((m,i)=>i<completedMonths?(m.inc>0?Math.round(m.net/m.inc*100):0):null),type:"line",borderColor:"#F2CC8F",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
     ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11},usePointStyle:true,pointStyleWidth:16}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.6)",callback:v=>String(v).padStart(3)+"%",font:{size:10,family:"'JetBrains Mono',monospace"}},grid:{display:false}}}}}),50);
 
     // Stacked expense chart + pie in 2-col
@@ -96,8 +99,6 @@ async function renderIS(el){
 
     // Detail table with subcategories
     const tblCard=h("div",{class:"cd"});
-    const now=new Date();const isCurrentYear=state.year===now.getFullYear();
-    const completedMonths=isCurrentYear?now.getMonth():12;
     const activeMonths=Math.max(1,Math.min(mData.filter(m=>m.totE>0||m.inc>0).length,completedMonths));
     const hasBgt=bgt&&totI>0;
     let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table class="is-tbl" style="table-layout:fixed"><colgroup><col style="width:140px"><col style="width:70px"><col style="width:70px">`;
@@ -166,10 +167,10 @@ async function renderIS(el){
     if(hasBgt)thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`;
     thtml+=`</tr>`;
 
-    thtml+=`<tr class="is-mo-row" data-months='${JSON.stringify(mData.map(m=>m.inc>0?parseFloat((m.net/m.inc*100).toFixed(1)):null))}' data-month-fmt="pct"><td style="font-weight:700;color:#F2CC8F">Savings Rate<span class="is-mob-chev">▸</span></td>`;
+    thtml+=`<tr class="is-mo-row" data-months='${JSON.stringify(mData.map((m,i)=>i<completedMonths?(m.inc>0?parseFloat((m.net/m.inc*100).toFixed(1)):null):null))}' data-month-fmt="pct"><td style="font-weight:700;color:#F2CC8F">Savings Rate<span class="is-mob-chev">▸</span></td>`;
     thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:700;text-align:right">${cI>0?((cN/cI)*100).toFixed(1)+"%":"—"}</td>`;
     thtml+=`<td class="r m" style="color:#F2CC8F;font-weight:600;text-align:right">${cI>0?((cN/cI)*100).toFixed(1)+"%":"—"}</td>`;
-    mData.forEach(m=>thtml+=`<td class="r m hide-m" style="color:#F2CC8F;font-weight:600;text-align:right">${m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"}</td>`);
+    mData.forEach((m,mi)=>thtml+=`<td class="r m hide-m" style="color:#F2CC8F;font-weight:600;text-align:right">${mi<completedMonths?(m.inc>0?(m.net/m.inc*100).toFixed(1)+"%":"—"):"—"}</td>`);
     if(hasBgt){const sTgt=bgt._savings||0;const sAct=totI>0?(totI-totE)/totI*100:0;const sDelta=sAct-sTgt;const sClr=sDelta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m bgt-tgt" data-bgt-key="_savings" style="color:rgba(255,255,255,0.3);font-size:10px;cursor:pointer" title="Click to edit target">${sTgt.toFixed(1)}%</td><td class="r m hide-m bgt-delta" style="color:${sClr};font-size:10px;font-weight:600">${sDelta>=0?"+":""}${sDelta.toFixed(1)}%</td>`}
     thtml+=`</tr>`;
 
