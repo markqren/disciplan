@@ -62,6 +62,9 @@ const SB_URL          = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY  = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const CRON_SECRET     = Deno.env.get("CRON_SECRET");
 const DRY_RUN_GLOBAL  = (Deno.env.get("INSIGHT_DRY_RUN") || "").trim() === "1";
+// PostgREST schema. Set DB_SCHEMA=disciplan via `supabase secrets set` after
+// running 20260513000003_disciplan_schema.sql; defaults to "public".
+const DB_SCHEMA       = Deno.env.get("DB_SCHEMA") || "public";
 
 const FIXTURE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -688,7 +691,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const today = fixtureRaw || realToday;
   if (dryRun) console.log(`Dry-run mode (today=${today}${fixtureRaw ? `, fixture=${fixtureRaw}` : ""}); Postmark + strategy aggregates will be skipped.`);
 
-  const supabase = createClient(SB_URL, SB_SERVICE_KEY);
+  const supabase = createClient(SB_URL, SB_SERVICE_KEY, { db: { schema: DB_SCHEMA } });
 
   // ── 0. Idempotency guard ──────────────────────────────────────────────────
   // Dry-runs are explicitly allowed to repeat; we only short-circuit on real sends.

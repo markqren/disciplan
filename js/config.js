@@ -1,13 +1,17 @@
 
 const SB_URL = "https://mjuannepfodstbsxweuc.supabase.co";
 const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qdWFubmVwZm9kc3Ric3h3ZXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzODcwMzksImV4cCI6MjA4Njk2MzAzOX0.6TqLUAhvWMjDunpird0_9FMnDiT4qRuYaH6XbXmKOnA";
-const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY);
+// PostgREST schema routing. Stays "public" until 20260513000003_disciplan_schema.sql
+// is applied; flip to "disciplan" in the same deploy that runs the schema migration.
+// See tasks/disciplan-schema-rollout.md.
+const DB_SCHEMA = "public";
+const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY, { db: { schema: DB_SCHEMA } });
 let currentSession = null;
 if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 function authHeaders(extra = {}) {
   const token = currentSession?.access_token || SB_KEY;
-  return {"apikey":SB_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json",...extra};
+  return {"apikey":SB_KEY,"Authorization":`Bearer ${token}`,"Content-Type":"application/json","Accept-Profile":DB_SCHEMA,"Content-Profile":DB_SCHEMA,...extra};
 }
 
 // Cache helpers for offline fallback (FEA-32)

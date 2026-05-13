@@ -9,6 +9,9 @@ const WEBHOOK_SECRET = Deno.env.get("INBOUND_EMAIL_SECRET");
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+// PostgREST schema. Set DB_SCHEMA=disciplan via `supabase secrets set` after
+// running 20260513000003_disciplan_schema.sql; defaults to "public".
+const DB_SCHEMA = Deno.env.get("DB_SCHEMA") || "public";
 
 // ── Truncation limits (prevent oversized rows) ──
 const MAX_TEXT_BODY = 10_000;
@@ -1083,7 +1086,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   } = payload;
 
   // 3. Init Supabase client (service role — bypasses RLS)
-  const supabase = createClient(SB_URL, SB_SERVICE_KEY);
+  const supabase = createClient(SB_URL, SB_SERVICE_KEY, { db: { schema: DB_SCHEMA } });
 
   // 3.5. Insight feedback reply handler
   // If this is a reply to a daily insight email, extract rating/comment,
