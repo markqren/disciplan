@@ -26,10 +26,6 @@ function saveBudgetTargets(year,bgt){
 }
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];
-// Cashback (FEA-14)
-const CB_COLORS={"AMEX Rose Gold":"#E07A5F","Chase United":"#4A6FA5","Chase Sapphire":"#3D405B","Aeroplan":"#D4A373","Bilt":"#81B29A","Capital One":"#CB997E","Rakuten":"#F2CC8F","Uber":"#9B8EA0","Venmo Credit":"#6B9AC4","AMEX":"#264653","Chase Aeroplan":"#5B8DB8","TD Visa":"#8B687F","Scotiabank":"#E9C46A","Apple":"#7FB3D8","Flying Blue":"#52556E","Venmo":"#A8DADC"};
-const CB_FEES={"AMEX Rose Gold":1075,"Chase Sapphire":985,"Chase United":345,"Chase Aeroplan":190,"Capital One":95,"AMEX":90};
-const CB_PTS_BAL={"Aeroplan":140992,"AMEX Rose Gold":123884,"Bilt":49752,"Chase Sapphire":8507};
 const CATS_LIST=[{id:"entertainment",l:"Entertainment (other)"},{id:"accommodation",l:"Accommodation"},{id:"games",l:"Games"},{id:"food",l:"Food (other)"},{id:"groceries",l:"Groceries"},{id:"restaurant",l:"Restaurant"},{id:"home",l:"Home (other)"},{id:"rent",l:"Rent"},{id:"furniture",l:"Furniture"},{id:"health",l:"Health"},{id:"personal",l:"Personal (other)"},{id:"clothes",l:"Clothes"},{id:"tech",l:"Tech"},{id:"transportation",l:"Transportation"},{id:"utilities",l:"Utilities"},{id:"financial",l:"Financial"},{id:"other",l:"Other"},{id:"income",l:"Income"},{id:"investment",l:"Investment"},{id:"adjustment",l:"Adjustment"}];
 const PTS=["AMEX","AMEX Chequing","AMEX Rose Gold","AMEX US","Air Canada","Amazon","Apple","Bilt","Capital One","Cash","Charles Schwab","Chase Aeroplan","Chase Chequing","Chase Freedom","Chase Sapphire","Chase Savings","Chase United","Clipper","First Republic","HSA Invest","Home Trust","Kraken","Poker Stars","Presto","Rakuten","Splitwise","TD Chequing","TD Debit","TD Savings","TD TFSA","TD Visa","Transfer","Uber","Vanguard","Venmo","Venmo Credit","WageWorks","Walmart","Wealthsimple","eTrade","eTrade IRA"];
 const CURS=["USD","CAD","EUR","GBP","JPY","MXN","INR","TND","CZK","TRY"];

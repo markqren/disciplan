@@ -1,8 +1,24 @@
 async function renderCashback(el){
   el.innerHTML='<div style="margin-bottom:16px"><h2>Cashback & Rewards</h2><p class="sub">Credit card rewards tracking · All time</p></div><div id="cbBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>';
   try{
-    const INACTIVE_CARDS=new Set(["Flying Blue","Chase Aeroplan","Scotiabank","Uber","AMEX","Capital One"]);
+    const cardMetaRows=await sb("cashback_cards?select=name,color,annual_fee_usd,points_balance,is_active,sort_order&order=sort_order.asc,name.asc");
+    const cardColor={};const cardFee={};const cardPtsBal={};
+    const inactiveCards=new Set();
+    const knownCardNames=[];
+    cardMetaRows.forEach(r=>{
+      knownCardNames.push(r.name);
+      cardColor[r.name]=r.color||"#888";
+      cardFee[r.name]=parseFloat(r.annual_fee_usd)||0;
+      cardPtsBal[r.name]=parseFloat(r.points_balance)||0;
+      if(r.is_active===false)inactiveCards.add(r.name);
+    });
     const rows=await sb('cashback_redemptions?order=date.desc');
+    const getPtsRatioX=r=>{
+      const pts=parseFloat(r.redemption_amount)||0;
+      const dv=parseFloat(r.dollar_value)||0;
+      if(!(pts>0&&dv>0))return null;
+      return dv/pts*100;
+    };
     const body=document.getElementById("cbBody");body.innerHTML="";
 
     // Aggregate per-card
@@ -15,9 +31,9 @@ async function renderCashback(el){
       if(r.cashback_type==="Points")byCard[c].ptsRedeemed+=parseFloat(r.redemption_amount)||0;
     }
     const totalRedeemed=Object.values(byCard).reduce((s,c)=>s+c.dollarValue,0);
-    const totalFees=Object.values(CB_FEES).reduce((s,v)=>s+v,0);
+    const totalFees=Object.values(cardFee).reduce((s,v)=>s+(parseFloat(v)||0),0);
     const netGain=totalRedeemed-totalFees;
-    const numCards=Object.keys(byCard).length;
+    const numCards=cardMetaRows.filter(r=>r.is_active!==false).length||Object.keys(byCard).length;
 
     // KPI cards
     const stats=h("div",{class:"g4"});
@@ -30,16 +46,18 @@ async function renderCashback(el){
     // Per-card summary table
     const tblCard=h("div",{class:"cd"});
     const cardEntries=Object.entries(byCard).sort((a,b)=>b[1].dollarValue-a[1].dollarValue);
-    const activeEntries=cardEntries.filter(([card])=>!INACTIVE_CARDS.has(card));
-    const inactiveEntries=cardEntries.filter(([card])=>INACTIVE_CARDS.has(card));
+    const activeEntries=cardEntries.filter(([card])=>!inactiveCards.has(card));
+    const inactiveEntries=cardEntries.filter(([card])=>inactiveCards.has(card));
     let thtml='<h3>Per-Card Summary</h3><div style="overflow-x:auto"><table><thead><tr><th>Card</th><th class="r hide-m">Pts Balance</th><th class="r">Redemptions</th><th class="r">$ Redeemed</th><th class="r hide-m">Fees</th><th class="r">Net Gain</th></tr></thead><tbody>';
     let tTotalRedeem=0,tTotalFee=0,tTotalNet=0;
     let iTotalRedeem=0,iTotalFee=0,iTotalNet=0;
+    const activeCount=activeEntries.reduce((s,[,d])=>s+d.count,0);
+    const inactiveCount=inactiveEntries.reduce((s,[,d])=>s+d.count,0);
     for(const[card,d]of activeEntries){
-      const fee=CB_FEES[card]||0;
+      const fee=cardFee[card]||0;
       const net=d.dollarValue-fee;
-      const ptsBal=CB_PTS_BAL[card];
-      const color=CB_COLORS[card]||"#888";
+      const ptsBal=cardPtsBal[card];
+      const color=cardColor[card]||"#888";
       tTotalRedeem+=d.dollarValue;tTotalFee+=fee;tTotalNet+=net;
       thtml+='<tr class="cb-card-row" data-card="'+card.replace(/"/g,"&quot;")+'" style="cursor:pointer"><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
       thtml+='<td class="r m hide-m" style="color:rgba(255,255,255,0.4)">'+(ptsBal?ptsBal.toLocaleString():"")+'</td>';
@@ -48,26 +66,29 @@ async function renderCashback(el){
       thtml+='<td class="r m hide-m" style="color:var(--r)">'+(fee?fmtT(fee):"")+'</td>';
       thtml+='<td class="r m" style="color:var(--y)">'+fmtT(Math.round(net))+'</td></tr>';
     }
-    thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Active Total</td><td class="r m hide-m"></td><td class="r m">'+activeEntries.reduce((s,[,d])=>s+d.count,0)+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet))+'</td></tr>';
-    thtml+='</tbody></table></div>';
+    thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Active Total</td><td class="r m hide-m"></td><td class="r m">'+activeCount+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet))+'</td></tr>';
+
     if(inactiveEntries.length){
-      thtml+='<details style="margin-top:10px"><summary style="cursor:pointer;color:rgba(255,255,255,0.45);font-size:11px">Inactive cards ('+inactiveEntries.length+')</summary><div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Card</th><th class="r hide-m">Pts Balance</th><th class="r">Redemptions</th><th class="r">$ Redeemed</th><th class="r hide-m">Fees</th><th class="r">Net Gain</th></tr></thead><tbody>';
       for(const[card,d]of inactiveEntries){
-        const fee=CB_FEES[card]||0;
+        const fee=cardFee[card]||0;
+        iTotalRedeem+=d.dollarValue;iTotalFee+=fee;iTotalNet+=d.dollarValue-fee;
+      }
+      thtml+='<tr class="cb-inactive-toggle" style="cursor:pointer;border-top:1px solid rgba(255,255,255,0.08)"><td style="color:rgba(255,255,255,0.6)"><span class="cb-inactive-arrow" style="display:inline-block;width:14px;color:rgba(255,255,255,0.4)">▸</span>Inactive Total ('+inactiveEntries.length+' cards)</td><td class="r m hide-m"></td><td class="r m" style="color:rgba(255,255,255,0.6)">'+inactiveCount+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(iTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(iTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(iTotalNet))+'</td></tr>';
+      for(const[card,d]of inactiveEntries){
+        const fee=cardFee[card]||0;
         const net=d.dollarValue-fee;
-        const ptsBal=CB_PTS_BAL[card];
-        const color=CB_COLORS[card]||"#888";
-        iTotalRedeem+=d.dollarValue;iTotalFee+=fee;iTotalNet+=net;
-        thtml+='<tr class="cb-card-row" data-card="'+card.replace(/"/g,"&quot;")+'" style="cursor:pointer"><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
+        const ptsBal=cardPtsBal[card];
+        const color=cardColor[card]||"#888";
+        thtml+='<tr class="cb-card-row cb-inactive-row" data-card="'+card.replace(/"/g,"&quot;")+'" style="cursor:pointer;display:none;opacity:0.8"><td style="padding-left:18px"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
         thtml+='<td class="r m hide-m" style="color:rgba(255,255,255,0.4)">'+(ptsBal?ptsBal.toLocaleString():"")+'</td>';
         thtml+='<td class="r m" style="color:rgba(255,255,255,0.5)">'+d.count+'</td>';
         thtml+='<td class="r m" style="color:var(--g)">'+fmtT(Math.round(d.dollarValue))+'</td>';
         thtml+='<td class="r m hide-m" style="color:var(--r)">'+(fee?fmtT(fee):"")+'</td>';
         thtml+='<td class="r m" style="color:var(--y)">'+fmtT(Math.round(net))+'</td></tr>';
       }
-      thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Inactive Total</td><td class="r m hide-m"></td><td class="r m">'+inactiveEntries.reduce((s,[,d])=>s+d.count,0)+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(iTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(iTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(iTotalNet))+'</td></tr>';
-      thtml+='</tbody></table></div></details>';
     }
+    thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Overall Total</td><td class="r m hide-m"></td><td class="r m">'+(activeCount+inactiveCount)+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem+iTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee+iTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet+iTotalNet))+'</td></tr>';
+    thtml+='</tbody></table></div>';
     tblCard.innerHTML=thtml;
     body.append(tblCard);
 
@@ -97,7 +118,7 @@ async function renderCashback(el){
 
       try{
         const cardRows=rows.filter(r=>r.payment_type===card).sort((a,b)=>b.date.localeCompare(a.date));
-        const fee=CB_FEES[card]||0;
+        const fee=cardFee[card]||0;
         const ptsRows=cardRows.filter(r=>r.cashback_type==="Points");
         const usdRows=cardRows.filter(r=>r.cashback_type!=="Points");
         const ptsValue=ptsRows.reduce((s,r)=>s+(parseFloat(r.dollar_value)||0),0);
@@ -183,6 +204,17 @@ async function renderCashback(el){
       tr.addEventListener("mouseleave",()=>tr.style.background="");
       tr.addEventListener("click",()=>openCardDetail(tr.dataset.card));
     });
+    const inactToggle=tblCard.querySelector(".cb-inactive-toggle");
+    if(inactToggle){
+      let inactOpen=false;
+      const inactRows=tblCard.querySelectorAll(".cb-inactive-row");
+      const arrow=inactToggle.querySelector(".cb-inactive-arrow");
+      inactToggle.addEventListener("click",()=>{
+        inactOpen=!inactOpen;
+        inactRows.forEach(r=>r.style.display=inactOpen?"":"none");
+        if(arrow)arrow.textContent=inactOpen?"▾":"▸";
+      });
+    }
 
     // Stacked bar chart by year
     const byYearCard={};
@@ -194,7 +226,7 @@ async function renderCashback(el){
     }
     const years=Object.keys(byYearCard).sort();
     const allCards=[...new Set(rows.map(r=>r.payment_type))];
-    const chartCards=allCards.filter(c=>!INACTIVE_CARDS.has(c));
+    const chartCards=allCards.filter(c=>!inactiveCards.has(c));
     // Sort cards by total value desc for better chart stacking
     allCards.sort((a,b)=>(byCard[b]?.dollarValue||0)-(byCard[a]?.dollarValue||0));
     chartCards.sort((a,b)=>(byCard[b]?.dollarValue||0)-(byCard[a]?.dollarValue||0));
@@ -206,16 +238,51 @@ async function renderCashback(el){
     const datasets=(chartCards.length?chartCards:allCards).map(card=>({
       label:card,
       data:years.map(y=>Math.round(byYearCard[y]?.[card]||0)),
-      backgroundColor:(CB_COLORS[card]||"#888")+"CC",
+      backgroundColor:(cardColor[card]||"#888")+"CC",
       borderRadius:2
     }));
 
     setTimeout(()=>makeChart("cbChart",{type:"bar",data:{labels:years,datasets},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.5)",font:{size:10},usePointStyle:true,pointStyleWidth:12,boxWidth:8}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+": "+fmtT(ctx.raw)}}},scales:{x:{stacked:true,ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
 
+    // Best redemption rates (points only), shown as x ratio
+    const pointsRates=rows
+      .filter(r=>r.cashback_type==="Points")
+      .map(r=>({row:r,ratioX:getPtsRatioX(r)}))
+      .filter(x=>x.ratioX!=null)
+      .sort((a,b)=>b.ratioX-a.ratioX);
+    if(pointsRates.length){
+      const ratioCard=h("div",{class:"cd"});
+      const topRates=pointsRates.slice(0,25);
+      const best=pointsRates[0].ratioX;
+      const avg=pointsRates.reduce((s,x)=>s+x.ratioX,0)/pointsRates.length;
+      const mid=Math.floor(pointsRates.length/2);
+      const median=pointsRates.length%2?pointsRates[mid].ratioX:(pointsRates[mid-1].ratioX+pointsRates[mid].ratioX)/2;
+      let rr='<h3>Best Redemption Rates</h3>';
+      rr+='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;font-size:11px;color:rgba(255,255,255,0.45)">';
+      rr+='<span>Best: <span style="color:var(--g);font-family:var(--mono)">'+best.toFixed(2)+'x</span></span>';
+      rr+='<span>Avg: <span style="color:var(--b);font-family:var(--mono)">'+avg.toFixed(2)+'x</span></span>';
+      rr+='<span>Median: <span style="color:var(--y);font-family:var(--mono)">'+median.toFixed(2)+'x</span></span>';
+      rr+='</div>';
+      rr+='<div style="font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:8px">Ratio formula: (Dollar Value / Points Redeemed) x 100</div>';
+      rr+='<div style="overflow:auto;max-height:280px"><table><thead><tr><th>Date</th><th>Item</th><th class="hide-m">Card</th><th class="r hide-m">Points</th><th class="r">Value</th><th class="r">Ratio</th></tr></thead><tbody>';
+      topRates.forEach(({row,ratioX})=>{
+        rr+='<tr><td class="m" style="color:rgba(255,255,255,0.5)">'+fmtD(row.date)+'</td>';
+        rr+='<td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(row.item||"")+'</td>';
+        rr+='<td class="hide-m" style="color:rgba(255,255,255,0.45)">'+(row.payment_type||"")+'</td>';
+        rr+='<td class="r m hide-m" style="color:rgba(255,255,255,0.45)">'+Math.round(parseFloat(row.redemption_amount)||0).toLocaleString()+'</td>';
+        rr+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(row.dollar_value)||0)+'</td>';
+        rr+='<td class="r m" style="color:var(--y);font-family:var(--mono);font-weight:700">'+ratioX.toFixed(2)+'x</td></tr>';
+      });
+      rr+='</tbody></table></div>';
+      ratioCard.innerHTML=rr;
+      body.append(ratioCard);
+    }
+
     // Recent redemptions table
     const recentCard=h("div",{class:"cd"});
-    const cardFilterOpts=["all",...allCards];
-    const addCardOpts=Object.keys(CB_COLORS).filter(c=>!INACTIVE_CARDS.has(c));
+    const allKnownCards=[...new Set([...knownCardNames,...allCards])];
+    const cardFilterOpts=["all",...allKnownCards];
+    const addCardOpts=allKnownCards.filter(c=>!inactiveCards.has(c));
     let rhtml='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">Redemptions</h3><button id="cbAddBtn" class="btn" style="background:rgba(129,178,154,0.15);color:var(--g);padding:6px 14px;font-size:12px;width:auto">+ Add</button></div>';
     // Inline add-redemption form (hidden by default)
     rhtml+='<div id="cbAddForm" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:16px">';
@@ -237,7 +304,7 @@ async function renderCashback(el){
     rhtml+='</div>';
     rhtml+='<div style="display:grid;grid-template-columns:minmax(220px,1fr) 180px 140px;gap:8px;margin-bottom:10px">';
     rhtml+='<input id="cbSearch" class="inp" type="text" placeholder="Search item...">';
-    rhtml+='<select id="cbFilterCard" class="inp">'+cardFilterOpts.map(c=>'<option value="'+c+'">'+(c==="all"?"All cards":(INACTIVE_CARDS.has(c)?c+" (inactive)":c))+'</option>').join("")+'</select>';
+    rhtml+='<select id="cbFilterCard" class="inp">'+cardFilterOpts.map(c=>'<option value="'+c+'">'+(c==="all"?"All cards":(inactiveCards.has(c)?c+" (inactive)":c))+'</option>').join("")+'</select>';
     rhtml+='<select id="cbFilterType" class="inp"><option value="all">All types</option><option value="Dollar Value">Dollar Value</option><option value="Points">Points</option></select>';
     rhtml+='</div>';
     rhtml+='<div id="cbTableWrap" style="overflow-x:auto"></div>';
@@ -312,7 +379,7 @@ async function renderCashback(el){
         const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
         const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
         const modal=h("div",{class:"modal",style:{maxWidth:"480px"}});
-        const cardOpts=Object.keys(CB_COLORS).map(c=>`<option value="${c}"${c===r.payment_type?" selected":""}>${c}</option>`).join("");
+        const cardOpts=allKnownCards.map(c=>`<option value="${c}"${c===r.payment_type?" selected":""}>${c}</option>`).join("");
         modal.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><h3 style="margin:0">Edit Redemption</h3><span class="cb-edit-close" style="cursor:pointer;font-size:18px;color:rgba(255,255,255,0.3);line-height:1">\u2715</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px"><div><label class="lbl">Date</label><input id="cbEdDate" class="inp" type="date" value="${r.date}"></div><div><label class="lbl">Card</label><select id="cbEdCard" class="inp">${cardOpts}</select></div></div>
           <div style="margin-bottom:12px"><label class="lbl">Item</label><input id="cbEdItem" class="inp" type="text" value="${(r.item||"").replace(/"/g,"&quot;")}"></div>
@@ -376,15 +443,15 @@ async function renderCashback(el){
 
       let th='<table><thead><tr><th>Date</th><th>Item</th><th class="hide-m">Card</th><th class="hide-m">Type</th><th class="r">Value</th></tr></thead><tbody>';
       for(const r of pageRows){
-        const color=CB_COLORS[r.payment_type]||"#888";
+        const color=cardColor[r.payment_type]||"#888";
         th+='<tr class="cb-row" data-cb-id="'+r.id+'" style="cursor:pointer"><td class="m" style="color:rgba(255,255,255,0.55);white-space:nowrap">'+fmtD(r.date)+'</td>';
         th+='<td style="color:rgba(255,255,255,0.8);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.item+'</td>';
         th+='<td class="hide-m"><span class="badge" style="background:'+color+'22;color:'+color+'">'+r.payment_type+'</span></td>';
         th+='<td class="hide-m" style="color:rgba(255,255,255,0.4)">'+r.cashback_type+'</td>';
-        if(r.cashback_type==="Points"&&r.redemption_rate){
-          const cpp=Math.round(r.redemption_rate*10000)/100;
+        if(r.cashback_type==="Points"&&(parseFloat(r.redemption_amount)||0)>0){
+          const ratioX=getPtsRatioX(r);
           const pts=Math.round(r.redemption_amount).toLocaleString();
-          th+='<td class="r m" style="color:var(--g);white-space:nowrap"><span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400;margin-right:8px">'+pts+' pts \u00b7 '+cpp.toFixed(2)+'\u00a2/pt</span>'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+          th+='<td class="r m" style="color:var(--g);white-space:nowrap"><span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400;margin-right:8px">'+pts+' pts \u00b7 '+(ratioX!=null?ratioX.toFixed(2):"0.00")+'x</span>'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
         }else{
           th+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
         }
