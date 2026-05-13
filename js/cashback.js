@@ -1,6 +1,7 @@
 async function renderCashback(el){
   el.innerHTML='<div style="margin-bottom:16px"><h2>Cashback & Rewards</h2><p class="sub">Credit card rewards tracking · All time</p></div><div id="cbBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>';
   try{
+    const INACTIVE_CARDS=new Set(["Flying Blue","Chase Aeroplan","Scotiabank","Uber","AMEX","Capital One"]);
     const rows=await sb('cashback_redemptions?order=date.desc');
     const body=document.getElementById("cbBody");body.innerHTML="";
 
@@ -29,25 +30,159 @@ async function renderCashback(el){
     // Per-card summary table
     const tblCard=h("div",{class:"cd"});
     const cardEntries=Object.entries(byCard).sort((a,b)=>b[1].dollarValue-a[1].dollarValue);
+    const activeEntries=cardEntries.filter(([card])=>!INACTIVE_CARDS.has(card));
+    const inactiveEntries=cardEntries.filter(([card])=>INACTIVE_CARDS.has(card));
     let thtml='<h3>Per-Card Summary</h3><div style="overflow-x:auto"><table><thead><tr><th>Card</th><th class="r hide-m">Pts Balance</th><th class="r">Redemptions</th><th class="r">$ Redeemed</th><th class="r hide-m">Fees</th><th class="r">Net Gain</th></tr></thead><tbody>';
     let tTotalRedeem=0,tTotalFee=0,tTotalNet=0;
-    for(const[card,d]of cardEntries){
+    let iTotalRedeem=0,iTotalFee=0,iTotalNet=0;
+    for(const[card,d]of activeEntries){
       const fee=CB_FEES[card]||0;
       const net=d.dollarValue-fee;
       const ptsBal=CB_PTS_BAL[card];
       const color=CB_COLORS[card]||"#888";
       tTotalRedeem+=d.dollarValue;tTotalFee+=fee;tTotalNet+=net;
-      thtml+='<tr><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
+      thtml+='<tr class="cb-card-row" data-card="'+card.replace(/"/g,"&quot;")+'" style="cursor:pointer"><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
       thtml+='<td class="r m hide-m" style="color:rgba(255,255,255,0.4)">'+(ptsBal?ptsBal.toLocaleString():"")+'</td>';
       thtml+='<td class="r m" style="color:rgba(255,255,255,0.5)">'+d.count+'</td>';
       thtml+='<td class="r m" style="color:var(--g)">'+fmtT(Math.round(d.dollarValue))+'</td>';
       thtml+='<td class="r m hide-m" style="color:var(--r)">'+(fee?fmtT(fee):"")+'</td>';
       thtml+='<td class="r m" style="color:var(--y)">'+fmtT(Math.round(net))+'</td></tr>';
     }
-    thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Total</td><td class="r m hide-m"></td><td class="r m">'+rows.length+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet))+'</td></tr>';
+    thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Active Total</td><td class="r m hide-m"></td><td class="r m">'+activeEntries.reduce((s,[,d])=>s+d.count,0)+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet))+'</td></tr>';
     thtml+='</tbody></table></div>';
+    if(inactiveEntries.length){
+      thtml+='<details style="margin-top:10px"><summary style="cursor:pointer;color:rgba(255,255,255,0.45);font-size:11px">Inactive cards ('+inactiveEntries.length+')</summary><div style="overflow-x:auto;margin-top:8px"><table><thead><tr><th>Card</th><th class="r hide-m">Pts Balance</th><th class="r">Redemptions</th><th class="r">$ Redeemed</th><th class="r hide-m">Fees</th><th class="r">Net Gain</th></tr></thead><tbody>';
+      for(const[card,d]of inactiveEntries){
+        const fee=CB_FEES[card]||0;
+        const net=d.dollarValue-fee;
+        const ptsBal=CB_PTS_BAL[card];
+        const color=CB_COLORS[card]||"#888";
+        iTotalRedeem+=d.dollarValue;iTotalFee+=fee;iTotalNet+=net;
+        thtml+='<tr class="cb-card-row" data-card="'+card.replace(/"/g,"&quot;")+'" style="cursor:pointer"><td><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+color+';margin-right:6px"></span>'+card+'</td>';
+        thtml+='<td class="r m hide-m" style="color:rgba(255,255,255,0.4)">'+(ptsBal?ptsBal.toLocaleString():"")+'</td>';
+        thtml+='<td class="r m" style="color:rgba(255,255,255,0.5)">'+d.count+'</td>';
+        thtml+='<td class="r m" style="color:var(--g)">'+fmtT(Math.round(d.dollarValue))+'</td>';
+        thtml+='<td class="r m hide-m" style="color:var(--r)">'+(fee?fmtT(fee):"")+'</td>';
+        thtml+='<td class="r m" style="color:var(--y)">'+fmtT(Math.round(net))+'</td></tr>';
+      }
+      thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Inactive Total</td><td class="r m hide-m"></td><td class="r m">'+inactiveEntries.reduce((s,[,d])=>s+d.count,0)+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(iTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(iTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(iTotalNet))+'</td></tr>';
+      thtml+='</tbody></table></div></details>';
+    }
     tblCard.innerHTML=thtml;
     body.append(tblCard);
+
+    function normalizeCBItem(s){
+      return String(s||"")
+        .replace(/\s*\([^)]*\)\s*$/,"")
+        .replace(/\s*-\s*(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2}.*$/i,"")
+        .replace(/\s+/g," ")
+        .trim();
+    }
+
+    async function openCardDetail(card){
+      const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
+      const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+      const modal=h("div",{class:"modal",style:{maxWidth:"900px"}});
+      const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"14px"}});
+      hdr.append(h("div",{},[
+        h("h3",{style:{margin:"0"}},`💳 ${card}`),
+        h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.45)",marginTop:"4px"}},"Cashback card details")
+      ]));
+      hdr.append(h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
+      modal.append(hdr);
+      const content=h("div",{style:{color:"rgba(255,255,255,0.45)",fontSize:"12px",padding:"20px 0",textAlign:"center"}},"Loading...");
+      modal.append(content);
+      bg.append(modal);
+      document.body.append(bg);
+
+      try{
+        const cardRows=rows.filter(r=>r.payment_type===card).sort((a,b)=>b.date.localeCompare(a.date));
+        const fee=CB_FEES[card]||0;
+        const ptsRows=cardRows.filter(r=>r.cashback_type==="Points");
+        const usdRows=cardRows.filter(r=>r.cashback_type!=="Points");
+        const ptsValue=ptsRows.reduce((s,r)=>s+(parseFloat(r.dollar_value)||0),0);
+        const usdValue=usdRows.reduce((s,r)=>s+(parseFloat(r.dollar_value)||0),0);
+        const totalValue=ptsValue+usdValue;
+        const ptsCount=ptsRows.length;
+        const usdCount=usdRows.length;
+        const totalPts=ptsRows.reduce((s,r)=>s+(parseFloat(r.redemption_amount)||0),0);
+
+        // Infer annual-fee payments from ledger transactions for this card.
+        const cardTxns=await sb(`transactions?payment_type=eq.${encodeURIComponent(card)}&order=date.desc&select=id,date,description,amount_usd,category_id`);
+        const feeRe=/(annual fee|membership fee|card fee|\bfee\b)/i;
+        const feeMatches=cardTxns.filter(t=>{
+          const amt=Math.abs(parseFloat(t.amount_usd)||0);
+          const byText=feeRe.test(t.description||"");
+          const byAmt=fee>0&&Math.abs(amt-fee)<=Math.max(5,fee*0.12);
+          return (parseFloat(t.amount_usd)||0)>0&&(byText||byAmt);
+        });
+
+        const itemGroups={};
+        for(const r of cardRows){
+          const k=normalizeCBItem(r.item)||"(unspecified)";
+          if(!itemGroups[k])itemGroups[k]={count:0,value:0,latest:r.date};
+          itemGroups[k].count++;
+          itemGroups[k].value+=(parseFloat(r.dollar_value)||0);
+          if(r.date>itemGroups[k].latest)itemGroups[k].latest=r.date;
+        }
+        const topItems=Object.entries(itemGroups)
+          .map(([item,d])=>({item,count:d.count,value:d.value,latest:d.latest}))
+          .sort((a,b)=>b.value-a.value);
+
+        let html='';
+        html+='<div class="g5" style="margin-bottom:12px">';
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">redeemed</div><div style="font-size:22px;color:var(--g);font-family:var(--mono);font-weight:700">${fmtN(totalValue)}</div></div>`;
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">redemptions</div><div style="font-size:22px;color:var(--b);font-family:var(--mono);font-weight:700">${cardRows.length}</div></div>`;
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">annual fee</div><div style="font-size:22px;color:var(--r);font-family:var(--mono);font-weight:700">${fee?fmtN(fee):"n/a"}</div></div>`;
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">fee payments</div><div style="font-size:22px;color:var(--y);font-family:var(--mono);font-weight:700">${feeMatches.length}</div></div>`;
+        html+=`<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:8px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">net gain</div><div style="font-size:22px;color:var(--g);font-family:var(--mono);font-weight:700">${fmtN(totalValue-feeMatches.length*fee)}</div></div>`;
+        html+='</div>';
+
+        html+='<div class="g2" style="margin-bottom:12px">';
+        html+='<div class="cd" style="margin:0"><h3 style="margin-bottom:8px">Redemption Split</h3><table><tbody>';
+        html+=`<tr><td style="color:rgba(255,255,255,0.6)">Points</td><td class="r m">${ptsCount}</td><td class="r m" style="color:var(--g)">${fmtF(ptsValue)}</td></tr>`;
+        html+=`<tr><td style="color:rgba(255,255,255,0.6)">Dollar Value</td><td class="r m">${usdCount}</td><td class="r m" style="color:var(--g)">${fmtF(usdValue)}</td></tr>`;
+        html+=`<tr style="border-top:1px solid rgba(255,255,255,0.08)"><td style="color:rgba(255,255,255,0.6)">Points redeemed</td><td class="r m" colspan="2">${Math.round(totalPts).toLocaleString()}</td></tr>`;
+        html+='</tbody></table></div>';
+
+        html+='<div class="cd" style="margin:0"><h3 style="margin-bottom:8px">Top Items (Inferred)</h3><div style="max-height:180px;overflow:auto">';
+        if(topItems.length){
+          html+='<table><thead><tr><th>Item</th><th class="r">Count</th><th class="r">Value</th><th class="hide-m">Latest</th></tr></thead><tbody>';
+          topItems.slice(0,30).forEach(it=>{
+            html+=`<tr><td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.item}</td><td class="r m">${it.count}</td><td class="r m" style="color:var(--g)">${fmtF(it.value)}</td><td class="hide-m m" style="color:rgba(255,255,255,0.4)">${fmtD(it.latest)}</td></tr>`;
+          });
+          html+='</tbody></table>';
+        }else{
+          html+='<div style="padding:10px;color:rgba(255,255,255,0.35);font-size:11px">No item history.</div>';
+        }
+        html+='</div></div>';
+        html+='</div>';
+
+        html+='<div class="cd" style="margin:0"><h3 style="margin-bottom:8px">All Redemptions</h3><div style="overflow:auto;max-height:260px"><table><thead><tr><th>Date</th><th>Item</th><th class="hide-m">Type</th><th class="r">Value</th></tr></thead><tbody>';
+        cardRows.forEach(r=>{
+          html+=`<tr><td class="m" style="color:rgba(255,255,255,0.5)">${fmtD(r.date)}</td><td style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.item||""}</td><td class="hide-m" style="color:rgba(255,255,255,0.4)">${r.cashback_type}</td><td class="r m" style="color:var(--g)">${fmtF(parseFloat(r.dollar_value)||0)}</td></tr>`;
+        });
+        html+='</tbody></table></div>';
+        if(feeMatches.length){
+          html+='<div style="margin-top:10px;font-size:11px;color:rgba(255,255,255,0.35)">Inferred annual-fee payments from ledger:</div>';
+          html+='<div style="overflow:auto;max-height:140px;margin-top:4px"><table><thead><tr><th>Date</th><th>Description</th><th class="r">Amount</th></tr></thead><tbody>';
+          feeMatches.slice(0,20).forEach(t=>{
+            html+=`<tr><td class="m" style="color:rgba(255,255,255,0.5)">${fmtD(t.date)}</td><td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description||""}</td><td class="r m" style="color:var(--r)">${fmtF(parseFloat(t.amount_usd)||0)}</td></tr>`;
+          });
+          html+='</tbody></table></div>';
+        }
+        html+='</div>';
+        content.innerHTML=html;
+      }catch(e){
+        content.innerHTML=`<div style="color:var(--r);padding:16px 0;text-align:center">Error: ${e.message}</div>`;
+      }
+    }
+
+    tblCard.querySelectorAll(".cb-card-row").forEach(tr=>{
+      tr.addEventListener("mouseenter",()=>tr.style.background="rgba(255,255,255,0.03)");
+      tr.addEventListener("mouseleave",()=>tr.style.background="");
+      tr.addEventListener("click",()=>openCardDetail(tr.dataset.card));
+    });
 
     // Stacked bar chart by year
     const byYearCard={};
@@ -59,14 +194,16 @@ async function renderCashback(el){
     }
     const years=Object.keys(byYearCard).sort();
     const allCards=[...new Set(rows.map(r=>r.payment_type))];
+    const chartCards=allCards.filter(c=>!INACTIVE_CARDS.has(c));
     // Sort cards by total value desc for better chart stacking
     allCards.sort((a,b)=>(byCard[b]?.dollarValue||0)-(byCard[a]?.dollarValue||0));
+    chartCards.sort((a,b)=>(byCard[b]?.dollarValue||0)-(byCard[a]?.dollarValue||0));
 
     const chartCard=h("div",{class:"cd"});
     chartCard.innerHTML='<h3>Redemptions by Year</h3><div class="chrt"><canvas id="cbChart"></canvas></div>';
     body.append(chartCard);
 
-    const datasets=allCards.map(card=>({
+    const datasets=(chartCards.length?chartCards:allCards).map(card=>({
       label:card,
       data:years.map(y=>Math.round(byYearCard[y]?.[card]||0)),
       backgroundColor:(CB_COLORS[card]||"#888")+"CC",
@@ -77,13 +214,14 @@ async function renderCashback(el){
 
     // Recent redemptions table
     const recentCard=h("div",{class:"cd"});
-    const showCount=Math.min(50,rows.length);
-    let rhtml='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">Recent Redemptions</h3><button id="cbAddBtn" class="btn" style="background:rgba(129,178,154,0.15);color:var(--g);padding:6px 14px;font-size:12px;width:auto">+ Add</button></div>';
+    const cardFilterOpts=["all",...allCards];
+    const addCardOpts=Object.keys(CB_COLORS).filter(c=>!INACTIVE_CARDS.has(c));
+    let rhtml='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px"><h3 style="margin:0">Redemptions</h3><button id="cbAddBtn" class="btn" style="background:rgba(129,178,154,0.15);color:var(--g);padding:6px 14px;font-size:12px;width:auto">+ Add</button></div>';
     // Inline add-redemption form (hidden by default)
     rhtml+='<div id="cbAddForm" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:16px">';
     rhtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
     rhtml+='<div><label class="lbl">Date</label><input id="cbAddDate" class="inp" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
-    rhtml+='<div><label class="lbl">Card</label><select id="cbAddCard" class="inp">'+Object.keys(CB_COLORS).map(c=>'<option value="'+c+'">'+c+'</option>').join("")+'</select></div>';
+    rhtml+='<div><label class="lbl">Card</label><select id="cbAddCard" class="inp">'+addCardOpts.map(c=>'<option value="'+c+'">'+c+'</option>').join("")+'</select></div>';
     rhtml+='</div>';
     rhtml+='<div style="margin-bottom:12px"><label class="lbl">Item</label><input id="cbAddItem" class="inp" type="text" placeholder="e.g. Hilton Points Transfer"></div>';
     rhtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
@@ -97,25 +235,13 @@ async function renderCashback(el){
     rhtml+='<div id="cbAddErr" style="color:var(--r);font-size:11px;margin-bottom:8px;min-height:16px"></div>';
     rhtml+='<div style="display:flex;gap:8px"><button id="cbAddSave" class="btn" style="background:rgba(129,178,154,0.2);color:var(--g);padding:10px 20px;width:auto">Save Redemption</button><button id="cbAddCancel" class="btn" style="background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.4);padding:10px 20px;width:auto">Cancel</button></div>';
     rhtml+='</div>';
-    rhtml+='<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Item</th><th class="hide-m">Card</th><th class="hide-m">Type</th><th class="r">Value</th></tr></thead><tbody>';
-    for(let i=0;i<showCount;i++){
-      const r=rows[i];
-      const color=CB_COLORS[r.payment_type]||"#888";
-      rhtml+='<tr class="cb-row" data-cb-idx="'+i+'" style="cursor:pointer"><td class="m" style="color:rgba(255,255,255,0.55);white-space:nowrap">'+fmtD(r.date)+'</td>';
-      rhtml+='<td style="color:rgba(255,255,255,0.8);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.item+'</td>';
-      rhtml+='<td class="hide-m"><span class="badge" style="background:'+color+'22;color:'+color+'">'+r.payment_type+'</span></td>';
-      rhtml+='<td class="hide-m" style="color:rgba(255,255,255,0.4)">'+r.cashback_type+'</td>';
-      if(r.cashback_type==="Points"&&r.redemption_rate){
-        const cpp=Math.round(r.redemption_rate*10000)/100;
-        const pts=Math.round(r.redemption_amount).toLocaleString();
-        rhtml+='<td class="r m" style="color:var(--g);white-space:nowrap"><span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400;margin-right:8px">'+pts+' pts \u00b7 '+cpp.toFixed(2)+'\u00a2/pt</span>'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
-      }else{
-        rhtml+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
-      }
-    }
-    rhtml+='</tbody></table></div>';
-    if(rows.length>showCount)rhtml+='<div style="text-align:center;padding:8px;font-size:11px;color:rgba(255,255,255,0.3)">Showing '+showCount+' of '+rows.length+' redemptions</div>';
-    else rhtml+='<div style="text-align:center;padding:8px;font-size:11px;color:rgba(255,255,255,0.3)">'+rows.length+' total redemptions</div>';
+    rhtml+='<div style="display:grid;grid-template-columns:minmax(220px,1fr) 180px 140px;gap:8px;margin-bottom:10px">';
+    rhtml+='<input id="cbSearch" class="inp" type="text" placeholder="Search item...">';
+    rhtml+='<select id="cbFilterCard" class="inp">'+cardFilterOpts.map(c=>'<option value="'+c+'">'+(c==="all"?"All cards":(INACTIVE_CARDS.has(c)?c+" (inactive)":c))+'</option>').join("")+'</select>';
+    rhtml+='<select id="cbFilterType" class="inp"><option value="all">All types</option><option value="Dollar Value">Dollar Value</option><option value="Points">Points</option></select>';
+    rhtml+='</div>';
+    rhtml+='<div id="cbTableWrap" style="overflow-x:auto"></div>';
+    rhtml+='<div id="cbPager" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;font-size:11px;color:rgba(255,255,255,0.35)"></div>';
     recentCard.innerHTML=rhtml;
     body.append(recentCard);
 
@@ -164,12 +290,25 @@ async function renderCashback(el){
         renderCashback(document.getElementById("main"));
       }catch(e){errEl.textContent="Failed: "+e.message;saveBtn.textContent="Save Redemption";saveBtn.disabled=false}
     };
-    // Clickable redemption rows → edit modal
-    recentCard.querySelectorAll(".cb-row").forEach(tr=>{
-      tr.addEventListener("mouseenter",()=>tr.style.background="rgba(255,255,255,0.03)");
-      tr.addEventListener("mouseleave",()=>tr.style.background="");
-      tr.addEventListener("click",()=>{
-        const r=rows[parseInt(tr.dataset.cbIdx)];if(!r)return;
+    const cbState={q:"",card:"all",type:"all",page:1,pageSize:50};
+    const rowMap=new Map(rows.map(r=>[String(r.id),r]));
+    const searchInp=document.getElementById("cbSearch");
+    const cardSel=document.getElementById("cbFilterCard");
+    const typeSel=document.getElementById("cbFilterType");
+    const tableWrap=document.getElementById("cbTableWrap");
+    const pager=document.getElementById("cbPager");
+
+    function filteredRows(){
+      const q=cbState.q.toLowerCase();
+      return rows.filter(r=>{
+        if(cbState.card!=="all"&&r.payment_type!==cbState.card)return false;
+        if(cbState.type!=="all"&&r.cashback_type!==cbState.type)return false;
+        if(q&&!String(r.item||"").toLowerCase().includes(q))return false;
+        return true;
+      });
+    }
+
+    function openEditModal(r){
         const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
         const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
         const modal=h("div",{class:"modal",style:{maxWidth:"480px"}});
@@ -225,7 +364,57 @@ async function renderCashback(el){
           }else{delBtn.dataset.confirm="1";delBtn.textContent="Confirm Delete";delBtn.style.background="rgba(224,122,95,0.3)"}
         };
         bg.append(modal);document.body.append(bg);
+    }
+
+    function renderTable(){
+      const filtered=filteredRows();
+      const total=filtered.length;
+      const totalPages=Math.max(1,Math.ceil(total/cbState.pageSize));
+      if(cbState.page>totalPages)cbState.page=totalPages;
+      const start=(cbState.page-1)*cbState.pageSize;
+      const pageRows=filtered.slice(start,start+cbState.pageSize);
+
+      let th='<table><thead><tr><th>Date</th><th>Item</th><th class="hide-m">Card</th><th class="hide-m">Type</th><th class="r">Value</th></tr></thead><tbody>';
+      for(const r of pageRows){
+        const color=CB_COLORS[r.payment_type]||"#888";
+        th+='<tr class="cb-row" data-cb-id="'+r.id+'" style="cursor:pointer"><td class="m" style="color:rgba(255,255,255,0.55);white-space:nowrap">'+fmtD(r.date)+'</td>';
+        th+='<td style="color:rgba(255,255,255,0.8);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+r.item+'</td>';
+        th+='<td class="hide-m"><span class="badge" style="background:'+color+'22;color:'+color+'">'+r.payment_type+'</span></td>';
+        th+='<td class="hide-m" style="color:rgba(255,255,255,0.4)">'+r.cashback_type+'</td>';
+        if(r.cashback_type==="Points"&&r.redemption_rate){
+          const cpp=Math.round(r.redemption_rate*10000)/100;
+          const pts=Math.round(r.redemption_amount).toLocaleString();
+          th+='<td class="r m" style="color:var(--g);white-space:nowrap"><span style="font-size:10px;color:rgba(255,255,255,0.3);font-weight:400;margin-right:8px">'+pts+' pts \u00b7 '+cpp.toFixed(2)+'\u00a2/pt</span>'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+        }else{
+          th+='<td class="r m" style="color:var(--g)">'+fmtF(parseFloat(r.dollar_value))+'</td></tr>';
+        }
+      }
+      if(!pageRows.length)th+='<tr><td colspan="5" style="text-align:center;color:rgba(255,255,255,0.35);padding:16px">No matching redemptions.</td></tr>';
+      th+='</tbody></table>';
+      tableWrap.innerHTML=th;
+
+      tableWrap.querySelectorAll(".cb-row").forEach(tr=>{
+        tr.addEventListener("mouseenter",()=>tr.style.background="rgba(255,255,255,0.03)");
+        tr.addEventListener("mouseleave",()=>tr.style.background="");
+        tr.addEventListener("click",()=>{
+          const r=rowMap.get(tr.dataset.cbId);
+          if(r)openEditModal(r);
+        });
       });
-    });
+
+      pager.innerHTML="";
+      const left=h("div",{},`Showing ${total?start+1:0}-${Math.min(start+pageRows.length,total)} of ${total} filtered (${rows.length} total)`);
+      const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
+      const prev=h("button",{class:"pg-btn",disabled:cbState.page<=1,onClick:()=>{if(cbState.page>1){cbState.page--;renderTable()}}},"Prev");
+      const ptxt=h("span",{style:{minWidth:"72px",textAlign:"center"}},`Page ${cbState.page}/${totalPages}`);
+      const next=h("button",{class:"pg-btn",disabled:cbState.page>=totalPages,onClick:()=>{if(cbState.page<totalPages){cbState.page++;renderTable()}}},"Next");
+      right.append(prev,ptxt,next);
+      pager.append(left,right);
+    }
+
+    searchInp.addEventListener("input",()=>{cbState.q=searchInp.value.trim();cbState.page=1;renderTable()});
+    cardSel.addEventListener("change",()=>{cbState.card=cardSel.value;cbState.page=1;renderTable()});
+    typeSel.addEventListener("change",()=>{cbState.type=typeSel.value;cbState.page=1;renderTable()});
+    renderTable();
   }catch(e){document.getElementById("cbBody").innerHTML='<div class="cd" style="color:var(--r)">Error: '+e.message+'</div>'}
 }

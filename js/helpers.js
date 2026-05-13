@@ -78,43 +78,127 @@ async function showSubHistory(merchantKey, sampleDesc){
 
   try{
     const firstWord=merchantKey.split(" ")[0];
-    const all=await sb(`transactions?description=ilike.*${encodeURIComponent(firstWord)}*&order=date.desc&limit=5000&select=id,date,description,amount_usd,category_id,payment_type,service_start,service_end,service_days,daily_cost`);
+    const all=await sb(`transactions?description=ilike.*${encodeURIComponent(firstWord)}*&order=date.desc&limit=5000&select=id,date,description,amount_usd,category_id,payment_type,service_start,service_end,service_days,daily_cost,is_subscription`);
     const txns=all.filter(t=>normalizeMerchant(t.description)===merchantKey);
     body.innerHTML="";
-    if(!txns.length){body.append(h("p",{style:{color:"rgba(255,255,255,0.3)",textAlign:"center",padding:"24px"}},"No matching transactions found."));return}
+    const byId=new Map();
+    txns.forEach(t=>byId.set(t.id,t));
 
-    // KPIs
-    const totalSpend=txns.reduce((s,t)=>s+parseFloat(t.amount_usd),0);
-    const firstDate=txns[txns.length-1].date;
-    const lastDate=txns[0].date;
-    const months=((new Date(lastDate)-new Date(firstDate))/(1000*60*60*24*30.44))+1;
-    const monthlyAvg=totalSpend/Math.max(1,months);
-    const kpis=h("div",{class:"g4",style:{marginBottom:"14px"}});
-    kpis.append(statCard("\uD83D\uDCB5","total spend",fmtN(totalSpend),"var(--b)"));
-    kpis.append(statCard("\uD83D\uDD22","occurrences",String(txns.length),"var(--g)"));
-    kpis.append(statCard("\uD83D\uDCC5","monthly avg",fmtN(monthlyAvg),"var(--y)"));
-    kpis.append(statCard("\uD83D\uDDD3","since",fmtD(firstDate),"rgba(255,255,255,0.5)"));
-    body.append(kpis);
-
-    // Table
-    const tWrap=h("div",{style:{overflowX:"auto",maxHeight:"360px",overflowY:"auto",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.06)"}});
-    const tbl=h("table");
-    tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th class="r">Amount</th><th class="hide-m">Payment</th></tr></thead>`;
-    const tbody=document.createElement("tbody");
-    for(const t of txns){
-      const tr=h("tr",{style:{cursor:"pointer"},onClick:async()=>{
-        bg.remove();
-        const full=await sb(`transactions?id=eq.${t.id}&select=*`);
-        if(full.length)openLedgerEditModal(full[0],()=>{});
-      }});
-      tr.innerHTML=`<td class="m" style="color:rgba(255,255,255,0.5);white-space:nowrap">${fmtD(t.date)}</td>`
-        +`<td style="color:rgba(255,255,255,0.8);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>`
-        +`<td class="r m" style="color:${t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}">${fmtF(t.amount_usd)}</td>`
-        +`<td class="hide-m" style="color:rgba(255,255,255,0.4);font-size:11px">${t.payment_type||""}</td>`;
-      tbody.append(tr);
+    async function setSubFlag(id,val){
+      await sb(`transactions?id=eq.${id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({is_subscription:val})});
+      const row=byId.get(id);
+      if(row)row.is_subscription=val;
+      dcInvalidateTxns();
     }
-    tbl.append(tbody);tWrap.append(tbl);body.append(tWrap);
-    body.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",marginTop:"10px",textAlign:"right"}},`${txns.length} transaction${txns.length===1?"":"s"} \u00b7 last charged ${fmtD(lastDate)}`));
+
+    async function setFamilyFlags(val){
+      for(const t of txns)await setSubFlag(t.id,val);
+    }
+
+    function sortedTxns(){return [...txns].sort((a,b)=>b.date.localeCompare(a.date))}
+
+    function renderModal(){
+      body.innerHTML="";
+      const rows=sortedTxns();
+      if(!rows.length){
+        body.append(h("p",{style:{color:"rgba(255,255,255,0.3)",textAlign:"center",padding:"16px 0"}},"No family transactions yet. Use search below to add one."));
+      }else{
+        const totalSpend=rows.reduce((s,t)=>s+parseFloat(t.amount_usd),0);
+        const firstDate=rows[rows.length-1].date;
+        const lastDate=rows[0].date;
+        const months=((new Date(lastDate)-new Date(firstDate))/(1000*60*60*24*30.44))+1;
+        const monthlyAvg=totalSpend/Math.max(1,months);
+        const kpis=h("div",{class:"g4",style:{marginBottom:"10px"}});
+        kpis.append(statCard("\uD83D\uDCB5","total spend",fmtN(totalSpend),"var(--b)"));
+        kpis.append(statCard("\uD83D\uDD22","occurrences",String(rows.length),"var(--g)"));
+        kpis.append(statCard("\uD83D\uDCC5","monthly avg",fmtN(monthlyAvg),"var(--y)"));
+        kpis.append(statCard("\uD83D\uDDD3","since",fmtD(firstDate),"rgba(255,255,255,0.5)"));
+        body.append(kpis);
+
+        const actionRow=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"8px",gap:"8px",flexWrap:"wrap"}});
+        actionRow.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},`${rows.filter(r=>r.is_subscription).length}/${rows.length} flagged as subscription`));
+        const clearBtn=h("button",{class:"pg-btn",onClick:async()=>{
+          clearBtn.disabled=true;clearBtn.textContent="Updating...";
+          try{await setFamilyFlags(false);renderModal()}
+          catch(e){alert("Failed: "+e.message)}
+          clearBtn.disabled=false;clearBtn.textContent="Deselect Family Subscription";
+        }},"Deselect Family Subscription");
+        actionRow.append(clearBtn);
+        body.append(actionRow);
+
+        const tWrap=h("div",{style:{overflowX:"auto",maxHeight:"300px",overflowY:"auto",borderRadius:"8px",border:"1px solid rgba(255,255,255,0.06)"}});
+        const tbl=h("table");
+        tbl.innerHTML=`<thead><tr><th>Date</th><th>Description</th><th class="r">Amount</th><th class="hide-m">Payment</th><th class="r">Sub</th></tr></thead>`;
+        const tbody=document.createElement("tbody");
+        for(const t of rows){
+          const tr=h("tr",{style:{cursor:"pointer"},onClick:async()=>{
+            bg.remove();
+            const full=await sb(`transactions?id=eq.${t.id}&select=*`);
+            if(full.length)openLedgerEditModal(full[0],()=>{});
+          }});
+          const tglLbl=t.is_subscription?"On":"Off";
+          const tglClr=t.is_subscription?"var(--g)":"rgba(255,255,255,0.5)";
+          tr.innerHTML=`<td class="m" style="color:rgba(255,255,255,0.5);white-space:nowrap">${fmtD(t.date)}</td>`
+            +`<td style="color:rgba(255,255,255,0.8);max-width:230px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>`
+            +`<td class="r m" style="color:${t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}">${fmtF(t.amount_usd)}</td>`
+            +`<td class="hide-m" style="color:rgba(255,255,255,0.4);font-size:11px">${t.payment_type||""}</td>`
+            +`<td class="r m"></td>`;
+          const tdSub=tr.lastChild;
+          const tglBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"4px 8px",color:tglClr},onClick:async(e)=>{
+            e.stopPropagation();
+            tglBtn.disabled=true;
+            try{await setSubFlag(t.id,!t.is_subscription);renderModal()}
+            catch(err){alert("Failed: "+err.message);tglBtn.disabled=false}
+          }},tglLbl);
+          tdSub.append(tglBtn);
+          tbody.append(tr);
+        }
+        tbl.append(tbody);tWrap.append(tbl);body.append(tWrap);
+        body.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",marginTop:"8px",textAlign:"right"}},`${rows.length} transaction${rows.length===1?"":"s"} \u00b7 last charged ${fmtD(rows[0].date)}`));
+      }
+
+      const searchWrap=h("div",{style:{marginTop:"14px",paddingTop:"12px",borderTop:"1px solid rgba(255,255,255,0.08)"}});
+      searchWrap.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",marginBottom:"8px"}},"Add Ledger Transactions"));
+      const searchRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px"}});
+      const sInp=h("input",{class:"inp",type:"text",placeholder:"Search description..."});
+      const sBtn=h("button",{class:"pg-btn"},"Search");
+      searchRow.append(sInp,sBtn);searchWrap.append(searchRow);
+      const results=h("div",{style:{marginTop:"8px",maxHeight:"180px",overflowY:"auto"}});
+      searchWrap.append(results);
+
+      async function runSearch(){
+        const q=(sInp.value||"").trim();
+        if(!q){results.innerHTML='<div style="font-size:11px;color:rgba(255,255,255,0.35);padding:8px 0">Type a description search term.</div>';return}
+        sBtn.disabled=true;sBtn.textContent="Searching...";
+        try{
+          const found=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&order=date.desc&limit=60&select=id,date,description,amount_usd,payment_type,is_subscription`);
+          const candidates=found.filter(r=>!byId.has(r.id));
+          results.innerHTML="";
+          if(!candidates.length){results.innerHTML='<div style="font-size:11px;color:rgba(255,255,255,0.35);padding:8px 0">No additional matches found.</div>'}
+          for(const c of candidates){
+            const row=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",alignItems:"center",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}});
+            row.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.75)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},`${fmtD(c.date)} \u00b7 ${c.description} \u00b7 ${fmtF(c.amount_usd)}`));
+            const addBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"4px 8px"},onClick:async()=>{
+              addBtn.disabled=true;addBtn.textContent="Adding...";
+              try{
+                await setSubFlag(c.id,true);
+                byId.set(c.id,{...c,is_subscription:true});
+                txns.push({...c,is_subscription:true});
+                renderModal();
+              }catch(e){alert("Failed: "+e.message);addBtn.disabled=false;addBtn.textContent="Add"}
+            }},"Add");
+            row.append(addBtn);
+            results.append(row);
+          }
+        }catch(e){results.innerHTML=`<div style="font-size:11px;color:var(--r);padding:8px 0">Search failed: ${e.message}</div>`}
+        sBtn.disabled=false;sBtn.textContent="Search";
+      }
+      sBtn.addEventListener("click",runSearch);
+      sInp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();runSearch()}});
+      body.append(searchWrap);
+    }
+
+    renderModal();
   }catch(e){body.innerHTML=`<p style="color:var(--r);text-align:center;padding:24px">Error: ${e.message}</p>`}
 }
 
