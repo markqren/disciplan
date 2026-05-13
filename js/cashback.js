@@ -88,6 +88,16 @@ async function renderCashback(el){
       }
     }
     thtml+='<tr style="border-top:2px solid rgba(255,255,255,0.1);font-weight:700"><td>Overall Total</td><td class="r m hide-m"></td><td class="r m">'+(activeCount+inactiveCount)+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(tTotalRedeem+iTotalRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(tTotalFee+iTotalFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(tTotalNet+iTotalNet))+'</td></tr>';
+    // Deduped Total: strip "Convert to Aeroplan" transfers (double-counted with downstream Aeroplan redemptions).
+    const convertRe=/convert to aeroplan/i;
+    const convertRows=rows.filter(r=>convertRe.test(r.item||""));
+    const convertCount=convertRows.length;
+    const convertValue=convertRows.reduce((s,r)=>s+(parseFloat(r.dollar_value)||0),0);
+    const dedupRedeem=tTotalRedeem+iTotalRedeem-convertValue;
+    const dedupFee=tTotalFee+iTotalFee;
+    const dedupNet=dedupRedeem-dedupFee;
+    const dedupCount=activeCount+inactiveCount-convertCount;
+    thtml+='<tr style="font-weight:700;color:rgba(255,255,255,0.85)" title="Excludes '+convertCount+' Convert to Aeroplan transfer(s) totaling '+fmtT(Math.round(convertValue))+' — already counted via downstream Aeroplan redemptions"><td>Deduped Total <span style="font-weight:400;color:rgba(255,255,255,0.4);font-size:11px">(excl. Aeroplan transfers)</span></td><td class="r m hide-m"></td><td class="r m">'+dedupCount+'</td><td class="r m" style="color:var(--g)">'+fmtT(Math.round(dedupRedeem))+'</td><td class="r m hide-m" style="color:var(--r)">'+fmtT(dedupFee)+'</td><td class="r m" style="color:var(--y)">'+fmtT(Math.round(dedupNet))+'</td></tr>';
     thtml+='</tbody></table></div>';
     tblCard.innerHTML=thtml;
     body.append(tblCard);
@@ -129,14 +139,22 @@ async function renderCashback(el){
         const totalPts=ptsRows.reduce((s,r)=>s+(parseFloat(r.redemption_amount)||0),0);
 
         // Infer annual-fee payments from ledger transactions for this card.
+        // Require BOTH (a) annual-fee-specific phrasing AND (b) amount within ~10% of known fee.
+        // This avoids matching generic "fee" lines (ATM, foreign-tx, late) or unrelated charges that
+        // happen to fall near the fee amount (e.g. statement payments).
         const cardTxns=await sb(`transactions?payment_type=eq.${encodeURIComponent(card)}&order=date.desc&select=id,date,description,amount_usd,category_id`);
-        const feeRe=/(annual fee|membership fee|card fee|\bfee\b)/i;
-        const feeMatches=cardTxns.filter(t=>{
-          const amt=Math.abs(parseFloat(t.amount_usd)||0);
-          const byText=feeRe.test(t.description||"");
-          const byAmt=fee>0&&Math.abs(amt-fee)<=Math.max(5,fee*0.12);
-          return (parseFloat(t.amount_usd)||0)>0&&(byText||byAmt);
-        });
+        const feeRe=/annual\s*(?:fee|membership)|membership\s*fee|card\s*membership/i;
+        const nonAnnualFeeRe=/(late fee|foreign(?:\s+transaction)? fee|cash advance fee|balance transfer fee|overlimit fee|returned payment fee|interest charge|finance charge)/i;
+        const feeMatches=fee>0?cardTxns.filter(t=>{
+          const raw=parseFloat(t.amount_usd)||0;
+          if(raw<=0)return false;
+          const desc=t.description||"";
+          const byText=feeRe.test(desc);
+          if(!byText)return false;
+          if(nonAnnualFeeRe.test(desc))return false;
+          const tol=Math.max(5,fee*0.10);
+          return Math.abs(raw-fee)<=tol;
+        }):[];
 
         const itemGroups={};
         for(const r of cardRows){

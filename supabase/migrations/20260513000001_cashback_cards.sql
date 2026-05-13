@@ -42,3 +42,22 @@ SET
   is_active = EXCLUDED.is_active,
   sort_order = EXCLUDED.sort_order,
   updated_at = now();
+
+-- RLS: authenticated-only CRUD (matches pending_imports pattern).
+ALTER TABLE cashback_cards ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "cashback_cards_select" ON cashback_cards;
+CREATE POLICY "cashback_cards_select" ON cashback_cards
+  FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "cashback_cards_insert" ON cashback_cards;
+CREATE POLICY "cashback_cards_insert" ON cashback_cards
+  FOR INSERT TO authenticated WITH CHECK (true);
+
+DROP POLICY IF EXISTS "cashback_cards_update" ON cashback_cards;
+CREATE POLICY "cashback_cards_update" ON cashback_cards
+  FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "cashback_cards_delete" ON cashback_cards;
+CREATE POLICY "cashback_cards_delete" ON cashback_cards
+  FOR DELETE TO authenticated USING (true);
