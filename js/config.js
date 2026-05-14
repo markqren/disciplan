@@ -4,7 +4,7 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 // PostgREST schema routing. Stays "public" until 20260513000003_disciplan_schema.sql
 // is applied; flip to "disciplan" in the same deploy that runs the schema migration.
 // See tasks/disciplan-schema-rollout.md.
-const DB_SCHEMA = "public";
+const DB_SCHEMA = "disciplan";
 const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY, { db: { schema: DB_SCHEMA } });
 let currentSession = null;
 if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
