@@ -187,6 +187,10 @@ async function renderContent(){
   const ob=document.getElementById("offlineBanner");if(ob)ob.classList.add("hidden");
   document.querySelectorAll(".batch-bar").forEach(b=>b.remove());
   const el=document.getElementById("content");
+  if(!el){
+    console.error("renderContent: missing #content container");
+    return;
+  }
   el.innerHTML="";
   if(!navigator.onLine&&(state.tab==="entry"||state.tab==="export")){
     el.innerHTML=`<div class="cd" style="text-align:center;padding:48px 24px"><div style="font-size:32px;margin-bottom:12px">\uD83D\uDCE1</div><h3 style="margin-bottom:8px">Offline Mode</h3><p style="font-size:13px;color:rgba(255,255,255,0.5)">${state.tab==="entry"?"Adding new transactions":"Exporting data"} requires an internet connection.<br>Browse cached data in other tabs while offline.</p></div>`;

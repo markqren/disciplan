@@ -139,22 +139,33 @@ async function renderCashback(el){
         const totalPts=ptsRows.reduce((s,r)=>s+(parseFloat(r.redemption_amount)||0),0);
 
         // Infer annual-fee payments from ledger transactions for this card.
-        // Require BOTH (a) annual-fee-specific phrasing AND (b) amount within ~10% of known fee.
-        // This avoids matching generic "fee" lines (ATM, foreign-tx, late) or unrelated charges that
-        // happen to fall near the fee amount (e.g. statement payments).
+        // Use annual-specific wording (not generic "membership fee"), then keep the dominant
+        // recurring amount bucket to avoid one-off non-card subscriptions (e.g. Splitwise).
         const cardTxns=await sb(`transactions?payment_type=eq.${encodeURIComponent(card)}&order=date.desc&select=id,date,description,amount_usd,category_id`);
-        const feeRe=/annual\s*(?:fee|membership)|membership\s*fee|card\s*membership/i;
+        const feeRe=/(annual\s*(?:fee|membership)|(?:fee|membership)\s*annual|cardmember\s*fee)/i;
         const nonAnnualFeeRe=/(late fee|foreign(?:\s+transaction)? fee|cash advance fee|balance transfer fee|overlimit fee|returned payment fee|interest charge|finance charge)/i;
-        const feeMatches=fee>0?cardTxns.filter(t=>{
+        const annualCandidates=cardTxns.filter(t=>{
           const raw=parseFloat(t.amount_usd)||0;
           if(raw<=0)return false;
           const desc=t.description||"";
           const byText=feeRe.test(desc);
           if(!byText)return false;
           if(nonAnnualFeeRe.test(desc))return false;
-          const tol=Math.max(5,fee*0.10);
-          return Math.abs(raw-fee)<=tol;
-        }):[];
+          return true;
+        });
+        let feeMatches=annualCandidates;
+        if(annualCandidates.length>1){
+          const amountBuckets={};
+          annualCandidates.forEach(t=>{
+            const amt=Math.round(parseFloat(t.amount_usd)||0);
+            if(!amountBuckets[amt])amountBuckets[amt]=[];
+            amountBuckets[amt].push(t);
+          });
+          const dominantAmt=Object.entries(amountBuckets)
+            .sort((a,b)=>b[1].length-a[1].length||parseFloat(b[0])-parseFloat(a[0]))[0][0];
+          const tol=Math.max(3,Math.round(parseFloat(dominantAmt)*0.05));
+          feeMatches=annualCandidates.filter(t=>Math.abs((parseFloat(t.amount_usd)||0)-parseFloat(dominantAmt))<=tol);
+        }
 
         const itemGroups={};
         for(const r of cardRows){
@@ -370,9 +381,11 @@ async function renderCashback(el){
         const newId=result[0]?.id;
         showUndo("\u2713 Redemption: "+fmtF(dv),async()=>{
           if(newId)await sb(`cashback_redemptions?id=eq.${newId}`,{method:"DELETE"});
-          renderCashback(document.getElementById("main"));
+          const root=document.getElementById("content");
+          if(root)renderCashback(root);
         });
-        renderCashback(document.getElementById("main"));
+        const root=document.getElementById("content");
+        if(root)renderCashback(root);
       }catch(e){errEl.textContent="Failed: "+e.message;saveBtn.textContent="Save Redemption";saveBtn.disabled=false}
     };
     const cbState={q:"",card:"all",type:"all",page:1,pageSize:50};
@@ -430,7 +443,9 @@ async function renderCashback(el){
             const redemptionAmount=type==="Points"?(parseFloat(edPts.value)||dv):dv;
             const rate=type==="Points"?(parseFloat(edRate.value)||1)/100:1;
             await sb(`cashback_redemptions?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({date,item,payment_type:card,cashback_type:type,redemption_amount:redemptionAmount,redemption_rate:rate,dollar_value:dv})});
-            bg.remove();renderCashback(document.getElementById("content"));
+            bg.remove();
+            const root=document.getElementById("content");
+            if(root)renderCashback(root);
           }catch(e){errEl.textContent="Failed: "+e.message;saveBtn.textContent="Save";saveBtn.disabled=false}
         };
         modal.querySelector("#cbEdDel").onclick=async()=>{
@@ -442,9 +457,11 @@ async function renderCashback(el){
               bg.remove();
               showUndo("Deleted: "+r.item,async()=>{
                 await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({date:r.date,item:r.item,payment_type:r.payment_type,cashback_type:r.cashback_type,redemption_amount:r.redemption_amount,redemption_rate:r.redemption_rate,dollar_value:r.dollar_value,transaction_id:r.transaction_id})});
-                renderCashback(document.getElementById("content"));
+                const root=document.getElementById("content");
+                if(root)renderCashback(root);
               });
-              renderCashback(document.getElementById("content"));
+              const root=document.getElementById("content");
+              if(root)renderCashback(root);
             }catch(e){delBtn.textContent="Delete";delBtn.disabled=false}
           }else{delBtn.dataset.confirm="1";delBtn.textContent="Confirm Delete";delBtn.style.background="rgba(224,122,95,0.3)"}
         };
