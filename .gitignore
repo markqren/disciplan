@@ -6,3 +6,6 @@ references/
 
 # Local Netlify folder
 .netlify
+
+# Local DB dumps (sensitive)
+backups/

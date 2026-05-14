@@ -11,6 +11,14 @@
 
 ### v2.3 — Apr 26, 2026
 
+#### v2.3.5
+<sub>Deployed 2026-05-13</sub>
+
+##### Infrastructure
+- **FEA-99: Disciplan schema namespace + explicit Data API grants** — Defensive prep ahead of Supabase's Oct 30, 2026 removal of auto-grants on `public`. Phase 1 (live): two new migrations — `20260513000002_data_api_grants.sql` adds explicit `GRANT SELECT/INSERT/UPDATE/DELETE` for `authenticated`, `GRANT ALL` for `service_role` on every existing object in `public`, plus `ALTER DEFAULT PRIVILEGES` so any future table auto-receives grants. `js/config.js` adds `DB_SCHEMA` constant (currently `"public"`), threads it into `createClient`, and sends `Accept-Profile`/`Content-Profile` headers on all Data API requests — functional no-op today, validates the PostgREST schema-routing mechanism for the upcoming move. Both Edge Functions (`daily-insight`, `inbound-email`) now read `DB_SCHEMA` env var (default `"public"`) and pass to `createClient`. Phase 2 (staged, not yet applied): `20260513000003_disciplan_schema.sql` is ready to move all 22 tables + functions/views from `public` → `disciplan` schema, namespacing them away from Nocturnal. Full 6-step rollout runbook + rollback SQL at `tasks/disciplan-schema-rollout.md`. CLAUDE.md updated with the new-table migration template requiring explicit GRANTs and `disciplan.`-qualified names. (~12,000 impl tokens / ~$0.60 session)
+
+---
+
 #### v2.3.1
 <sub>Deployed 2026-04-27</sub>
 
