@@ -11,6 +11,14 @@
 
 ### v2.3 — Apr 26, 2026
 
+#### v2.3.6
+<sub>Deployed 2026-05-14</sub>
+
+##### Features
+- **FEA-100: Newsletter engagement archetypes (Phase C)** — Six new accrual-aware archetypes added to the daily-insight pipeline plus selection-policy upgrades. Builders: `on_this_day_flashback` (storytelling — what your life *cost* on this calendar day in prior years, computed from `daily_cost` overlap not transaction-date amounts so rent/trips/annual subs surface correctly), `streak_or_gap` (rhythm — longest current spending gap among commitment-based parents `food`/`personal`/`entertainment`/`transportation`, ranked vs trailing-12mo distribution), `net_worth_velocity` (longhorizon — 90d net-worth delta vs same window 1y ago, monthly aggregates from `balance_snapshots`), `monthly_burn_forecast` (forward — projected total accrued cost for current month = already-accrued MTD + locked-in remainder + variable forecast, vs trailing-12mo monthly mean), `cashback_roi` (health — YTD effective rate per card with drag-card detection), `trip_year_in_review` (trips — annual rollup from `get_tag_summaries`, fires Jan 1-31 for prior year else YTD). Selection policy v2: `theme` column on `insight_strategy` (backfilled across all 17 archetypes); soft 0.7× score multiplier when same theme appeared in last 3 sends; novelty bonus of `0.3 × (1 − sent_count/5)` decays over first 5 sends so new archetypes get exploration head start. Migration `20260514000001_engagement_archetypes.sql` applied via `db query --linked --file`. Function deployed. Verified via 11-fixture dry-run replay (2025-08 through 2026-05): `on_this_day_flashback` fired 4× including today's "FA Cup Final at Wembley, Airbnb $88/day of $1,406 total" — perfect demo of accrual-correctness (transaction-date semantics would have collapsed the Airbnb to a single booking-day hit). `cashback_roi` fired with $1,742 YTD at 6.25% blended rate, per-card breakdown. AI portal strategy table gains read-only `theme` column. Mark's 2026-05-14 directive baked into design: every builder uses `daily_cost` accrual or has explicit cash-mechanics justification. Future-session tuning hook: query `insight_log` for per-archetype rating averages + comments after ~8-12 weeks of cron sends, recalibrate priority weights, deepen winners, retire bottom performers. (~12,500 impl+verify tokens / ~$0.55 session)
+
+---
+
 #### v2.3.5
 <sub>Deployed 2026-05-13</sub>
 

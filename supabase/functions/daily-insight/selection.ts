@@ -3,7 +3,7 @@
 
 import type { Candidate, ScoredCandidate, Strategy } from "./types.ts";
 
-export const POLICY_NAME = "epsilon_greedy_v1";
+export const POLICY_NAME = "epsilon_greedy_v2";   // FEA-100: theme rotation + novelty bonus
 export const DEFAULT_POLICY_PARAMS = {
   epsilon: 0.15,                // exploration probability — see Opus 4.7 review notes for rationale
   recency_half_life_days: 6,    // how fast recency penalty decays
@@ -11,6 +11,10 @@ export const DEFAULT_POLICY_PARAMS = {
   recency_weight: 0.5,          // contribution of recency penalty to score (subtracted)
   data_strength_weight: 0.2,    // contribution of data_strength to score
   rating_floor_unrated: 6.5,    // unrated archetypes are treated as "average minus a hair" so they're not over-explored
+  novelty_weight: 0.3,          // FEA-100: bonus for under-sampled archetypes; decays over first 5 sends
+  novelty_decay_sends: 5,       // FEA-100: # of sends after which novelty bonus is fully decayed
+  theme_rotation_lookback: 3,   // FEA-100: penalize candidates whose theme appeared in last N sends
+  theme_rotation_penalty: 0.7,  // FEA-100: multiplier applied (1.0 = no penalty, 0.7 = soft 30% cut)
 };
 
 export interface PolicyParams {
@@ -20,6 +24,10 @@ export interface PolicyParams {
   recency_weight: number;
   data_strength_weight: number;
   rating_floor_unrated: number;
+  novelty_weight: number;
+  novelty_decay_sends: number;
+  theme_rotation_lookback: number;
+  theme_rotation_penalty: number;
 }
 
 export interface SelectionResult {
@@ -77,6 +85,7 @@ export function scoreCandidate(
   strategy: Strategy,
   today: string,
   params: PolicyParams,
+  recentThemes: Array<string | null> = [],   // FEA-100: themes of last N sends, oldest→newest
 ): ScoredCandidate {
   const avgRating = strategy.rated_count > 0
     ? strategy.rating_sum / strategy.rated_count
@@ -88,14 +97,32 @@ export function scoreCandidate(
     : 365;
   const recencyPenalty = Math.exp(-daysSinceUsed / Math.max(1, params.recency_half_life_days));
 
-  const score =
+  // FEA-100 novelty bonus: linearly decays over the first novelty_decay_sends.
+  // Encourages exploration of newly-released archetypes without disabling old ones.
+  const noveltyBonus = strategy.sent_count < params.novelty_decay_sends
+    ? params.novelty_weight * (1 - strategy.sent_count / params.novelty_decay_sends)
+    : 0;
+
+  // FEA-100 theme rotation: if this candidate's theme appeared in the last N
+  // sends, multiply the score by theme_rotation_penalty. Soft penalty — bandit
+  // can still pick the candidate if it's clearly best on other dimensions.
+  // Strategies without a theme (parse_fallback, anything not yet categorised)
+  // get no rotation pressure.
+  const themePenalty = strategy.theme && recentThemes.includes(strategy.theme)
+    ? params.theme_rotation_penalty
+    : 1.0;
+
+  const baseScore =
       strategy.priority_weight
     + params.rating_weight        * ratingSignal
     - params.recency_weight       * recencyPenalty
-    + params.data_strength_weight * candidate.data_strength;
+    + params.data_strength_weight * candidate.data_strength
+    + noveltyBonus;
+  const score = baseScore * themePenalty;
 
   return {
     ...candidate,
+    theme: strategy.theme,
     passes_policy_gate: false,           // filled in later by the selector caller
     policy_gate_reason: null,
     score,
@@ -104,6 +131,8 @@ export function scoreCandidate(
       rating_signal: ratingSignal,
       recency_penalty: recencyPenalty,
       data_strength: candidate.data_strength,
+      novelty_bonus: noveltyBonus,
+      theme_penalty: themePenalty,
     },
   };
 }
@@ -128,14 +157,21 @@ export function selectCandidate(
   thisMonthSentCount: Record<string, number>,
   params: PolicyParams = DEFAULT_POLICY_PARAMS,
   rng: Rng = Math.random,
+  recentInsightTypes: string[] = [],   // FEA-100: insight_types of last N sends, newest→oldest
 ): SelectionResult | null {
+  // Map recent insight_types → themes for the rotation penalty. Anything not in
+  // the strategy map (deleted/disabled types) maps to null and contributes no pressure.
+  const recentThemes = recentInsightTypes
+    .slice(0, params.theme_rotation_lookback)
+    .map(t => strategies.get(t)?.theme ?? null);
+
   const scored: ScoredCandidate[] = [];
 
   for (const c of candidates) {
     const strategy = strategies.get(c.insight_type);
     if (!strategy) continue;
     const gate = passesPolicyGate(c, strategy, { today, this_month_sent_count: thisMonthSentCount });
-    const sc = scoreCandidate(c, strategy, today, params);
+    const sc = scoreCandidate(c, strategy, today, params, recentThemes);
     sc.passes_policy_gate = gate.ok;
     sc.policy_gate_reason = gate.reason;
     scored.push(sc);

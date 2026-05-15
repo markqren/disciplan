@@ -230,6 +230,7 @@ function renderStrategyTable(strategies,parentEl){
   const cols=[
     {label:"On",width:"40px"},
     {label:"Type",width:"180px"},
+    {label:"Theme",width:"100px"},
     {label:"Avg",width:"60px"},
     {label:"Sent",width:"50px"},
     {label:"Rated",width:"50px"},
@@ -266,6 +267,7 @@ function renderStrategyTable(strategies,parentEl){
       typeTd.title=s.notes;
     }
 
+    const themeTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.45)",fontSize:"11px",whiteSpace:"nowrap"}},s.theme||"—");
     const avgTd=h("td",{style:{padding:"6px 10px",color:avg==null?"rgba(255,255,255,0.25)":(avg>=7?"var(--g)":avg>=5?"var(--y)":"var(--r)"),fontWeight:"600"}},avg==null?"—":(avg+"/10"));
     const sentTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.7)"}},s.sent_count||0);
     const ratedTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.7)"}},s.rated_count||0);
@@ -294,7 +296,7 @@ function renderStrategyTable(strategies,parentEl){
     const lastUsedTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.4)",fontSize:"11px"}},s.last_used_at?s.last_used_at.slice(0,10):"never");
     const skipTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.35)",fontSize:"11px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"260px"},title:s.last_skip_reason||""},(s.last_skip_reason||"").slice(0,40));
 
-    tr.append(enabledTd,typeTd,avgTd,sentTd,ratedTd,cooldownTd,monthlyTd,weightTd,lastUsedTd,skipTd);
+    tr.append(enabledTd,typeTd,themeTd,avgTd,sentTd,ratedTd,cooldownTd,monthlyTd,weightTd,lastUsedTd,skipTd);
     tbody.append(tr);
   }
 

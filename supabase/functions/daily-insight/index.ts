@@ -31,20 +31,28 @@ import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-
 
 import type {
   Candidate,
+  CashbackByCard,
+  CashbackYtd,
   CategorySchema,
   Features,
+  FlashbackContributor,
+  FlashbackDayBreakdown,
   HealthCheckResult,
   ISRow,
   InsightContextRow,
   InsightLogRow,
   InsightResponse,
+  MonthlyBurnInputs,
   MonthlyMap,
+  NetWorthPoint,
   PastTagCandidate,
   ScoredCandidate,
+  StreakStats,
   Strategy,
   TagRow,
   TagSummary,
   Transaction,
+  TripYearEntry,
   TxnDetail,
 } from "./types.ts";
 import { DEFAULT_BUDGET_TARGETS, buildCandidates } from "./archetypes.ts";
@@ -271,6 +279,26 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
   // bound query cost (each tag adds ~1 query).
   const pastTagCandidates = await fetchPastTagCandidates(supabase, today);
 
+  // ── Phase C: engagement-archetype features (FEA-100) ───────────────────────
+  // Six new feature sets, all parallelised. Each fetcher degrades gracefully on
+  // empty source data so the corresponding archetype builder cleanly returns
+  // `ineligible` rather than crashing.
+  const [
+    flashbackByYear,
+    streakStats,
+    netWorthSeries,
+    monthlyBurnInputs,
+    cashbackYtd,
+    tripsByYear,
+  ] = await Promise.all([
+    fetchFlashbackByYear(supabase, today),
+    fetchStreakStats(supabase, today, schema),
+    fetchNetWorthSeries(supabase, today),
+    fetchMonthlyBurnInputs(supabase, today, expenses),
+    fetchCashbackYtd(supabase, today),
+    fetchTripsByYear(supabase, today, tagSummaries as TagSummary[] | null),
+  ]);
+
   const features: Features = {
     today,
     monthDay,
@@ -287,6 +315,12 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     activeTags: (activeTags || []) as TagRow[],
     tagSummaries: (tagSummaries || []) as TagSummary[],
     pastTagCandidates,
+    flashbackByYear,
+    streakStats,
+    netWorthSeries,
+    monthlyBurnInputs,
+    cashbackYtd,
+    tripsByYear,
   };
   return { features, history, principles };
 }
@@ -439,6 +473,501 @@ async function fetchPastTagCandidates(supabase: SupabaseClient, today: string): 
   return enriched;
 }
 
+// ── Phase C helpers (FEA-100): engagement archetypes ────────────────────────
+
+// Day-overlap helpers — used by accrual-based archetypes that need to compute
+// "what was your life costing on day D" rather than "what cleared on day D".
+// Inclusive on both ends; matches Disciplan's `service_days = end - start + 1`.
+function overlapsDate(serviceStart: string | null, serviceEnd: string | null, dateIso: string): boolean {
+  if (!serviceStart || !serviceEnd) return false;
+  return serviceStart <= dateIso && dateIso <= serviceEnd;
+}
+function overlapDays(serviceStart: string | null, serviceEnd: string | null, rangeStartIso: string, rangeEndIso: string): number {
+  if (!serviceStart || !serviceEnd) return 0;
+  const s = serviceStart > rangeStartIso ? serviceStart : rangeStartIso;
+  const e = serviceEnd   < rangeEndIso   ? serviceEnd   : rangeEndIso;
+  if (s > e) return 0;
+  return Math.round((Date.parse(e) - Date.parse(s)) / 86_400_000) + 1;
+}
+
+// Paginated fetch — Supabase caps each request at 1000 rows. Mirrors the
+// js/config.js sb() pattern but using the official client's range API.
+async function fetchAllPages<T>(
+  build: () => { range: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }> },
+): Promise<T[]> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await build().range(offset, offset + PAGE - 1);
+    if (error) {
+      console.error("fetchAllPages error:", error);
+      break;
+    }
+    const rows = data || [];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    offset += PAGE;
+  }
+  return out;
+}
+
+// computeDailyAccrualForDate: shared helper. Returns the accrual snapshot for a
+// single calendar day — every txn whose service period overlaps that day
+// contributes its `daily_cost` (already DB-computed). This is the Disciplan
+// answer to "what did your life cost on date D".
+async function computeDailyAccrualForDate(
+  supabase: SupabaseClient,
+  dateIso: string,
+): Promise<FlashbackDayBreakdown | null> {
+  // service_start <= date AND service_end >= date.
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("description,category_id,daily_cost,amount_usd,service_start,service_end,tag")
+    .lte("service_start", dateIso)
+    .gte("service_end", dateIso)
+    .not("category_id", "in", "(income,investment,adjustment)")
+    .gt("daily_cost", 0)
+    .order("daily_cost", { ascending: false })
+    .limit(500);
+  if (error) {
+    console.error(`computeDailyAccrualForDate ${dateIso} error:`, error);
+    return null;
+  }
+  const rows = (data || []) as Array<{ description: string | null; category_id: string; daily_cost: number; amount_usd: number; service_start: string; service_end: string; tag: string | null }>;
+  if (rows.length === 0) {
+    return {
+      year: parseInt(dateIso.slice(0, 4), 10),
+      date: dateIso,
+      total_daily_cost: 0,
+      parent_breakdown: {},
+      top_contributors: [],
+      active_tag: null,
+    };
+  }
+  const total_daily_cost = rows.reduce((s, r) => s + (Number(r.daily_cost) || 0), 0);
+  // Parent breakdown is computed in archetype builder (it has the schema). Here
+  // we ship raw category_id totals; archetypes.ts rolls them up.
+  const cat_breakdown: Record<string, number> = {};
+  for (const r of rows) {
+    cat_breakdown[r.category_id] = (cat_breakdown[r.category_id] || 0) + (Number(r.daily_cost) || 0);
+  }
+  const top_contributors: FlashbackContributor[] = rows.slice(0, 5).map(r => ({
+    description: r.description || "",
+    category_id: r.category_id,
+    daily_cost: Number(r.daily_cost) || 0,
+    service_start: r.service_start,
+    service_end: r.service_end,
+    amount_usd: Number(r.amount_usd) || 0,
+    tag: r.tag,
+  }));
+  const active_tag = rows.find(r => r.tag)?.tag ?? null;
+  return {
+    year: parseInt(dateIso.slice(0, 4), 10),
+    date: dateIso,
+    total_daily_cost,
+    parent_breakdown: cat_breakdown,   // child-id keyed; archetype rolls to parents
+    top_contributors,
+    active_tag,
+  };
+}
+
+async function fetchFlashbackByYear(supabase: SupabaseClient, today: string): Promise<Record<string, FlashbackDayBreakdown>> {
+  const [yyyy, mm, dd] = today.split("-");
+  const cy = parseInt(yyyy, 10);
+  const out: Record<string, FlashbackDayBreakdown> = {};
+  // Up to 9 prior years + today (current year). The archetype reads today's
+  // bucket separately to drive the "today's daily cost vs same day in prior
+  // years" comparison; eligibility checks only look at prior years.
+  const years: number[] = [cy];
+  for (let i = 1; i <= 9; i++) years.push(cy - i);
+  const results = await Promise.all(years.map(y => computeDailyAccrualForDate(supabase, `${y}-${mm}-${dd}`)));
+  for (let i = 0; i < years.length; i++) {
+    const r = results[i];
+    if (r && r.total_daily_cost > 0) {
+      out[String(years[i])] = r;
+    }
+  }
+  return out;
+}
+
+// streak_or_gap fetcher.
+// Restricted to commitment-based parents where streaks are narratively meaningful
+// (no always-on subscriptions). For each parent: pull all txn dates in trailing
+// 12mo where service_days <= 7 (i.e. a "spend event", not an always-on accrual);
+// compute current gap (today − last_spend_date) and rank against historical gaps.
+const STREAK_PARENTS = ["food", "personal", "entertainment", "transportation"];
+
+async function fetchStreakStats(
+  supabase: SupabaseClient,
+  today: string,
+  schema: { parentRollup: Record<string, string[]> },
+): Promise<Record<string, StreakStats>> {
+  const trailingStart = new Date(Date.parse(today) - 365 * 86_400_000).toISOString().slice(0, 10);
+  const out: Record<string, StreakStats> = {};
+
+  for (const parent of STREAK_PARENTS) {
+    const childIds = schema.parentRollup[parent];
+    if (!childIds || childIds.length === 0) continue;
+
+    // Pull DISTINCT dates only — keeps the row count small even for high-frequency
+    // parents. We coerce service_days <= 7 OR null to exclude always-on subs that
+    // would mark every day as a "spend day" and drown the streak signal.
+    const rows = await fetchAllPages<{ date: string }>(() =>
+      supabase
+        .from("transactions")
+        .select("date")
+        .gte("date", trailingStart)
+        .lte("date", today)
+        .in("category_id", childIds)
+        .or("service_days.is.null,service_days.lte.7")
+        .gt("amount_usd", 0)
+        .order("date", { ascending: false })
+    );
+
+    const dateSet = new Set(rows.map(r => r.date));
+    const sortedDates = Array.from(dateSet).sort();   // ascending
+
+    // Current gap: days from most-recent spend date to today, exclusive of that date.
+    const lastSpendDate = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : null;
+    const todayMs = Date.parse(today);
+    const current_gap_days = lastSpendDate
+      ? Math.round((todayMs - Date.parse(lastSpendDate)) / 86_400_000)
+      : Math.round((todayMs - Date.parse(trailingStart)) / 86_400_000);
+
+    // Historical gaps in the trailing-12mo window. Walk consecutive dates.
+    const gaps: Array<{ gap_days: number; ended_on: string | null }> = [];
+    if (sortedDates.length === 0) {
+      gaps.push({ gap_days: current_gap_days, ended_on: null });
+    } else {
+      // Leading gap from window start to first spend date.
+      const firstMs = Date.parse(sortedDates[0]);
+      const leading = Math.round((firstMs - Date.parse(trailingStart)) / 86_400_000);
+      if (leading > 0) gaps.push({ gap_days: leading, ended_on: sortedDates[0] });
+      // Internal gaps.
+      for (let i = 1; i < sortedDates.length; i++) {
+        const g = Math.round((Date.parse(sortedDates[i]) - Date.parse(sortedDates[i - 1])) / 86_400_000);
+        if (g > 1) gaps.push({ gap_days: g - 1, ended_on: sortedDates[i] });   // -1 because consecutive days have gap=0
+      }
+    }
+    // Add the in-flight current gap at the head, marked as "ongoing" via ended_on=null.
+    const allGaps = [...gaps, { gap_days: current_gap_days, ended_on: null as string | null }];
+    allGaps.sort((a, b) => b.gap_days - a.gap_days);
+    const trailing12_top3_gaps = allGaps.slice(0, 3);
+    const ytd_longest_gap_days = allGaps[0]?.gap_days || 0;
+    const rank_in_trailing12 = allGaps.findIndex(g => g.ended_on === null && g.gap_days === current_gap_days) + 1;
+
+    out[parent] = {
+      parent,
+      current_gap_days,
+      last_spend_date: lastSpendDate,
+      ytd_longest_gap_days,
+      trailing12_top3_gaps,
+      rank_in_trailing12: rank_in_trailing12 || allGaps.length,
+    };
+  }
+  return out;
+}
+
+// net_worth_velocity fetcher.
+// Reads balance_snapshots joined with accounts to know account_type, aggregates
+// per snapshot_date, then rolls up to monthly buckets (last snapshot of each
+// month wins — same heuristic as the Balance Sheet UI).
+async function fetchNetWorthSeries(supabase: SupabaseClient, today: string): Promise<NetWorthPoint[]> {
+  const startIso = new Date(Date.parse(today) - 24 * 31 * 86_400_000).toISOString().slice(0, 10);
+  const rows = await fetchAllPages<{ snapshot_date: string; balance_usd: number; accounts: { account_type: string } | null }>(() =>
+    supabase
+      .from("balance_snapshots")
+      .select("snapshot_date,balance_usd,accounts!inner(account_type)")
+      .gte("snapshot_date", startIso)
+      .lte("snapshot_date", today)
+      .order("snapshot_date", { ascending: true })
+  );
+  if (rows.length === 0) return [];
+
+  // Group by snapshot_date first (the "balance sheet at date D" view).
+  type DayAgg = { liquid: number; invested: number; net: number };
+  const byDate = new Map<string, DayAgg>();
+  for (const r of rows) {
+    const d = r.snapshot_date;
+    const t = r.accounts?.account_type || "other";
+    const b = Number(r.balance_usd) || 0;
+    const cur = byDate.get(d) || { liquid: 0, invested: 0, net: 0 };
+    if (t === "checking" || t === "savings") cur.liquid += b;
+    if (t === "investment") cur.invested += b;
+    if (t === "checking" || t === "savings" || t === "investment" || t === "other") cur.net += b;
+    if (t === "credit" || t === "liability" || t === "working_capital") cur.net -= Math.abs(b);
+    byDate.set(d, cur);
+  }
+  // Roll daily snapshots up into monthly points — last snapshot date per month wins.
+  type MonthAgg = { month: string; total_liquid: number; total_invested: number; total_net: number; snapshot_count: number };
+  const byMonth = new Map<string, MonthAgg>();
+  for (const [date, agg] of byDate.entries()) {
+    const mk = date.slice(0, 7);
+    const existing = byMonth.get(mk);
+    if (!existing || existing.month < date.slice(0, 7)) {
+      // Same-month snapshots: the *latest* date wins. Keep total_count incremented.
+      byMonth.set(mk, {
+        month: mk,
+        total_liquid: agg.liquid,
+        total_invested: agg.invested,
+        total_net: agg.net,
+        snapshot_count: (existing?.snapshot_count || 0) + 1,
+      });
+    } else {
+      existing.snapshot_count += 1;
+    }
+  }
+  return Array.from(byMonth.values()).sort((a, b) => a.month.localeCompare(b.month));
+}
+
+// monthly_burn_forecast fetcher.
+// Splits each current-month-overlapping txn's daily_cost between the past
+// portion (already accrued through today) and the future portion (locked-in
+// remainder). Then estimates variable_forecast from trailing-30d short-window
+// txns. trailing_12mo_monthly_mean comes from the already-built `expenses` map.
+async function fetchMonthlyBurnInputs(
+  supabase: SupabaseClient,
+  today: string,
+  expenses: MonthlyMap,
+): Promise<MonthlyBurnInputs | null> {
+  const [yyyy, mm] = today.split("-").map(Number);
+  const monthKey = today.slice(0, 7);
+  const daysInMonth = new Date(Date.UTC(yyyy, mm, 0)).getUTCDate();
+  const month_day = parseInt(today.slice(8, 10), 10);
+  const monthStart = `${monthKey}-01`;
+  const monthEnd = `${monthKey}-${String(daysInMonth).padStart(2, "0")}`;
+  const remainderStart = month_day < daysInMonth
+    ? `${monthKey}-${String(month_day + 1).padStart(2, "0")}`
+    : null;
+
+  // All txns whose service period overlaps the current month and aren't income/transfer.
+  const rows = await fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string; amount_usd: number; date: string; service_days: number | null }>(() =>
+    supabase
+      .from("transactions")
+      .select("daily_cost,service_start,service_end,category_id,amount_usd,date,service_days")
+      .lte("service_start", monthEnd)
+      .gte("service_end", monthStart)
+      .not("category_id", "in", "(income,investment,adjustment)")
+      .gt("daily_cost", 0)
+  );
+
+  let already_accrued_mtd = 0;
+  let locked_in_remainder = 0;
+  for (const r of rows) {
+    const dc = Number(r.daily_cost) || 0;
+    if (dc <= 0) continue;
+    already_accrued_mtd += dc * overlapDays(r.service_start, r.service_end, monthStart, today);
+    if (remainderStart) {
+      locked_in_remainder += dc * overlapDays(r.service_start, r.service_end, remainderStart, monthEnd);
+    }
+  }
+
+  // Variable forecast: trailing-30d daily-cost from short-window txns. Excludes
+  // long-window service periods (rent, annual subs, trips that pre-paid) so we
+  // don't double-count what's already in locked_in_remainder.
+  const trailingStart = new Date(Date.parse(today) - 30 * 86_400_000).toISOString().slice(0, 10);
+  const variableRows = await fetchAllPages<{ amount_usd: number }>(() =>
+    supabase
+      .from("transactions")
+      .select("amount_usd")
+      .gte("date", trailingStart)
+      .lte("date", today)
+      .not("category_id", "in", "(income,investment,adjustment)")
+      .or("service_days.is.null,service_days.lte.7")
+      .gt("amount_usd", 0)
+  );
+  const trailing_30d_variable_total = variableRows.reduce((s, r) => s + (Number(r.amount_usd) || 0), 0);
+  const trailing_30d_variable_daily_rate = trailing_30d_variable_total / 30;
+  const days_remaining = Math.max(0, daysInMonth - month_day);
+  const variable_forecast = trailing_30d_variable_daily_rate * days_remaining;
+
+  const projected_total = already_accrued_mtd + locked_in_remainder + variable_forecast;
+
+  // Trailing 12mo monthly mean from the already-built `expenses` map. Sum each
+  // prior-month parent total then average. This is *expense* parents only
+  // (income / investment / adjustment are already excluded upstream).
+  const months: string[] = [];
+  for (let i = 1; i <= 12; i++) {
+    const d = new Date(Date.UTC(yyyy, (mm - 1) - i, 1));
+    months.push(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+  }
+  const monthlySums = months
+    .map(mk => {
+      const m = expenses[mk];
+      if (!m) return 0;
+      return Object.values(m).reduce((s, v) => s + v, 0);
+    })
+    .filter(v => v > 0);
+  const trailing_12mo_monthly_mean = monthlySums.length > 0
+    ? monthlySums.reduce((s, v) => s + v, 0) / monthlySums.length
+    : 0;
+
+  // Same calendar month 1y ago — apples-to-apples seasonal comparison.
+  const sameMonthAgo = `${yyyy - 1}-${today.slice(5, 7)}`;
+  const sameMonthMap = expenses[sameMonthAgo];
+  const same_month_1y_ago_total = sameMonthMap
+    ? Object.values(sameMonthMap).reduce((s, v) => s + v, 0)
+    : null;
+
+  if (monthlySums.length < 3) {
+    // Not enough history for the comparison to be meaningful; archetype will
+    // see this and return ineligible.
+    return null;
+  }
+
+  return {
+    month_key: monthKey,
+    days_in_month: daysInMonth,
+    month_day,
+    already_accrued_mtd,
+    locked_in_remainder,
+    trailing_30d_variable_daily_rate,
+    variable_forecast,
+    projected_total,
+    trailing_12mo_monthly_mean,
+    same_month_1y_ago_total,
+  };
+}
+
+// cashback_roi fetcher.
+// YTD cashback by payment_type, joined to YTD eligible spend by payment_type.
+// Cashback is a single-day event so transaction-date is correct here (this is
+// not an accrual archetype — it's about card-rate optimization, which is
+// inherently cash/event-based).
+async function fetchCashbackYtd(supabase: SupabaseClient, today: string): Promise<CashbackYtd | null> {
+  const cy = parseInt(today.slice(0, 4), 10);
+  const yearStart = `${cy}-01-01`;
+
+  // Cashback redemptions YTD.
+  const cbRows = await fetchAllPages<{ payment_type: string | null; dollar_value: number }>(() =>
+    supabase
+      .from("cashback_redemptions")
+      .select("payment_type,dollar_value")
+      .gte("date", yearStart)
+      .lte("date", today)
+  );
+  if (cbRows.length === 0) return null;
+
+  const cashbackByCard = new Map<string, number>();
+  let ytd_total_cashback = 0;
+  for (const r of cbRows) {
+    const pt = (r.payment_type || "Unknown").trim();
+    const v = Number(r.dollar_value) || 0;
+    if (v <= 0) continue;
+    cashbackByCard.set(pt, (cashbackByCard.get(pt) || 0) + v);
+    ytd_total_cashback += v;
+  }
+
+  // YTD eligible spend by payment_type — only payment_types that have any cashback.
+  // Excludes income/investment/adjustment so we measure card spend, not transfers.
+  const cards = Array.from(cashbackByCard.keys());
+  if (cards.length === 0) return null;
+
+  const spendRows = await fetchAllPages<{ payment_type: string | null; amount_usd: number }>(() =>
+    supabase
+      .from("transactions")
+      .select("payment_type,amount_usd")
+      .gte("date", yearStart)
+      .lte("date", today)
+      .in("payment_type", cards)
+      .not("category_id", "in", "(income,investment,adjustment)")
+      .gt("amount_usd", 0)
+  );
+  const spendByCard = new Map<string, number>();
+  for (const r of spendRows) {
+    const pt = (r.payment_type || "Unknown").trim();
+    spendByCard.set(pt, (spendByCard.get(pt) || 0) + (Number(r.amount_usd) || 0));
+  }
+  const ytd_eligible_spend = Array.from(spendByCard.values()).reduce((s, v) => s + v, 0);
+
+  const by_card: CashbackByCard[] = cards.map(pt => {
+    const cb = cashbackByCard.get(pt) || 0;
+    const sp = spendByCard.get(pt) || 0;
+    return {
+      payment_type: pt,
+      cashback_usd: cb,
+      eligible_spend_usd: sp,
+      effective_rate: sp > 0 ? cb / sp : null,
+    };
+  }).sort((a, b) => b.cashback_usd - a.cashback_usd);
+
+  return {
+    year: cy,
+    ytd_total_cashback,
+    ytd_eligible_spend,
+    ytd_effective_rate: ytd_eligible_spend > 0 ? ytd_total_cashback / ytd_eligible_spend : 0,
+    by_card,
+  };
+}
+
+// trip_year_in_review fetcher.
+// Aggregates completed trip-style tags by end_date.year. Uses get_tag_summaries
+// (already accrual-correct via overlap days). "Trip-style" = tag_type in trip set
+// OR (no tag_type AND duration > 1 day AND duration < 60 days).
+const TRIP_TAG_TYPES = new Set(["trip", "vacation", "travel"]);
+
+async function fetchTripsByYear(
+  supabase: SupabaseClient,
+  today: string,
+  tagSummaries: TagSummary[] | null,
+): Promise<Record<string, TripYearEntry[]>> {
+  const { data: tagsRaw } = await supabase
+    .from("tags")
+    .select("name,start_date,end_date,tag_type")
+    .not("end_date", "is", null)
+    .lte("end_date", today);
+  const tags = (tagsRaw || []) as TagRow[];
+  if (tags.length === 0) return {};
+
+  const summaryByName = new Map<string, TagSummary>();
+  for (const s of tagSummaries || []) summaryByName.set(s.tag_name, s);
+
+  const out: Record<string, TripYearEntry[]> = {};
+  for (const t of tags) {
+    if (!t.end_date) continue;
+    const startMs = Date.parse(t.start_date);
+    const endMs   = Date.parse(t.end_date);
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) continue;
+    const duration_days = Math.max(1, Math.round((endMs - startMs) / 86_400_000) + 1);
+
+    const isTripType = t.tag_type ? TRIP_TAG_TYPES.has(t.tag_type) : false;
+    const looksLikeTrip = !t.tag_type && duration_days >= 2 && duration_days <= 60;
+    if (!isTripType && !looksLikeTrip) continue;
+
+    const sum = summaryByName.get(t.name);
+    if (!sum) continue;
+    const total_accrual = Number(sum.total_accrual) || 0;
+    if (total_accrual <= 0) continue;
+    const daily_burn = total_accrual / duration_days;
+
+    let top_category: string | null = null;
+    if (sum.category_totals) {
+      let best = -Infinity;
+      for (const [cat, amt] of Object.entries(sum.category_totals)) {
+        const v = Number(amt) || 0;
+        if (v > best) { best = v; top_category = cat; }
+      }
+    }
+
+    const yearKey = t.end_date.slice(0, 4);
+    (out[yearKey] ||= []).push({
+      name: t.name,
+      start_date: t.start_date,
+      end_date: t.end_date,
+      duration_days,
+      total_accrual,
+      daily_burn,
+      top_category,
+    });
+  }
+  // Sort each year's trips by total_accrual desc.
+  for (const yr of Object.keys(out)) {
+    out[yr].sort((a, b) => b.total_accrual - a.total_accrual);
+  }
+  return out;
+}
+
 async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, Strategy>> {
   const { data, error } = await supabase
     .from("insight_strategy")
@@ -460,6 +989,7 @@ async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, St
       rating_sum:        row.rating_sum ?? 0,
       rating_sumsq:      row.rating_sumsq ?? 0,
       requires:          (row.requires as Record<string, unknown> | null) ?? {},
+      theme:             row.theme ?? null,
     };
     map.set(row.insight_type, r);
   }
@@ -643,6 +1173,7 @@ function tryParseInsight(text: string): InsightResponse | null {
 function summarizeCandidatesForLog(scored: ScoredCandidate[], selected: ScoredCandidate): unknown[] {
   return scored.map(s => ({
     insight_type: s.insight_type,
+    theme: s.theme,
     eligible: s.eligible,
     passed_gate: s.passes_policy_gate,
     score: Number(s.score.toFixed(4)),
@@ -651,6 +1182,8 @@ function summarizeCandidatesForLog(scored: ScoredCandidate[], selected: ScoredCa
       rs: Number(s.score_components.rating_signal.toFixed(3)),
       rp: Number(s.score_components.recency_penalty.toFixed(3)),
       ds: Number(s.score_components.data_strength.toFixed(3)),
+      nb: Number(s.score_components.novelty_bonus.toFixed(3)),
+      tp: Number(s.score_components.theme_penalty.toFixed(3)),
     },
     reason: s.policy_gate_reason || s.ineligibility_reason || null,
     summary: s.summary,
@@ -752,8 +1285,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   // ── 3. Select via policy gate + scoring + epsilon-greedy ──────────────────
   const monthlySent = tallyMonthlySent(today, history.map(h => ({ insight_type: h.insight_type, created_at: h.created_at })));
+  // FEA-100: theme history of last 3 sends drives the rotation soft penalty.
+  // We hand the selector both the typed Strategy map (for theme lookup) and the
+  // most-recent insight_types so it can derive themes of recent sends.
+  const recentInsightTypes = history.slice(0, 3).map(h => h.insight_type);
   const selection = candidates.length
-    ? selectCandidate(candidates, strategies, today, monthlySent)
+    ? selectCandidate(candidates, strategies, today, monthlySent, undefined, undefined, recentInsightTypes)
     : null;
 
   let chosen: ScoredCandidate | null = selection?.selected ?? null;

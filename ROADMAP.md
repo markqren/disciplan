@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** May 13, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** May 14, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,14 @@
 ## 🚀 Releases
 
 ### v2.3 — Apr 26, 2026
+
+#### v2.3.6
+<sub>Deployed 2026-05-14</sub>
+
+##### Features
+- **FEA-100: Newsletter engagement archetypes (Phase C)** — Six new accrual-aware archetypes added to the daily-insight pipeline plus selection-policy upgrades. Builders: `on_this_day_flashback` (storytelling — what your life *cost* on this calendar day in prior years, computed from `daily_cost` overlap not transaction-date amounts so rent/trips/annual subs surface correctly), `streak_or_gap` (rhythm — longest current spending gap among commitment-based parents `food`/`personal`/`entertainment`/`transportation`, ranked vs trailing-12mo distribution), `net_worth_velocity` (longhorizon — 90d net-worth delta vs same window 1y ago, monthly aggregates from `balance_snapshots`), `monthly_burn_forecast` (forward — projected total accrued cost for current month = already-accrued MTD + locked-in remainder + variable forecast, vs trailing-12mo monthly mean), `cashback_roi` (health — YTD effective rate per card with drag-card detection), `trip_year_in_review` (trips — annual rollup from `get_tag_summaries`, fires Jan 1-31 for prior year else YTD). Selection policy v2: `theme` column on `insight_strategy` (backfilled across all 17 archetypes); soft 0.7× score multiplier when same theme appeared in last 3 sends; novelty bonus of `0.3 × (1 − sent_count/5)` decays over first 5 sends so new archetypes get exploration head start. Migration `20260514000001_engagement_archetypes.sql` applied via `db query --linked --file`. Function deployed. Verified via 11-fixture dry-run replay (2025-08 through 2026-05): `on_this_day_flashback` fired 4× including today's "FA Cup Final at Wembley, Airbnb $88/day of $1,406 total" — perfect demo of accrual-correctness (transaction-date semantics would have collapsed the Airbnb to a single booking-day hit). `cashback_roi` fired with $1,742 YTD at 6.25% blended rate, per-card breakdown. AI portal strategy table gains read-only `theme` column. Mark's 2026-05-14 directive baked into design: every builder uses `daily_cost` accrual or has explicit cash-mechanics justification. Future-session tuning hook: query `insight_log` for per-archetype rating averages + comments after ~8-12 weeks of cron sends, recalibrate priority weights, deepen winners, retire bottom performers. (~12,500 impl+verify tokens / ~$0.55 session)
+
+---
 
 #### v2.3.5
 <sub>Deployed 2026-05-13</sub>
@@ -395,12 +403,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (147 items)</summary>
+<summary><strong>✅ Completed</strong> (148 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-100 | **Newsletter engagement archetypes (Phase C)** — Six new accrual-aware archetypes added to `daily-insight`: `on_this_day_flashback` (storytelling — daily-cost overlap on this calendar day across prior 9 years; rent/trips/annual subs surface correctly), `streak_or_gap` (rhythm — longest current spending gap among commitment-based parents food/personal/entertainment/transportation, ranked vs trailing-12mo), `net_worth_velocity` (longhorizon — 90d net-worth delta vs same window 1y ago from `balance_snapshots`), `monthly_burn_forecast` (forward — projected total accrued cost for current month from already-accrued MTD + locked-in remainder + variable forecast), `cashback_roi` (health — YTD effective rate per card with drag-card detection), `trip_year_in_review` (trips — annual rollup from `get_tag_summaries`). Selection policy v2: `theme` column on `insight_strategy` backfilled across all 17 archetypes; soft 0.7× score multiplier when same theme appeared in last 3 sends; novelty bonus `0.3 × (1 − sent_count/5)` decays over first 5 sends. AI portal strategy table gains read-only `theme` column. Verified via 11-fixture replay; today's flashback fired with "FA Cup Final at Wembley, Airbnb $88/day of $1,406 total" — accrual-correctness demo (transaction-date semantics would have collapsed the Airbnb to a single booking-day hit). | Feature → Done | May 14 |
 | FEA-98 | **Newsletter Admin Portal v2 + Inbound Feedback Guardrails** — `#ai/Newsletter` tab gains 6 KPI cards (sends, rated %, avg rating, total cost, parse fallbacks, dry-run replays), strategy table (priority weights, cooldowns, monthly caps, last-used reasons), pending principles approval queue (approve/reject inline), recent selection traces (top-N candidates with eligibility reasons), and a dry-run viewer separated from real sends. Inbound `inbound-email` function now (1) routes any Haiku-distilled principles update into `principles_pending` instead of writing `insight_context` directly, (2) auto-rejects updates with >30% length delta or banned override prefixes (`ignore`, `disregard`, `system:`, etc.) as prompt-injection defense, (3) calls `apply_strategy_feedback` RPC to feed the rating into the bandit (clamped to ±0.10 weight delta, bounded `[0.1, 2.0]`) so a single bad rating cannot zero out an archetype. | Feature → Done | Apr 27 |
 | FEA-97 | **Newsletter Hybrid Insight Engine — Phase A/B archetype reworks** — Refactored `daily-insight` from a single mega-prompt into a deterministic candidate pipeline (`archetypes.ts` + `selection.ts` + `types.ts`) with ε-greedy stochastic selection (`epsilon=0.15`) over scored candidates. Phase A: fixed silent miscounts by reading `EXPENSE_CATS` / `PARENT_ROLLUP` dynamically from the `categories` table at runtime (was hardcoded). Phase B archetype reworks: `tag_recap` replaces `tag_burn_rate` (historical trip recap with 1y/2y/3y anniversary boost ±10 days, overrides recency decay), `category_anomaly` smart-combo drill-down (merchant > tag > description rollup based on concentration), `category_trend` deep-dive (12 *complete* months only, recent-parent exclusion, relative-strength gate `≥0.15` instead of absolute slope, `min_r2=0.10`, excludes `financial`/`other` parents, multi-chart `chart_configs[]` for parent + child stacked bar), `income_breakdown` YoY + 3Y CAGR pivot (requires `day_of_year ≥ 60` and `\|YoY\| ≥ 3%` to avoid partial-month timing). New tables: `insight_strategy` (per-archetype enabled/cooldown/monthly cap/quality score/last-used reason), `insight_selection_log` (full candidate trace), `principles_pending` (approval queue). New `subject_key` column on `insight_log` for structured deduplication (`tag:cozumel`, `parent:food`). Dry-run mode (`?fixture=YYYY-MM-DD`) filters history by fixture cutoff so cooldowns evaluate correctly during historical replay; dry-run responses include `candidates_trace` for debugging. `replay-newsletter.sh` helper for fixture-based testing. 8 migrations. | Feature → Done | Apr 27 |
 | FEA-96 | **Automated Supabase Backup** — GitHub Actions runs weekly, backs up all 6 tables as CSVs (~2.5 MB), uploads 90-day artifact, emails Gmail via Postmark on success. Monthly Mac cron pulls artifact locally with native notification. | Infrastructure → Done | Apr 17 |

@@ -13,7 +13,9 @@
 import type {
   Candidate,
   Features,
+  FlashbackDayBreakdown,
   Strategy,
+  StreakStats,
   Transaction,
   MonthlyMap,
 } from "./types.ts";
@@ -856,6 +858,385 @@ function buildTagRecap(features: Features, strategy: Strategy): Candidate {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase C archetypes (FEA-100): engagement-focused, accrual-aware
+// ──────────────────────────────────────────────────────────────────────────────
+// Mark's 2026-05-14 directive: "don't overindex on amounts paid on a single
+// day, pay attention to the accrual rate." Every builder below either uses
+// daily_cost (accrual) or has an explicit cash-mechanics justification
+// (cashback_roi: card optimization is inherently event-based).
+
+// Helper used by flashback + monthly_burn_forecast: roll a category-id-keyed
+// map up to a parent-keyed map, using the same parentRollup the rest of the
+// pipeline relies on.
+function rollupCatToParent(
+  catMap: Record<string, number>,
+  rollup: Record<string, string[]>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [parent, children] of Object.entries(rollup)) {
+    const sum = children.reduce((s, c) => s + (catMap[c] || 0), 0);
+    if (sum > 0) out[parent] = Number(sum.toFixed(2));
+  }
+  return out;
+}
+
+// ── Archetype: on_this_day_flashback ────────────────────────────────────────
+// "What was your life costing on this calendar day in prior years?"
+// Uses each prior year's daily_cost overlap snapshot — so rent shows its daily
+// share, an active trip shows daily-burn, and an annual sub shows its daily
+// slice instead of the random one-off that happened to clear that calendar date.
+
+function buildOnThisDayFlashback(features: Features, strategy: Strategy): Candidate {
+  const minDailyCost = (strategy.requires?.min_prior_year_daily_cost as number | undefined) ?? 15;
+  const maxLookback  = (strategy.requires?.max_lookback_years as number | undefined) ?? 9;
+  const chartMaxYears = (strategy.requires?.chart_max_years as number | undefined) ?? 5;
+
+  const flashback = features.flashbackByYear || {};
+  const today = features.today;
+  const cy = parseInt(today.slice(0, 4), 10);
+  const mmdd = today.slice(5);
+
+  // Filter to PRIOR years within lookback window AND with meaningful daily cost.
+  // Current year is included in flashbackByYear only to drive the "today vs same
+  // day in past years" comparison — it's not eligible as the anchor itself.
+  const usable = Object.values(flashback)
+    .filter(b => b.year < cy && b.total_daily_cost >= minDailyCost && (cy - b.year) <= maxLookback)
+    .sort((a, b) => b.year - a.year);
+  if (usable.length === 0) return ineligible("on_this_day_flashback", "no_prior_year_meets_min_daily_cost");
+
+  // For chart: cap at most-recent N years so the bar chart stays legible.
+  const chartYears = usable.slice(0, chartMaxYears);
+
+  // For storytelling: pick the year with the highest total_daily_cost as the
+  // anchor year (most narratively interesting). Surface its top contributors
+  // and any active tag.
+  const anchor = usable.reduce((best, b) => b.total_daily_cost > best.total_daily_cost ? b : best, usable[0]);
+  const anchorParents = rollupCatToParent(anchor.parent_breakdown, features.schema.parentRollup);
+
+  // Compute today's actual daily cost for context (so the LLM can compare
+  // "today vs same day in prior years"). Cheap re-use: features.expenses[mk]
+  // is whole-month accrual; we derive today's via the same overlap math the
+  // backend used to assemble flashbackByYear by reading the current-year entry
+  // if it exists. If not (we haven't pre-fetched today), we leave it null and
+  // the LLM omits the comparison.
+  const todayBreakdown: FlashbackDayBreakdown | null = flashback[String(cy)] || null;
+
+  const data_strength = Math.min(1, anchor.total_daily_cost / 150);
+
+  return {
+    insight_type: "on_this_day_flashback",
+    eligible: true,
+    ineligibility_reason: null,
+    data_strength,
+    subject_key: `flashback:${mmdd}`,
+    facts: {
+      today,
+      mm_dd: mmdd,
+      anchor_year: anchor.year,
+      anchor: {
+        date: anchor.date,
+        total_daily_cost: Number(anchor.total_daily_cost.toFixed(2)),
+        parent_breakdown: anchorParents,
+        top_contributors: anchor.top_contributors.map(c => ({
+          description: c.description,
+          category_id: c.category_id,
+          daily_cost: Number(c.daily_cost.toFixed(2)),
+          service_window: `${c.service_start} → ${c.service_end}`,
+          original_amount_usd: Number(c.amount_usd.toFixed(2)),
+          tag: c.tag,
+        })),
+        active_tag: anchor.active_tag,
+      },
+      chart_series: chartYears
+        .slice()
+        .reverse()                           // chronological order on x-axis
+        .map(b => ({ year: b.year, total_daily_cost: Number(b.total_daily_cost.toFixed(2)) })),
+      today_total_daily_cost: todayBreakdown ? Number(todayBreakdown.total_daily_cost.toFixed(2)) : null,
+      hint: "ACCRUAL FLASHBACK — these numbers are *daily-cost slices*, not what cleared on this calendar day. A $1,200 annual sub contributes $3.29/day; an active trip contributes its daily-burn. Lead with what your life cost on this day in {anchor_year} and call out 1-2 specific top_contributors. If active_tag is set, mention you were on that trip. Tone: warm, observational, no budget critique.",
+    },
+    summary: `flashback ${mmdd}: ${usable.length}y of data; anchor ${anchor.year} = $${anchor.total_daily_cost.toFixed(2)}/d`,
+  };
+}
+
+// ── Archetype: streak_or_gap ────────────────────────────────────────────────
+// Surfaces the longest current spending gap among commitment-based parents
+// (restaurant, groceries, clothes, tech, short-window entertainment). A "spend
+// day" is one with at least one short-window txn (service_days ≤ 7) — this
+// excludes always-on subs that would silently reset the streak counter.
+
+function buildStreakOrGap(features: Features, strategy: Strategy): Candidate {
+  const minGap         = (strategy.requires?.min_current_gap_days as number | undefined) ?? 7;
+  const rankWithinTopN = (strategy.requires?.rank_within_top_n as number | undefined) ?? 3;
+
+  const stats = features.streakStats || {};
+  const parents = Object.values(stats).filter(s => s.current_gap_days >= minGap && s.rank_in_trailing12 <= rankWithinTopN);
+  if (parents.length === 0) return ineligible("streak_or_gap", "no_parent_meets_gap_or_rank");
+
+  // Pick the parent with the longest current gap as the focus.
+  parents.sort((a, b) => b.current_gap_days - a.current_gap_days);
+  const focus: StreakStats = parents[0];
+
+  const data_strength = Math.min(1, focus.current_gap_days / Math.max(14, focus.ytd_longest_gap_days));
+
+  return {
+    insight_type: "streak_or_gap",
+    eligible: true,
+    ineligibility_reason: null,
+    data_strength,
+    subject_key: `streak:${focus.parent}:gap`,
+    facts: {
+      today: features.today,
+      focus_parent: focus.parent,
+      current_gap_days: focus.current_gap_days,
+      last_spend_date: focus.last_spend_date,
+      rank_in_trailing12: focus.rank_in_trailing12,
+      ytd_longest_gap_days: focus.ytd_longest_gap_days,
+      trailing12_top3_gaps: focus.trailing12_top3_gaps,
+      other_qualifying_parents: parents.slice(1, 3).map(p => ({
+        parent: p.parent,
+        current_gap_days: p.current_gap_days,
+        rank_in_trailing12: p.rank_in_trailing12,
+      })),
+      hint: "Lead with the gap framing: 'X days without {focus_parent} spend' and the rank ('your 2nd-longest in trailing 12mo'). Mention last_spend_date as the anchor. If trailing12_top3_gaps shows a notably longer prior gap, name it for context (e.g. 'last gap this long was during the Japan trip'). NO budget critique — gaps aren't inherently good or bad. Keep it observational.",
+    },
+    summary: `${focus.parent} ${focus.current_gap_days}d gap (#${focus.rank_in_trailing12} in trailing 12mo)`,
+  };
+}
+
+// ── Archetype: net_worth_velocity ───────────────────────────────────────────
+// 90-day net-worth delta + same-window 1y ago. Pure cash/asset data — not
+// accrual (balance sheet is naturally a point-in-time concept).
+
+function buildNetWorthVelocity(features: Features, strategy: Strategy): Candidate {
+  const primaryWindowDays = (strategy.requires?.primary_window_days as number | undefined) ?? 90;
+  const minRecent  = (strategy.requires?.min_snapshots_recent_window as number | undefined) ?? 2;
+  const minYearAgo = (strategy.requires?.min_snapshots_yearago_window as number | undefined) ?? 2;
+
+  const series = features.netWorthSeries || [];
+  if (series.length < 4) return ineligible("net_worth_velocity", "insufficient_snapshot_history");
+
+  const todayMs = Date.parse(features.today);
+  const windowStartMs = todayMs - primaryWindowDays * 86_400_000;
+  const yearAgoEndMs = todayMs - 365 * 86_400_000;
+  const yearAgoStartMs = yearAgoEndMs - primaryWindowDays * 86_400_000;
+
+  function inWindow(monthIso: string, startMs: number, endMs: number): boolean {
+    const ms = Date.parse(`${monthIso}-15`);  // mid-month proxy; aggregation is monthly
+    return ms >= startMs && ms <= endMs;
+  }
+  const recentPoints  = series.filter(p => inWindow(p.month, windowStartMs, todayMs));
+  const yearAgoPoints = series.filter(p => inWindow(p.month, yearAgoStartMs, yearAgoEndMs));
+
+  if (recentPoints.length < minRecent)   return ineligible("net_worth_velocity", `recent_window_only_${recentPoints.length}_points`);
+  if (yearAgoPoints.length < minYearAgo) return ineligible("net_worth_velocity", `yearago_window_only_${yearAgoPoints.length}_points`);
+
+  const recentDelta  = recentPoints[recentPoints.length - 1].total_net  - recentPoints[0].total_net;
+  const yearAgoDelta = yearAgoPoints[yearAgoPoints.length - 1].total_net - yearAgoPoints[0].total_net;
+  const annualizedRate = recentDelta * (365 / primaryWindowDays);
+
+  const liquidDelta   = recentPoints[recentPoints.length - 1].total_liquid   - recentPoints[0].total_liquid;
+  const investedDelta = recentPoints[recentPoints.length - 1].total_invested - recentPoints[0].total_invested;
+
+  const data_strength = Math.min(1, Math.abs(recentDelta) / 5000);
+
+  return {
+    insight_type: "net_worth_velocity",
+    eligible: true,
+    ineligibility_reason: null,
+    data_strength,
+    facts: {
+      today: features.today,
+      window_days: primaryWindowDays,
+      recent_window: {
+        from: recentPoints[0].month,
+        to: recentPoints[recentPoints.length - 1].month,
+        starting_net: Math.round(recentPoints[0].total_net),
+        ending_net: Math.round(recentPoints[recentPoints.length - 1].total_net),
+        delta: Math.round(recentDelta),
+        liquid_delta: Math.round(liquidDelta),
+        invested_delta: Math.round(investedDelta),
+      },
+      year_ago_window: {
+        from: yearAgoPoints[0].month,
+        to: yearAgoPoints[yearAgoPoints.length - 1].month,
+        starting_net: Math.round(yearAgoPoints[0].total_net),
+        ending_net: Math.round(yearAgoPoints[yearAgoPoints.length - 1].total_net),
+        delta: Math.round(yearAgoDelta),
+      },
+      annualized_rate: Math.round(annualizedRate),
+      monthly_series_24mo: series.slice(-24).map(p => ({
+        month: p.month,
+        net: Math.round(p.total_net),
+        liquid: Math.round(p.total_liquid),
+        invested: Math.round(p.total_invested),
+      })),
+      hint: "Lead with the dollar delta over the last {window_days} days and annualized rate. Compare to the same window 1y ago plainly — don't speculate on causes. If liquid_delta and invested_delta have opposite signs, that's interesting structural color worth noting (e.g. 'cash up, investments down'). Chart should be a 24-month line of total_net.",
+    },
+    summary: `net worth ${recentDelta >= 0 ? "+" : ""}$${Math.round(recentDelta).toLocaleString()} (${primaryWindowDays}d) vs ${yearAgoDelta >= 0 ? "+" : ""}$${Math.round(yearAgoDelta).toLocaleString()} same window 1y ago`,
+  };
+}
+
+// ── Archetype: monthly_burn_forecast ────────────────────────────────────────
+// Projects total accrued cost for the current month given already-accrued MTD,
+// locked-in remainder (txns whose service period extends past today), and
+// variable forecast (trailing-30d daily-rate × remaining days). Compared
+// against trailing-12mo monthly mean and same-calendar-month 1y ago.
+
+function buildMonthlyBurnForecast(features: Features, strategy: Strategy): Candidate {
+  const dayMin = (strategy.requires?.month_day_min as number | undefined) ?? 8;
+  const dayMax = (strategy.requires?.month_day_max as number | undefined) ?? 25;
+  const day = features.monthDay;
+  if (day < dayMin || day > dayMax) return ineligible("monthly_burn_forecast", `day_${day}_outside_${dayMin}_${dayMax}`);
+
+  const mb = features.monthlyBurnInputs;
+  if (!mb) return ineligible("monthly_burn_forecast", "insufficient_history_or_data");
+
+  const vsTrailing = mb.projected_total - mb.trailing_12mo_monthly_mean;
+  const vsTrailingPct = mb.trailing_12mo_monthly_mean > 0
+    ? vsTrailing / mb.trailing_12mo_monthly_mean
+    : 0;
+  const vsSameMonthAgo = mb.same_month_1y_ago_total != null
+    ? mb.projected_total - mb.same_month_1y_ago_total
+    : null;
+
+  const data_strength = Math.min(1, Math.abs(vsTrailing) / 1000);
+
+  return {
+    insight_type: "monthly_burn_forecast",
+    eligible: true,
+    ineligibility_reason: null,
+    data_strength,
+    facts: {
+      today: features.today,
+      month_key: mb.month_key,
+      month_day: mb.month_day,
+      days_in_month: mb.days_in_month,
+      already_accrued_mtd: Math.round(mb.already_accrued_mtd),
+      locked_in_remainder: Math.round(mb.locked_in_remainder),
+      variable_forecast: Math.round(mb.variable_forecast),
+      projected_total: Math.round(mb.projected_total),
+      trailing_12mo_monthly_mean: Math.round(mb.trailing_12mo_monthly_mean),
+      same_month_1y_ago_total: mb.same_month_1y_ago_total != null ? Math.round(mb.same_month_1y_ago_total) : null,
+      vs_trailing_12mo_abs: Math.round(vsTrailing),
+      vs_trailing_12mo_pct: Number(vsTrailingPct.toFixed(3)),
+      vs_same_month_1y_ago_abs: vsSameMonthAgo != null ? Math.round(vsSameMonthAgo) : null,
+      hint: "ACCRUAL forecast — these numbers are daily-cost-summed projections, not cash-flow. Lead with projected_total for {month_key} and the comparison to trailing_12mo_monthly_mean (vs_trailing_12mo_pct). Break down the projection: '$X already accrued, $Y locked in for the rest of the month, $Z variable forecast.' If same_month_1y_ago_total is non-null and meaningfully different (>10% delta), mention it. Don't editorialize on whether the projection is good or bad.",
+    },
+    summary: `${mb.month_key} projection $${Math.round(mb.projected_total).toLocaleString()} vs trailing-12mo mean $${Math.round(mb.trailing_12mo_monthly_mean).toLocaleString()} (${vsTrailingPct >= 0 ? "+" : ""}${(vsTrailingPct * 100).toFixed(1)}%)`,
+  };
+}
+
+// ── Archetype: cashback_roi ─────────────────────────────────────────────────
+// YTD cashback effective rate per card. The one Phase C archetype that uses
+// transaction-date semantics — cashback is a single-day event and card
+// optimization is inherently event-based, not accrual-based.
+
+function buildCashbackRoi(features: Features, strategy: Strategy): Candidate {
+  const minYtd = (strategy.requires?.min_ytd_cashback_usd as number | undefined) ?? 50;
+  const minCards = (strategy.requires?.min_distinct_cards as number | undefined) ?? 2;
+
+  const cb = features.cashbackYtd;
+  if (!cb) return ineligible("cashback_roi", "no_cashback_redemptions");
+  if (cb.ytd_total_cashback < minYtd) return ineligible("cashback_roi", `ytd_only_$${cb.ytd_total_cashback.toFixed(0)}`);
+  if (cb.by_card.length < minCards)   return ineligible("cashback_roi", `only_${cb.by_card.length}_cards`);
+
+  const topByAbsolute = cb.by_card[0];
+  // Top by rate among cards with meaningful spend (≥ $200 YTD) — otherwise a
+  // tiny-spend card with a one-off bonus dominates.
+  const topByRate = cb.by_card
+    .filter(c => c.eligible_spend_usd >= 200 && c.effective_rate != null)
+    .sort((a, b) => (b.effective_rate || 0) - (a.effective_rate || 0))[0] || null;
+  const dragCards = cb.by_card.filter(c => (c.effective_rate || 0) < 0.01 && c.eligible_spend_usd >= 200);
+
+  const data_strength = Math.min(1, cb.ytd_total_cashback / 500);
+
+  return {
+    insight_type: "cashback_roi",
+    eligible: true,
+    ineligibility_reason: null,
+    data_strength,
+    subject_key: `cashback:${cb.year}`,
+    facts: {
+      year: cb.year,
+      ytd_total_cashback: Math.round(cb.ytd_total_cashback),
+      ytd_eligible_spend: Math.round(cb.ytd_eligible_spend),
+      ytd_effective_rate_pct: Number((cb.ytd_effective_rate * 100).toFixed(2)),
+      by_card: cb.by_card.map(c => ({
+        payment_type: c.payment_type,
+        cashback_usd: Math.round(c.cashback_usd),
+        eligible_spend_usd: Math.round(c.eligible_spend_usd),
+        effective_rate_pct: c.effective_rate != null ? Number((c.effective_rate * 100).toFixed(2)) : null,
+      })),
+      top_by_absolute: { card: topByAbsolute.payment_type, cashback_usd: Math.round(topByAbsolute.cashback_usd) },
+      top_by_rate: topByRate ? { card: topByRate.payment_type, rate_pct: Number(((topByRate.effective_rate || 0) * 100).toFixed(2)) } : null,
+      drag_cards: dragCards.map(c => c.payment_type),
+      hint: "Lead with YTD total cashback and effective rate. Name the top card by absolute and the top card by rate (these can differ — one card volume-wins, another rate-wins). Call out drag_cards if any (cards with meaningful spend but <1% effective rate — worth auditing). NO speculation about what specific categories drove the rate; we don't know. Chart: dual bar by card (absolute $ + rate %).",
+    },
+    summary: `YTD cashback $${Math.round(cb.ytd_total_cashback)} (${(cb.ytd_effective_rate * 100).toFixed(2)}% effective rate) across ${cb.by_card.length} cards`,
+  };
+}
+
+// ── Archetype: trip_year_in_review ──────────────────────────────────────────
+// Annual trip rollup. Two windows: prior-completed-year (fires Jan 1-31) and
+// current YTD. Uses get_tag_summaries which is already accrual-correct via
+// overlap days — a long trip whose accrual spans a year boundary contributes
+// proportionally to each year.
+
+function buildTripYearInReview(features: Features, strategy: Strategy): Candidate {
+  const minTrips = (strategy.requires?.min_completed_trips as number | undefined) ?? 2;
+  const minTotal = (strategy.requires?.min_total_trip_spend as number | undefined) ?? 500;
+
+  const today = features.today;
+  const cy = parseInt(today.slice(0, 4), 10);
+  const isJanuary = today.slice(5, 7) === "01";
+  const focusYear = isJanuary ? cy - 1 : cy;
+  const trips = features.tripsByYear?.[String(focusYear)] || [];
+  if (trips.length < minTrips) return ineligible("trip_year_in_review", `only_${trips.length}_trips_in_${focusYear}`);
+
+  const total_spend = trips.reduce((s, t) => s + t.total_accrual, 0);
+  if (total_spend < minTotal) return ineligible("trip_year_in_review", `total_$${total_spend.toFixed(0)}_lt_min`);
+  const total_days = trips.reduce((s, t) => s + t.duration_days, 0);
+  const overall_daily_burn = total_days > 0 ? total_spend / total_days : 0;
+  const biggest = trips[0];   // already sorted by total_accrual desc in fetcher
+
+  const data_strength = Math.min(1, trips.length / 5);
+
+  return {
+    insight_type: "trip_year_in_review",
+    eligible: true,
+    ineligibility_reason: null,
+    data_strength,
+    subject_key: `trip_review:${focusYear}`,
+    facts: {
+      focus_year: focusYear,
+      window_label: isJanuary ? `${focusYear} (year just closed)` : `${focusYear} YTD through ${today}`,
+      trip_count: trips.length,
+      total_spend_usd: Math.round(total_spend),
+      total_travel_days: total_days,
+      overall_daily_burn: Math.round(overall_daily_burn),
+      biggest_trip: {
+        name: biggest.name,
+        total_usd: Math.round(biggest.total_accrual),
+        days: biggest.duration_days,
+        daily_burn: Math.round(biggest.daily_burn),
+        top_category: biggest.top_category,
+      },
+      trips: trips.map(t => ({
+        name: t.name,
+        start: t.start_date,
+        end: t.end_date,
+        days: t.duration_days,
+        total_usd: Math.round(t.total_accrual),
+        daily_burn: Math.round(t.daily_burn),
+        top_category: t.top_category,
+      })),
+      hint: "Lead with trip_count and total_spend_usd for {window_label}. State overall_daily_burn. Call out the biggest trip by name with its $/day. If a trip has notably high daily_burn vs the others, note it briefly. NO budget critique — trips are voluntary. Chart: horizontal bar of trips ranked by total_usd, with daily_burn label per bar.",
+    },
+    summary: `${focusYear} trip review: ${trips.length} trips, $${Math.round(total_spend).toLocaleString()}, $${Math.round(overall_daily_burn)}/day across ${total_days}d`,
+  };
+}
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 export type ArchetypeBuilder = (features: Features, strategy: Strategy) => Candidate;
@@ -873,6 +1254,13 @@ export const ARCHETYPE_BUILDERS: Record<string, ArchetypeBuilder> = {
   accrual_quality_alert:  buildAccrualQualityAlert,
   // tag_burn_rate replaced by tag_recap in Phase B (2026-04-27).
   tag_recap:              buildTagRecap,
+  // ── Phase C engagement archetypes (FEA-100, 2026-05-14) ─────────────────
+  on_this_day_flashback:  buildOnThisDayFlashback,
+  streak_or_gap:          buildStreakOrGap,
+  net_worth_velocity:     buildNetWorthVelocity,
+  monthly_burn_forecast:  buildMonthlyBurnForecast,
+  cashback_roi:           buildCashbackRoi,
+  trip_year_in_review:    buildTripYearInReview,
 };
 
 export function buildCandidates(features: Features, strategies: Map<string, Strategy>): Candidate[] {
