@@ -11,6 +11,14 @@
 
 ### v2.4 — May 30, 2026
 
+#### v2.4.1
+<sub>Pushed 2026-06-03</sub>
+
+##### Features
+- **FEA-101: Tag detail delete action** — Tags can now be deleted directly from the open tag detail modal via a two-click `Delete Tag` → `Confirm Delete` flow. The action clears the tag from all matching transactions before deleting the `tags` row, invalidates transaction-derived caches, closes the modal, and refreshes the Tags tab. Includes the in-progress Tags tab search/sort controls already present in `js/tags.js`. (~3,000 tokens)
+
+---
+
 #### v2.4.0
 <sub>Deployed 2026-05-30</sub>
 

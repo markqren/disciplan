@@ -1,5 +1,5 @@
 async function renderTags(el){
-  el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsBody"></div>`;
+  el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsFilterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div><div id="tagsBody"></div>`;
   try{
     const [tagRows,summaries]=await Promise.all([
       sb("tags?order=start_date.desc"),
@@ -10,67 +10,91 @@ async function renderTags(el){
       tm[s.tag_name]={total:s.total_accrual,count:s.txn_count,cats:s.category_totals||{}};
     }
 
-    const tags=tagRows.map(t=>({...t,...(tm[t.name]||{total:0,count:0,cats:{}})})).sort((a,b)=>b.total-a.total);
-    el.querySelector(".sub").textContent=`Click any tag for breakdown · ${tags.length} tags`;
-    const body=document.getElementById("tagsBody");body.innerHTML="";
-    const grid=h("div",{class:"tag-grid"});
+    const tags=tagRows.map(t=>({...t,...(tm[t.name]||{total:0,count:0,cats:{}})}));
+    const tv=state.tagsView||(state.tagsView={q:"",sort:"total"});
+    const fS="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 10px;color:#e8e8e4;font-size:11px;font-family:var(--sans);outline:none";
+    const bar=el.querySelector("#tagsFilterBar");
+    const si=h("input",{style:fS+";width:180px",placeholder:"Search tags...",value:tv.q||""});
+    const ss=h("select",{style:fS+";cursor:pointer"});
+    ss.innerHTML=`<option value="total"${tv.sort==="total"?" selected":""}>Sort: Total</option><option value="recent"${tv.sort==="recent"?" selected":""}>Sort: Recent</option><option value="alpha"${tv.sort==="alpha"?" selected":""}>Sort: A-Z</option>`;
+    bar.append(si,ss);
+    const body=el.querySelector("#tagsBody");
+    const tagCmp=(a,b)=>a.name.localeCompare(b.name,undefined,{sensitivity:"base"});
+    function sortTags(a,b){
+      if(tv.sort==="recent")return (b.start_date||"").localeCompare(a.start_date||"")||tagCmp(a,b);
+      if(tv.sort==="alpha")return tagCmp(a,b);
+      return (b.total-a.total)||tagCmp(a,b);
+    }
+    function drawGrid(){
+      const q=(tv.q||"").trim().toLowerCase();
+      const view=tags.filter(t=>!q||t.name.toLowerCase().includes(q)).sort(sortTags);
+      el.querySelector(".sub").textContent=q?`Click any tag for breakdown · ${view.length} of ${tags.length} tags`:`Click any tag for breakdown · ${tags.length} tags`;
+      body.innerHTML="";
+      if(!view.length){body.innerHTML=`<div class="cd" style="color:rgba(255,255,255,0.35)">No tags match your search.</div>`;return}
+      const grid=h("div",{class:"tag-grid"});
 
-    tags.forEach((tag,i)=>{
-      const card=h("div",{class:"tag-card",style:{borderLeftColor:TCOLS[i%TCOLS.length],cursor:tag.total>0?"pointer":"default"},onClick:()=>tag.total>0&&showTagDetail(tag)});
-      let inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:14px;font-weight:600;color:#fff">${tag.name}</div>`;
-      if(tag.start_date)inner+=`<div class="tag-date-edit" data-tag="${tag.name}" style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px;cursor:pointer" title="Click to edit dates">${fmtD(tag.start_date)} – ${fmtD(tag.end_date)}</div>`;
-      inner+=`</div><span style="font-size:10px;color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">${tag.count||0} txns</span></div>`;
-      if(tag.total>0){
-        const days=tag.start_date&&tag.end_date?Math.max(1,Math.floor((new Date(tag.end_date)-new Date(tag.start_date))/864e5)+1):0;
-        inner+=`<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--r)">${fmtF(tag.total)}</div>`;
-        if(days>0)inner+=`<div style="font-size:11px;color:rgba(255,255,255,0.25);font-family:var(--mono)">${fmtF(tag.total/days)}/day</div>`;
-        inner+=`</div>`;
-        if(Object.keys(tag.cats).length>0){
-          const posCats=Object.entries(tag.cats).filter(([,v])=>v>0);
-          if(posCats.length>0){const barTotal=posCats.reduce((s,[,v])=>s+v,0);
-          inner+=`<div style="display:flex;gap:2px;margin-top:6px;height:4px;border-radius:2px;overflow:hidden">`;
-          posCats.sort((a,b)=>b[1]-a[1]).forEach(([c,v])=>inner+=`<div style="width:${(v/barTotal)*100}%;background:${CC[c]||"#666"};min-width:2px"></div>`);
-          inner+=`</div>`;}
+      view.forEach((tag,i)=>{
+        const card=h("div",{class:"tag-card",style:{borderLeftColor:TCOLS[i%TCOLS.length],cursor:tag.total>0?"pointer":"default"},onClick:()=>tag.total>0&&showTagDetail(tag)});
+        let inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:14px;font-weight:600;color:#fff">${tag.name}</div>`;
+        if(tag.start_date)inner+=`<div class="tag-date-edit" data-tag="${tag.name}" style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px;cursor:pointer" title="Click to edit dates">${fmtD(tag.start_date)} – ${fmtD(tag.end_date)}</div>`;
+        inner+=`</div><span style="font-size:10px;color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">${tag.count||0} txns</span></div>`;
+        if(tag.total>0){
+          const days=tag.start_date&&tag.end_date?Math.max(1,Math.floor((new Date(tag.end_date)-new Date(tag.start_date))/864e5)+1):0;
+          inner+=`<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:8px"><div style="font-size:18px;font-weight:700;font-family:var(--mono);color:var(--r)">${fmtF(tag.total)}</div>`;
+          if(days>0)inner+=`<div style="font-size:11px;color:rgba(255,255,255,0.25);font-family:var(--mono)">${fmtF(tag.total/days)}/day</div>`;
+          inner+=`</div>`;
+          if(Object.keys(tag.cats).length>0){
+            const posCats=Object.entries(tag.cats).filter(([,v])=>v>0);
+            if(posCats.length>0){const barTotal=posCats.reduce((s,[,v])=>s+v,0);
+            inner+=`<div style="display:flex;gap:2px;margin-top:6px;height:4px;border-radius:2px;overflow:hidden">`;
+            posCats.sort((a,b)=>b[1]-a[1]).forEach(([c,v])=>inner+=`<div style="width:${(v/barTotal)*100}%;background:${CC[c]||"#666"};min-width:2px"></div>`);
+            inner+=`</div>`;}
+          }
         }
-      }
-      card.innerHTML=inner;
-      grid.append(card);
-    });
-    body.append(grid);
-    // Tag date editing — click date range to edit start/end
-    grid.querySelectorAll(".tag-date-edit").forEach(dateEl=>{
-      dateEl.addEventListener("click",e=>{
-        e.stopPropagation();
-        const tName=dateEl.dataset.tag;
-        const tag=tags.find(t=>t.name===tName);if(!tag)return;
-        const origHTML=dateEl.innerHTML;
-        dateEl.innerHTML=`<input type="date" class="td-start" value="${tag.start_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px"> – <input type="date" class="td-end" value="${tag.end_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px">`;
-        dateEl.style.cursor="default";
-        const startIn=dateEl.querySelector(".td-start"),endIn=dateEl.querySelector(".td-end");
-        startIn.addEventListener("click",e=>e.stopPropagation());
-        endIn.addEventListener("click",e=>e.stopPropagation());
-        let saving=false;
-        const save=async()=>{
-          if(saving)return;
-          const ns=startIn.value,ne=endIn.value;
-          if(!ns||!ne||ns>ne){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";return}
-          if(ns===tag.start_date&&ne===tag.end_date){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";return}
-          saving=true;
-          try{
-            await sb(`tags?name=eq.${encodeURIComponent(tName)}`,{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({start_date:ns,end_date:ne})});
-            renderTags(el);
-          }catch(err){saving=false;dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";alert("Failed to save: "+err.message)}
-        };
-        const cancel=()=>{if(!saving){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer"}};
-        // Save on blur only when focus leaves both inputs
-        const blurSave=()=>{setTimeout(()=>{if(!dateEl.contains(document.activeElement))save()},150)};
-        startIn.addEventListener("blur",blurSave);
-        endIn.addEventListener("blur",blurSave);
-        startIn.addEventListener("keydown",e=>{if(e.key==="Escape")cancel();if(e.key==="Enter"){e.preventDefault();endIn.focus()}});
-        endIn.addEventListener("keydown",e=>{if(e.key==="Escape")cancel();if(e.key==="Enter"){e.preventDefault();save()}});
-        startIn.focus();
+        card.innerHTML=inner;
+        grid.append(card);
       });
-    });
+      body.append(grid);
+      // Tag date editing — click date range to edit start/end
+      grid.querySelectorAll(".tag-date-edit").forEach(dateEl=>{
+        dateEl.addEventListener("click",e=>{
+          e.stopPropagation();
+          const tName=dateEl.dataset.tag;
+          const tag=tags.find(t=>t.name===tName);if(!tag)return;
+          const origHTML=dateEl.innerHTML;
+          dateEl.innerHTML=`<input type="date" class="td-start" value="${tag.start_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px"> – <input type="date" class="td-end" value="${tag.end_date}" style="font-size:11px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:4px;color:#fff;padding:1px 4px;width:120px">`;
+          dateEl.style.cursor="default";
+          const startIn=dateEl.querySelector(".td-start"),endIn=dateEl.querySelector(".td-end");
+          startIn.addEventListener("click",e=>e.stopPropagation());
+          endIn.addEventListener("click",e=>e.stopPropagation());
+          let saving=false;
+          const save=async()=>{
+            if(saving)return;
+            const ns=startIn.value,ne=endIn.value;
+            if(!ns||!ne||ns>ne){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";return}
+            if(ns===tag.start_date&&ne===tag.end_date){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";return}
+            saving=true;
+            try{
+              await sb(`tags?name=eq.${encodeURIComponent(tName)}`,{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({start_date:ns,end_date:ne})});
+              renderTags(el);
+            }catch(err){saving=false;dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer";alert("Failed to save: "+err.message)}
+          };
+          const cancel=()=>{if(!saving){dateEl.innerHTML=origHTML;dateEl.style.cursor="pointer"}};
+          // Save on blur only when focus leaves both inputs
+          const blurSave=()=>{setTimeout(()=>{if(!dateEl.contains(document.activeElement))save()},150)};
+          startIn.addEventListener("blur",blurSave);
+          endIn.addEventListener("blur",blurSave);
+          startIn.addEventListener("keydown",e=>{if(e.key==="Escape")cancel();if(e.key==="Enter"){e.preventDefault();endIn.focus()}});
+          endIn.addEventListener("keydown",e=>{if(e.key==="Escape")cancel();if(e.key==="Enter"){e.preventDefault();save()}});
+          startIn.focus();
+        });
+      });
+    }
+    let searchTimer;
+    si.addEventListener("input",()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{tv.q=si.value;drawGrid()},200)});
+    si.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();clearTimeout(searchTimer);tv.q=si.value;drawGrid()}});
+    ss.addEventListener("change",()=>{tv.sort=ss.value;drawGrid()});
+    drawGrid();
     // Auto-open tag detail if navigated from Ledger tab
     if(state.tagDetail){
       const t=tags.find(tg=>tg.name===state.tagDetail);
@@ -133,7 +157,7 @@ async function showTagDetail(tag){
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   let mhtml=`<div style="display:flex;justify-content:space-between;margin-bottom:20px"><div><h2 style="font-size:22px">${tag.name}</h2>`;
   if(tag.start_date)mhtml+=`<p class="tag-modal-dates" style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px;cursor:pointer" title="Click to edit dates"><span class="tmd-text">${fmtD(tag.start_date)} – ${fmtD(tag.end_date)}</span></p>`;
-  mhtml+=`</div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">✕</button></div>`;
+  mhtml+=`</div><div style="display:flex;gap:8px;align-items:flex-start"><button class="tag-delete-btn" style="background:rgba(224,122,95,0.12);border:1px solid rgba(224,122,95,0.25);border-radius:8px;padding:8px 12px;cursor:pointer;color:var(--r);font-size:11px;font-family:var(--sans)">Delete Tag</button><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">✕</button></div></div>`;
   mhtml+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px">`;
   [["Total",fmtF(total),"var(--r)"],["Days",days,"var(--b)"],["Per Day",days>0?fmtF(total/days):"—","var(--g)"]].forEach(([l,v,c])=>mhtml+=`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`);
   mhtml+=`</div>`;
@@ -186,6 +210,32 @@ async function showTagDetail(tag){
 
   const modal=h("div",{class:"modal",style:{maxWidth:"700px"}});
   modal.innerHTML=mhtml;
+  const delBtn=modal.querySelector(".tag-delete-btn");
+  if(delBtn){
+    let delTimer;
+    delBtn.addEventListener("click",async e=>{
+      e.stopPropagation();
+      if(delBtn.dataset.confirm!=="1"){
+        delBtn.dataset.confirm="1";
+        delBtn.textContent="Confirm Delete";
+        delTimer=setTimeout(()=>{if(delBtn.isConnected){delBtn.dataset.confirm="0";delBtn.textContent="Delete Tag"}},3500);
+        return;
+      }
+      if(delTimer)clearTimeout(delTimer);
+      delBtn.disabled=true;delBtn.textContent="Deleting...";
+      try{
+        await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}`,{method:"PATCH",headers:{Prefer:"return=minimal"},body:JSON.stringify({tag:""})});
+        await sb(`tags?name=eq.${encodeURIComponent(tag.name)}`,{method:"DELETE",headers:{Prefer:"return=minimal"}});
+        dcInvalidateTxns();
+        bg.remove();
+        const contentEl=document.getElementById("content");
+        if(contentEl)renderTags(contentEl);
+      }catch(err){
+        delBtn.disabled=false;delBtn.dataset.confirm="0";delBtn.textContent="Delete Tag";
+        alert("Delete failed: "+err.message);
+      }
+    });
+  }
   // Expand/collapse for linked transaction groups
   const expandedTagGroups=new Set();
   modal.querySelectorAll(".tag-grp-row").forEach(row=>{
