@@ -9,6 +9,16 @@
 
 ## 🚀 Releases
 
+### v2.4 — May 30, 2026
+
+#### v2.4.0
+<sub>Deployed 2026-05-30</sub>
+
+##### Bug Fixes
+- **BUG-32: Daily insight cron missing Supabase gateway auth** — `pg_cron` continued to succeed after May 13, but `net._http_response` showed `401 UNAUTHORIZED_NO_AUTH_HEADER` because the `daily-insight` cron request only sent `X-Cron-Secret`; Supabase rejected the request before the Edge Function's own secret check could run. Patched the live cron command to include `Authorization: Bearer <anon>` and `apikey: <anon>`, increased `timeout_milliseconds` to `60000` for the heavier FEA-100 pipeline, and added migration `20260530000001_daily_insight_cron_auth.sql` that preserves the existing `X-Cron-Secret` by extracting it from `cron.job.command`. Verified with a `pg_net` dry-run: `insight_log.id=108`, `dry_run=true`, `parse_fallback=false`, no Postmark message ID. (~4,000 tokens)
+
+---
+
 ### v2.3 — Apr 26, 2026
 
 #### v2.3.6
