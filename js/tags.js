@@ -34,7 +34,7 @@ async function renderTags(el){
       const grid=h("div",{class:"tag-grid"});
 
       view.forEach((tag,i)=>{
-        const card=h("div",{class:"tag-card",style:{borderLeftColor:TCOLS[i%TCOLS.length],cursor:tag.total>0?"pointer":"default"},onClick:()=>tag.total>0&&showTagDetail(tag)});
+        const card=h("div",{class:"tag-card",style:{borderLeftColor:TCOLS[i%TCOLS.length],cursor:"pointer"},onClick:()=>showTagDetail(tag)});
         let inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:14px;font-weight:600;color:#fff">${tag.name}</div>`;
         if(tag.start_date)inner+=`<div class="tag-date-edit" data-tag="${tag.name}" style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:2px;cursor:pointer" title="Click to edit dates">${fmtD(tag.start_date)} – ${fmtD(tag.end_date)}</div>`;
         inner+=`</div><span style="font-size:10px;color:rgba(255,255,255,0.2);background:rgba(255,255,255,0.04);padding:2px 6px;border-radius:4px">${tag.count||0} txns</span></div>`;

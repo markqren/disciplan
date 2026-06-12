@@ -11,6 +11,14 @@
 
 ### v2.4 — May 30, 2026
 
+#### v2.4.4
+<sub>Deployed 2026-06-11</sub>
+
+##### Features
+- **Tags tab: open empty tags** — Tags with zero matching transactions now remain clickable in the Tags grid and open the existing tag detail modal, making the two-step `Delete Tag` flow available for empty cleanup tags as well as tags with transaction history. (~500 tokens)
+
+---
+
 #### v2.4.3
 <sub>Deployed 2026-06-11</sub>
 
