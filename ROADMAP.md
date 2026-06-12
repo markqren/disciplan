@@ -8,6 +8,17 @@
 
 ## 🚀 Releases
 
+### v2.5 — Jun 11, 2026
+
+#### v2.5.0
+<sub>Deployed 2026-06-11</sub>
+
+##### Features
+- **Reimburse flow: Transfer credit sub-account** — When the Reimburse modal's Payment Method is set to `Transfer`, a "Credit Sub-Account" selector now appears (reusing `buildCreditSelect`), offering a dropdown of recent credit account names plus an "Other…" option to add a new one. The selected credit is stored on the generated reimbursement transaction (`createReimbursement` now takes a `credit` arg, blanked for non-Transfer types), matching the entry form and ledger edit modal behavior. (~1,500 tokens)
+- **Reimburse split: 100% preset** — Added a `100%` option as the first choice in the `SPLIT_PRESETS` row so a full reimbursement can be selected in one click; the default highlighted split remains 50%. (~500 tokens)
+
+---
+
 ### v2.4 — May 30, 2026
 
 #### v2.4.2

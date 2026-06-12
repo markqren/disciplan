@@ -247,9 +247,15 @@ function openLedgerEditModal(txn,onSaved){
     modal.append(amtDisplay);
 
     // Payment method
-    const rPt=h("select",{class:"inp",onChange:()=>updateRPreview()});
+    const rPt=h("select",{class:"inp",onChange:()=>{rCreditRow.style.display=rPt.value==="Transfer"?"grid":"none";updateRPreview()}});
     PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Venmo")o.selected=true;rPt.append(o)});
     modal.append(mRow(mField("Payment Method",rPt)));
+
+    // Credit sub-account (only for Transfer payment type)
+    const rCredit=buildCreditSelect("");
+    const rCreditRow=h("div",{style:{display:rPt.value==="Transfer"?"grid":"none",gridTemplateColumns:"1fr 2fr",gap:"6px",marginBottom:"14px"}});
+    rCreditRow.append(mField("Credit Sub-Account",rCredit));
+    modal.append(rCreditRow);
 
     // Note
     const rNote=h("input",{class:"inp",type:"text",placeholder:"optional context"});
@@ -288,7 +294,7 @@ function openLedgerEditModal(txn,onSaved){
       rCreate.textContent="Creating...";rCreate.disabled=true;
       const effectiveRatio=manualMode?manualAmt/txn.amount_usd:selectedRatio;
       try{
-        await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value);
+        await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"");
         bg.remove();
         const msg=document.getElementById("ledgerOkMsg");
         if(msg){msg.textContent="Reimbursement created";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}

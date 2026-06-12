@@ -227,7 +227,7 @@ async function fetchReimburseFriends(){
   return result.slice(0,15);
 }
 
-async function createReimbursement(originalTxn,person,splitRatio,paymentType,note){
+async function createReimbursement(originalTxn,person,splitRatio,paymentType,note,credit){
   const reimbAmount=Math.round(-(originalTxn.amount_usd*splitRatio)*100)/100;
   const ss=originalTxn.service_start||originalTxn.date;
   const se=originalTxn.service_end||originalTxn.date;
@@ -249,7 +249,7 @@ async function createReimbursement(originalTxn,person,splitRatio,paymentType,not
     tag:(originalTxn.tag||"").toLowerCase().trim(),
     daily_cost:dailyCost,
     service_days:serviceDays,
-    credit:""
+    credit:paymentType==="Transfer"?(credit||""):""
   };
   const result=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(newTxn)});
   const newId=result[0]?.id;
