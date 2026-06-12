@@ -9,9 +9,9 @@
 
 ## 🚀 Releases
 
-### v2.5 — Jun 11, 2026
+### v2.4 — May 30, 2026
 
-#### v2.5.0
+#### v2.4.3
 <sub>Deployed 2026-06-11</sub>
 
 ##### Features
@@ -19,8 +19,6 @@
 - **Reimburse split: 100% preset** — Added a `100%` option as the first choice in the `SPLIT_PRESETS` row so a full reimbursement can be selected in one click; the default highlighted split remains 50%. (~500 tokens)
 
 ---
-
-### v2.4 — May 30, 2026
 
 #### v2.4.2
 <sub>Deployed 2026-06-11</sub>
