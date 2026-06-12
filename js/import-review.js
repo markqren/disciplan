@@ -1,3 +1,16 @@
+function syncServiceStartToEnd(startInput,endInput){
+  if(startInput.value&&endInput.value&&endInput.value<startInput.value)startInput.value=endInput.value;
+}
+
+function normalizeCandidateServicePeriod(c){
+  if(c.service_start&&c.service_end&&c.service_end<c.service_start)c.service_start=c.service_end;
+  if(c.service_start&&c.service_end&&c.amount_usd!=null){
+    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
+    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+  }
+}
+
 function renderReviewTable(container,candidates){
   container.innerHTML="";
   const skipped=candidates.filter(c=>c._status==="skipped");
@@ -156,7 +169,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
     updatePreview();
   }});
   const mSe=h("input",{class:"inp",type:"date",value:c.service_end,onInput:()=>{
-    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";updatePreview();
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";syncServiceStartToEnd(mSs,mSe);updatePreview();
   }});
   const hintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
   function updateHint(){const r=ACCRUAL_D[mCat.value];hintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: full month)":`(Auto: ${r} days)`):""}
@@ -309,6 +322,7 @@ async function commitImport(candidates){
   const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
   if(valid.length<approved.length)console.warn(`commitImport: dropped ${approved.length-valid.length} rows with missing dates`);
   if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  valid.forEach(normalizeCandidateServicePeriod);
   const batchId="import-"+new Date().toISOString().slice(0,16);
   const rows=valid.map(c=>({
     date:c.date,service_start:c.service_start,service_end:c.service_end,
@@ -718,7 +732,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
     emUpdatePreview();
   }});
   const mSe=h("input",{class:"inp",type:"date",value:c.service_end,onInput:()=>{
-    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";emUpdatePreview();
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";syncServiceStartToEnd(mSs,mSe);emUpdatePreview();
   }});
   const emHintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
   function emUpdateHint(){const r=ACCRUAL_D[mCat.value];emHintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: full month)":`(Auto: ${r} days)`):""}
@@ -826,7 +840,7 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
     psUpdatePreview();
   }});
   const mSe=h("input",{class:"inp",type:"date",value:c.service_end,onInput:()=>{
-    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";psUpdatePreview();
+    seManual=true;mSe.style.borderColor="rgba(242,204,143,0.3)";syncServiceStartToEnd(mSs,mSe);psUpdatePreview();
   }});
   const psHintSpan=h("span",{style:{color:"rgba(129,178,154,0.6)",textTransform:"none",letterSpacing:"0",fontWeight:"400",fontSize:"10px"}});
   function psUpdateHint(){const r=ACCRUAL_D[mCat.value];psHintSpan.textContent=!seManual&&r?(r==="month"?"(Auto: full month)":`(Auto: ${r} days)`):""}
@@ -905,6 +919,7 @@ async function commitEmailImports(candidates){
   const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
   if(valid.length<approved.length)console.warn(`commitEmailImports: dropped ${approved.length-valid.length} rows with missing dates`);
   if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  valid.forEach(normalizeCandidateServicePeriod);
   const batchId="email-"+new Date().toISOString().slice(0,16);
   const rows=valid.map(c=>({
     date:c.date,service_start:c.service_start,service_end:c.service_end,
@@ -952,6 +967,7 @@ async function commitPayslipImport(candidates){
   const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
   if(valid.length<approved.length)console.warn(`commitPayslipImport: dropped ${approved.length-valid.length} rows with missing dates`);
   if(!valid.length)throw new Error("All approved transactions have invalid dates.");
+  valid.forEach(normalizeCandidateServicePeriod);
   const batchId="payslip-"+new Date().toISOString().slice(0,16);
   const rows=valid.map(c=>({
     date:c.date,service_start:c.service_start,service_end:c.service_end,

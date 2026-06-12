@@ -11,6 +11,24 @@
 
 ### v2.4 — May 30, 2026
 
+#### v2.4.2
+<sub>Deployed 2026-06-11</sub>
+
+##### Bug Fixes
+- **Import service-period normalization** — CSV, email, and payslip import edit modals now clamp `service_end` so it can never precede `service_start` (`syncServiceStartToEnd`), and all three commit paths run `normalizeCandidateServicePeriod` to re-derive `service_days` and `daily_cost` from the final dates before insert. Prevents negative/zero service windows and stale accrual math from reaching the ledger. (~1,500 tokens)
+- **Net-worth chart accuracy** — Balance Sheet "Net Worth Over Time" now counts `other`-type accounts as assets (matching the headline net-worth total), and pins the latest chart point to the live computed totals so the trend line ends exactly where the current net-worth figure sits. (~1,000 tokens)
+
+##### Features
+- **Tags tab search/sort state** — Added persistent `state.tagsView` (`{q, sort}`) backing the Tags tab search box and sort control so the chosen query/sort survives re-renders within a session. (~500 tokens)
+
+##### Infrastructure
+- **INF-06: Cache Version Key** — Persisted `localStorage` offline caches (FEA-32) are now namespaced by a `CACHE_VERSION` segment (`CACHE_PREFIX="dc_v2_"` in `js/config.js`). A one-time `purgeStaleCache()` runs on load and removes any legacy `dc_`-prefixed keys that don't match the current versioned prefix, so a stale RPC/response shape carried over from a prior deploy can no longer cause rendering errors — future schema/response changes just need a `CACHE_VERSION` bump to invalidate all persisted caches cleanly. The in-memory `_dc` tab cache (FEA-89) and unrelated keys (`anthropic_api_key`, `ai_model`, `sessionStorage` group labels) are untouched. (~3,500 tokens)
+
+##### Docs
+- **UI-01: IS Unrealized G/L card (roadmap reconciliation)** — Marked UI-01 complete after confirming the work already shipped in code: the Income Statement has a standalone "Unrealized G/L" 5th KPI card on a `.g5` grid (`js/income-stmt.js`), a dedicated detail-table row with per-month drilldown, a cross-year G/L column (`js/cross-year.js`), and the old "Show Inv" toggle (FEA-07) has been removed entirely. The ledger-filter emoji-compaction sub-item was dropped as not worth doing — the category/payment/tag selects and date inputs can't meaningfully become emoji-only, and Clear (✖) / Subscriptions (🔄) are already iconified. (~3,000 tokens)
+
+---
+
 #### v2.4.1
 <sub>Pushed 2026-06-03</sub>
 

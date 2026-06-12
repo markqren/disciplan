@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jun 3, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jun 11, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,24 @@
 ## 🚀 Releases
 
 ### v2.4 — May 30, 2026
+
+#### v2.4.2
+<sub>Deployed 2026-06-11</sub>
+
+##### Bug Fixes
+- **Import service-period normalization** — CSV, email, and payslip import edit modals now clamp `service_end` so it can never precede `service_start` (`syncServiceStartToEnd`), and all three commit paths run `normalizeCandidateServicePeriod` to re-derive `service_days` and `daily_cost` from the final dates before insert. Prevents negative/zero service windows and stale accrual math from reaching the ledger. (~1,500 tokens)
+- **Net-worth chart accuracy** — Balance Sheet "Net Worth Over Time" now counts `other`-type accounts as assets (matching the headline net-worth total), and pins the latest chart point to the live computed totals so the trend line ends exactly where the current net-worth figure sits. (~1,000 tokens)
+
+##### Features
+- **Tags tab search/sort state** — Added persistent `state.tagsView` (`{q, sort}`) backing the Tags tab search box and sort control so the chosen query/sort survives re-renders within a session. (~500 tokens)
+
+##### Infrastructure
+- **INF-06: Cache Version Key** — Persisted `localStorage` offline caches (FEA-32) are now namespaced by a `CACHE_VERSION` segment (`CACHE_PREFIX="dc_v2_"` in `js/config.js`). A one-time `purgeStaleCache()` runs on load and removes any legacy `dc_`-prefixed keys that don't match the current versioned prefix, so a stale RPC/response shape carried over from a prior deploy can no longer cause rendering errors — future schema/response changes just need a `CACHE_VERSION` bump to invalidate all persisted caches cleanly. The in-memory `_dc` tab cache (FEA-89) and unrelated keys (`anthropic_api_key`, `ai_model`, `sessionStorage` group labels) are untouched. (~3,500 tokens)
+
+##### Docs
+- **UI-01: IS Unrealized G/L card (roadmap reconciliation)** — Marked UI-01 complete after confirming the work already shipped in code: the Income Statement has a standalone "Unrealized G/L" 5th KPI card on a `.g5` grid (`js/income-stmt.js`), a dedicated detail-table row with per-month drilldown, a cross-year G/L column (`js/cross-year.js`), and the old "Show Inv" toggle (FEA-07) has been removed entirely. The ledger-filter emoji-compaction sub-item was dropped as not worth doing — the category/payment/tag selects and date inputs can't meaningfully become emoji-only, and Clear (✖) / Subscriptions (🔄) are already iconified. (~3,000 tokens)
+
+---
 
 #### v2.4.1
 <sub>Pushed 2026-06-03</sub>
@@ -413,20 +431,20 @@
 | FEA-09 | **Plaid Integration** | Feature | High | Auto-sync bank account balances via Plaid API. Needs backend endpoint (Supabase Edge Function) for token management. Auth prerequisite done (FEA-10). |
 | FEA-13 | **Income Tracking & Net Savings** | Feature | Medium | Already partially done (IS shows income + savings rate). Could integrate deeper with Investments tab for full financial picture. |
 | FEA-17 | **Recurring Transaction Templates** | Feature | Low | Auto-generate recurring expenses (rent, subscriptions) each month instead of manual entry. Would reduce data entry burden before Plaid is live. |
-| UI-01 | **IS Unrealized G/L Card + Ledger Filter Compaction** | UI | **High** | Investment as standalone 5th KPI card ("Unrealized G/L") in IS, separate from expenses/savings rate. `.g5` grid for 5-column stats. Detail table row with per-month drilldown. Cross-year G/L column. Remove "Show Inv" toggle. Ledger filter buttons condensed to emoji-only with tooltips. |
 | FEA-25 | **Live Stock Prices in Portfolio** | Feature | High | Fetch real-time (or daily-close) stock/ETF/crypto prices from a free API and display live market values on the Portfolio tab. Currently portfolio valuations are static snapshots — this would show up-to-date prices alongside cost basis for accurate unrealized gain/loss. API options: Yahoo Finance (unofficial), Alpha Vantage (free tier: 25 req/day), Finnhub, or Twelve Data. Implementation: (1) on Portfolio tab load, collect unique ticker symbols from `investment_lots`, (2) batch-fetch current prices, (3) compute live market value per lot/symbol/account (shares × current price), (4) update KPI cards (Market Value, Unrealized Gain, Total Return %) with live figures, (5) show "as of" timestamp and a manual refresh button. Considerations: API rate limits (cache prices for 15 min), handle market-hours vs after-hours, crypto tickers may need different API, Schwab 401K has no ticker (keep hardcoded or manual). |
 | INF-05 | **Supabase RLS Policies** | Infra | Medium | Auth is Phase 1 only — no Row Level Security on transactions or other tables. The anon key is visible in source, meaning anyone inspecting the page can read/write all data via the REST API. Add RLS policies (`user_id = auth.uid()`) to: `transactions`, `tags`, `accounts`, `balance_snapshots`, `pending_imports`, `cashback_redemptions`, `investment_lots`, `investment_symbols`, `investment_accounts`, and `group_overrides`. Not urgent for single-user but becomes critical if sharing the URL or adding users. **Depends on:** FEA-10 (auth, done). |
-| INF-06 | **Cache Version Key** | Infra | Low | sessionStorage cache keys use prefix `dc_` without versioning. If RPC response shapes change (new columns, renamed fields), stale cached data causes rendering errors on next load. Add a version segment to the prefix (e.g., `dc_v2_`) and bump on schema changes. Trivial to implement. |
 
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (150 items)</summary>
+<summary><strong>✅ Completed</strong> (152 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| INF-06 | **Cache Version Key** — Persisted `localStorage` offline caches (FEA-32) are now namespaced by `CACHE_VERSION` (`dc_v2_` prefix in `js/config.js`). On load, a one-time purge removes any legacy `dc_`-prefixed keys that don't match the current version, so a stale RPC/response shape from a prior deploy can no longer mis-render — bumping `CACHE_VERSION` invalidates all persisted caches cleanly. In-memory `_dc` cache (FEA-89) unaffected. | Infra → Done | Jun 11 |
+| UI-01 | **IS Unrealized G/L Card** — Income Statement shows investment as a standalone "Unrealized G/L" 5th KPI card on a `.g5` grid (separate from expenses/savings rate), with a dedicated detail-table row supporting per-month drilldown and a cross-year G/L column. The old "Show Inv" toggle (FEA-07) was removed entirely. Ledger-filter emoji-compaction sub-item dropped as not worthwhile (selects/date inputs can't be emoji-only; Clear/Subscriptions already iconified). | UI → Done | Jun 11 |
 | FEA-101 | **Tag detail delete action** — Tags can be deleted directly from the open tag detail modal with a two-click `Delete Tag` → `Confirm Delete` flow. Deletion clears the tag from all matching transactions, deletes the `tags` row, invalidates transaction-derived caches, closes the modal, and refreshes the Tags tab. Also ships the in-progress Tags search/sort controls already present in `js/tags.js`. | Feature → Done | Jun 3 |
 | BUG-32 | **Daily insight cron missing Supabase gateway auth** — `pg_cron` kept firing successfully, but `net._http_response` returned `401 UNAUTHORIZED_NO_AUTH_HEADER` because the `daily-insight` cron request only sent `X-Cron-Secret`; Supabase rejected it before the Edge Function's CRON_SECRET check ran. Live cron now sends `Authorization: Bearer <anon>` and `apikey: <anon>`, uses a `60000ms` pg_net timeout, and has a migration (`20260530000001_daily_insight_cron_auth.sql`) that preserves the existing cron secret by extracting it from `cron.job.command`. Verified with a pg_net dry-run producing `insight_log.id=108`, `dry_run=true`, `parse_fallback=false`, no Postmark send. | Bug → Done | May 30 |
 | FEA-100 | **Newsletter engagement archetypes (Phase C)** — Six new accrual-aware archetypes added to `daily-insight`: `on_this_day_flashback` (storytelling — daily-cost overlap on this calendar day across prior 9 years; rent/trips/annual subs surface correctly), `streak_or_gap` (rhythm — longest current spending gap among commitment-based parents food/personal/entertainment/transportation, ranked vs trailing-12mo), `net_worth_velocity` (longhorizon — 90d net-worth delta vs same window 1y ago from `balance_snapshots`), `monthly_burn_forecast` (forward — projected total accrued cost for current month from already-accrued MTD + locked-in remainder + variable forecast), `cashback_roi` (health — YTD effective rate per card with drag-card detection), `trip_year_in_review` (trips — annual rollup from `get_tag_summaries`). Selection policy v2: `theme` column on `insight_strategy` backfilled across all 17 archetypes; soft 0.7× score multiplier when same theme appeared in last 3 sends; novelty bonus `0.3 × (1 − sent_count/5)` decays over first 5 sends. AI portal strategy table gains read-only `theme` column. Verified via 11-fixture replay; today's flashback fired with "FA Cup Final at Wembley, Airbnb $88/day of $1,406 total" — accrual-correctness demo (transaction-date semantics would have collapsed the Airbnb to a single booking-day hit). | Feature → Done | May 14 |

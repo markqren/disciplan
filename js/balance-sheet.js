@@ -80,9 +80,11 @@ async function renderBS(el){
     if(snapDates.length>2){
       const nwData=snapDates.sort().map(d=>{
         let a=0,l=0;
-        for(const s of snaps){if(s.snapshot_date!==d)continue;const t=s.accounts?.account_type||"other";const b=parseFloat(s.balance_usd||s.balance)||0;if(["checking","savings","investment"].includes(t))a+=b;else if(["credit","liability","working_capital"].includes(t))l+=Math.abs(b)}
+        for(const s of snaps){if(s.snapshot_date!==d)continue;const t=s.accounts?.account_type||"other";const b=parseFloat(s.balance_usd||s.balance)||0;if(["checking","savings","investment","other"].includes(t))a+=b;else if(["credit","liability","working_capital"].includes(t))l+=Math.abs(b)}
         return{d,a,nw:a-l};
       });
+      const livePoint=nwData[nwData.length-1];
+      if(livePoint&&livePoint.d===latestSnap){livePoint.a=totA;livePoint.nw=nw}
       const nwCard=h("div",{class:"cd"});
       nwCard.innerHTML=`<h3>Net Worth Over Time</h3><div class="chrt"><canvas id="nwChart"></canvas></div>`;
       body.append(nwCard);

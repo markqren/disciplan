@@ -1,4 +1,4 @@
-let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set()};
+let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set(),tagsView:{q:"",sort:"total"}};
 
 // In-session data cache (FEA-89)
 // Prevents redundant API calls when switching tabs without making edits.
