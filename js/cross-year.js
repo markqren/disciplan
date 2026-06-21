@@ -33,8 +33,8 @@ async function renderCrossYear(el){
 
   try{
     const years=[2017,2018,2019,2020,2021,2022,2023,2024,2025,2026];
-    let results=dcGet('crossyear');
-    if(!results){results=await Promise.all(years.map(y=>sbRPC("get_income_statement",{p_year:y})));dcSet('crossyear',results)}
+    let results=dcGet('crossyear_'+state.view);
+    if(!results){results=await Promise.all(years.map(y=>scopedRPC("get_income_statement",{p_year:y})));dcSet('crossyear_'+state.view,results)}
     const allTax=await fetchAllTaxTxns();
     const taxByYear={};
     for(const t of allTax){const yr=parseInt(t.date.slice(0,4));taxByYear[yr]=(taxByYear[yr]||0)+parseFloat(t.amount_usd)}

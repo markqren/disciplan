@@ -7,9 +7,9 @@ async function renderIS(el){
   ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;history.replaceState(null,null,y==="all"?"#income-all":"#income");renderContent()}},y==="all"?"All":String(y));yt.append(b)});
 
   try{
-    const cacheKey='is_'+state.year;
+    const cacheKey='is_'+state.year+'_'+state.view;
     let data=dcGet(cacheKey);
-    if(!data){data=await sbRPC("get_income_statement",{p_year:state.year});dcSet(cacheKey,data)}
+    if(!data){data=await scopedRPC("get_income_statement",{p_year:state.year});dcSet(cacheKey,data)}
     const body=document.getElementById("isBody");body.innerHTML="";
 
     // Process monthly data
@@ -454,7 +454,7 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
     catFilter=`&category_id=eq.${categoryId}`;
     catLabel=categoryId[0].toUpperCase()+categoryId.slice(1);
   }
-  const txns=await sb(`transactions?select=*${catFilter}&service_start=lte.${mEnd}&service_end=gte.${mStart}&order=date.desc&limit=500`);
+  const txns=await sb(`transactions?select=*${catFilter}&service_start=lte.${mEnd}&service_end=gte.${mStart}&order=date.desc&limit=500`+ownerQS());
   const txnAccruals=[];let total=0;
   for(const t of txns){
     const oStart=t.service_start>mStart?t.service_start:mStart;

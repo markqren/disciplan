@@ -2,8 +2,8 @@ async function renderTags(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsFilterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div><div id="tagsBody"></div>`;
   try{
     const [tagRows,summaries]=await Promise.all([
-      sb("tags?order=start_date.desc"),
-      sbRPC("get_tag_summaries")
+      sb("tags?order=start_date.desc"+ownerQS()),
+      scopedRPC("get_tag_summaries")
     ]);
     const tm={};
     for(const s of summaries){
@@ -106,7 +106,7 @@ async function renderTags(el){
 
 async function showTagDetail(tag){
   const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
-  const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&category_id=neq.adjustment&order=date.desc`);
+  const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&category_id=neq.adjustment&order=date.desc`+ownerQS());
   const cats={};let total=0;
   const txnAccruals=[];
   for(const t of txns){

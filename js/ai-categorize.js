@@ -50,7 +50,7 @@ async function fetchSampleDescriptions(){
 }
 
 async function fetchSubscriptions(){
-  try{return await sbRPC("detect_subscriptions")}
+  try{return await scopedRPC("detect_subscriptions")}
   catch(e){console.warn("Subscription detection failed:",e);return[]}
 }
 

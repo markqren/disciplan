@@ -1,12 +1,25 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jun 11, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jun 20, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 
 
 ## 🚀 Releases
+
+### v2.5 — Jun 20, 2026
+
+#### v2.5.0
+<sub>Multi-user households</sub>
+
+##### Features
+- **Multi-user households** — Disciplan is now multi-user. A new `households` + `profiles` schema maps each Supabase auth user to an `owner` (e.g. `mark`, `shilpa`) within a household, and every user-data table (`transactions`, `accounts`, `balance_snapshots`, `tags`, `cashback_*`, `investment_*`, `preferences`, `pending_imports`, `group_overrides`) gained `owner` + `household_id` columns (existing rows backfilled to `mark`). Writes are auto-stamped with the signed-in owner in `sb()`. (~6,000 tokens)
+- **Mark | Shilpa | Combined view switcher** — A header segmented control scopes every tab at once. Combined uses the original aggregation RPCs untouched (guaranteed-identical numbers); single-person views call new owner/household-scoped RPC variants (`get_income_statement_scoped`, `get_ledger_balances_scoped`, `get_credit_balances_scoped`, `get_tag_summaries_scoped`, `detect_subscriptions_scoped`) and `&owner=`/`&household_id=` REST filters. In-session caches are namespaced by view. The switcher only appears once a household with 2+ profiles exists, so the app is unchanged until the migration is applied. (~7,000 tokens)
+- **Cross-person reimbursement mirroring** — When you reimburse a household member, their share is queued as a pending expense in their ledger via a new `pending_shared_txns` table. The recipient sees a review banner on load and can Approve (inserts the expense into their ledger) or Reject each proposal. (~5,000 tokens)
+- **Scoped for future RLS** — The schema is structured so per-household / per-owner Row Level Security (INF-05) becomes a policy-only change; policies remain permissive (`USING(true)`) for now. (~500 tokens)
+
+---
 
 ### v2.4 — May 30, 2026
 

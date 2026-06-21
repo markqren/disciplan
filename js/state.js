@@ -1,4 +1,4 @@
-let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set(),tagsView:{q:"",sort:"total"}};
+let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set(),tagsView:{q:"",sort:"total"},view:(()=>{try{return localStorage.getItem("dc_view")||"combined"}catch(e){return"combined"}})()};
 
 // In-session data cache (FEA-89)
 // Prevents redundant API calls when switching tabs without making edits.
@@ -11,6 +11,9 @@ function dcDel(...keys){keys.forEach(k=>delete _dc[k])}
 function dcInvalidateTxns(){['is_2017','is_2018','is_2019','is_2020','is_2021','is_2022','is_2023','is_2024','is_2025','is_2026','crossyear','bs','tax_all'].forEach(k=>delete _dc[k])}
 // Call after any portfolio mutation (lots, prices)
 function dcInvalidatePortfolio(){delete _dc['portfolio']}
+// Clear the entire in-session cache (e.g. when switching person view, since
+// every cached aggregate is scope-specific).
+function dcClearAll(){for(const k in _dc)delete _dc[k]}
 
 
 // Ensure a tag exists in the tags table; prompt user to create if new

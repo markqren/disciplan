@@ -941,7 +941,7 @@ async function renderLedger(el){
     selected.clear();updateBatchBar();
     document.getElementById("ledgerBody").innerHTML="Loading...";
     await subFetch;
-    let q=`transactions?select=*&order=date.desc,id.desc&limit=${PS}&offset=${state.page*PS}`;
+    let q=`transactions?select=*&order=date.desc,id.desc&limit=${PS}&offset=${state.page*PS}`+ownerQS();
     if(f.cat)q+=`&category_id=eq.${f.cat}`;
     if(f.pt)q+=`&payment_type=eq.${encodeURIComponent(f.pt)}`;
     if(f.tag)q+=`&tag=eq.${encodeURIComponent(f.tag)}`;

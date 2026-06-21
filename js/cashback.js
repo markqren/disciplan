@@ -1,7 +1,7 @@
 async function renderCashback(el){
   el.innerHTML='<div style="margin-bottom:16px"><h2>Cashback & Rewards</h2><p class="sub">Credit card rewards tracking · All time</p></div><div id="cbBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>';
   try{
-    const cardMetaRows=await sb("cashback_cards?select=name,color,annual_fee_usd,points_balance,is_active,sort_order&order=sort_order.asc,name.asc");
+    const cardMetaRows=await sb("cashback_cards?select=name,color,annual_fee_usd,points_balance,is_active,sort_order&order=sort_order.asc,name.asc"+ownerQS());
     const cardColor={};const cardFee={};const cardPtsBal={};
     const inactiveCards=new Set();
     const knownCardNames=[];
@@ -12,7 +12,7 @@ async function renderCashback(el){
       cardPtsBal[r.name]=parseFloat(r.points_balance)||0;
       if(r.is_active===false)inactiveCards.add(r.name);
     });
-    const rows=await sb('cashback_redemptions?order=date.desc');
+    const rows=await sb('cashback_redemptions?order=date.desc'+ownerQS());
     const getPtsRatioX=r=>{
       const pts=parseFloat(r.redemption_amount)||0;
       const dv=parseFloat(r.dollar_value)||0;

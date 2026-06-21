@@ -258,5 +258,127 @@ async function createReimbursement(originalTxn,person,splitRatio,paymentType,not
     await linkToGroup(originalTxn,newTxnObj);
   }
   state.txnCount++;
+  // Cross-person mirror: if the reimbursing party is a household member, queue
+  // a pending expense in their ledger for approval (plan Phase 5).
+  try{await mirrorReimbursementToHousehold(originalTxn,person,reimbAmount,paymentType,ss,se,serviceDays)}
+  catch(e){console.warn("Household reimbursement mirror failed:",e)}
   return result;
+}
+
+// Resolve a free-text person name to another household member's owner key.
+function resolveHouseholdOwner(person){
+  if(!person||!householdMembers||!householdMembers.length)return null;
+  const p=person.trim().toLowerCase();
+  if(!p)return null;
+  for(const m of householdMembers){
+    if(m.owner===currentOwner)continue;
+    const dn=(m.display_name||"").toLowerCase();
+    const fn=dn.split(" ")[0];
+    if(dn===p||fn===p||m.owner.toLowerCase()===p||(fn&&p.startsWith(fn)))return m.owner;
+  }
+  return null;
+}
+
+// Queue the other person's share as a pending expense in their ledger.
+async function mirrorReimbursementToHousehold(originalTxn,person,reimbAmount,paymentType,ss,se,serviceDays){
+  if(currentOwner==null||currentHousehold==null)return;
+  const toOwner=resolveHouseholdOwner(person);
+  if(!toOwner)return;
+  const shareAmt=Math.abs(reimbAmount);
+  if(!(shareAmt>0))return;
+  const proposed={
+    date:originalTxn.date,
+    service_start:ss,service_end:se,
+    description:originalTxn.description,
+    category_id:originalTxn.category_id,
+    original_amount:shareAmt,currency:"USD",fx_rate:1,
+    amount_usd:shareAmt,
+    payment_type:paymentType,
+    tag:(originalTxn.tag||"").toLowerCase().trim(),
+    daily_cost:Math.round(shareAmt/serviceDays*1e6)/1e6,
+    service_days:serviceDays,
+    credit:"",
+    owner:toOwner,
+    household_id:currentHousehold
+  };
+  await sb("pending_shared_txns",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+    household_id:currentHousehold,
+    from_owner:currentOwner,
+    to_owner:toOwner,
+    source_txn_id:originalTxn.id,
+    proposed_txn:proposed,
+    status:"pending"
+  })});
+}
+
+// Inbox: surface pending shared transactions addressed to the signed-in user.
+async function checkPendingSharedTxns(){
+  if(currentOwner==null)return;
+  try{
+    const rows=await sb(`pending_shared_txns?to_owner=eq.${encodeURIComponent(currentOwner)}&status=eq.pending&order=created_at.desc`);
+    const old=document.getElementById("sharedTxnBanner");if(old)old.remove();
+    if(!rows||!rows.length)return;
+    const banner=document.createElement("div");
+    banner.id="sharedTxnBanner";
+    banner.style.cssText="background:rgba(129,178,154,0.15);color:var(--g);text-align:center;padding:6px 12px;font-size:11px;border-bottom:1px solid rgba(129,178,154,0.2);cursor:pointer";
+    banner.innerHTML=`\uD83E\uDD1D ${rows.length} shared transaction${rows.length>1?"s":""} to review \u2014 <b>Review</b>`;
+    banner.onclick=()=>showSharedTxnApprovalModal(rows);
+    const hdr=document.querySelector(".hdr");if(hdr)hdr.after(banner);
+  }catch(e){console.warn("Shared txn check failed:",e)}
+}
+
+function showSharedTxnApprovalModal(rows){
+  const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"560px"}});
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px"}});
+  const hdrText=h("div",{});
+  hdrText.append(h("h3",{style:{margin:"0",fontSize:"18px"}},"Shared Transactions"));
+  hdrText.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"4px"}},"Approve to add to your ledger, or reject"));
+  hdr.append(hdrText);
+  hdr.append(h("button",{style:{background:"rgba(255,255,255,0.06)",border:"none",borderRadius:"8px",width:"32px",height:"32px",cursor:"pointer",color:"rgba(255,255,255,0.5)",fontSize:"16px"},onClick:()=>bg.remove()},"\u2715"));
+  modal.append(hdr);
+  const list=h("div",{});
+  modal.append(list);
+
+  function memberName(owner){const m=(householdMembers||[]).find(x=>x.owner===owner);return m?m.display_name:owner}
+
+  function renderRows(){
+    list.innerHTML="";
+    const pend=rows.filter(r=>r.status==="pending");
+    if(!pend.length){bg.remove();const b=document.getElementById("sharedTxnBanner");if(b)b.remove();return}
+    pend.forEach(r=>{
+      const p=r.proposed_txn||{};
+      const row=h("div",{style:{background:"rgba(255,255,255,0.04)",borderRadius:"8px",padding:"12px 14px",marginBottom:"8px"}});
+      const top=h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:"6px"}});
+      top.append(h("span",{style:{color:"rgba(255,255,255,0.85)",fontSize:"13px"}},p.description||"(no description)"));
+      top.append(h("span",{style:{fontFamily:"var(--mono)",color:"var(--r)",fontSize:"13px"}},fmtF(p.amount_usd||0)));
+      const meta=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)",marginBottom:"8px"}},
+        `${fmtD(p.date)} \u00B7 ${p.category_id||""} \u00B7 ${p.payment_type||""} \u00B7 from ${memberName(r.from_owner)}`);
+      const btns=h("div",{style:{display:"flex",gap:"8px"}});
+      const err=h("div",{style:{color:"var(--r)",fontSize:"11px",minHeight:"14px",marginTop:"6px"}});
+      const approve=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)",padding:"8px 16px",width:"auto"},onClick:async()=>{
+        approve.disabled=true;approve.textContent="Adding...";
+        try{
+          await sb("transactions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify(p)});
+          await sb(`pending_shared_txns?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({status:"approved",resolved_at:new Date().toISOString()})});
+          r.status="approved";dcInvalidateTxns();state.txnCount++;
+          document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+          renderRows();
+        }catch(e){err.textContent="Failed: "+e.message;approve.disabled=false;approve.textContent="Approve"}
+      }},"Approve");
+      const reject=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",padding:"8px 16px",width:"auto"},onClick:async()=>{
+        reject.disabled=true;reject.textContent="...";
+        try{
+          await sb(`pending_shared_txns?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({status:"rejected",resolved_at:new Date().toISOString()})});
+          r.status="rejected";renderRows();
+        }catch(e){err.textContent="Failed: "+e.message;reject.disabled=false;reject.textContent="Reject"}
+      }},"Reject");
+      btns.append(approve,reject);
+      row.append(top,meta,btns,err);
+      list.append(row);
+    });
+  }
+  renderRows();
+  bg.append(modal);document.body.append(bg);
 }

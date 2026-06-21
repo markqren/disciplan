@@ -2,16 +2,16 @@ async function renderBS(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Balance Sheet</h2><p class="sub">Loading...</p></div><div id="bsBody"></div>`;
   try{
     // Fetch live ledger balances, accounts metadata, and snapshots in parallel
-    let bsCache=dcGet('bs');
+    let bsCache=dcGet('bs_'+state.view);
     if(!bsCache){
       const res=await Promise.all([
-        sbRPC("get_ledger_balances"),
-        sb("accounts?order=display_order"),
-        sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc"),
-        sbRPC("get_credit_balances")
+        scopedRPC("get_ledger_balances"),
+        sb("accounts?order=display_order"+ownerQS()),
+        sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc"+ownerQS()),
+        scopedRPC("get_credit_balances")
       ]);
       bsCache={ledgerBals:res[0],accts:res[1],snaps:res[2],creditBals:res[3]};
-      dcSet('bs',bsCache);
+      dcSet('bs_'+state.view,bsCache);
     }
     const {ledgerBals,accts,snaps,creditBals}=bsCache;
     const body=document.getElementById("bsBody");body.innerHTML="";
@@ -70,7 +70,7 @@ async function renderBS(el){
     snapBar.innerHTML=`<div><span style="font-size:12px;font-weight:600;color:rgba(255,255,255,0.6)">Snapshots</span><span style="font-size:11px;color:rgba(255,255,255,0.3);margin-left:8px">${snapDates.length} saved${latestSnap?` · Last: ${fmtD(latestSnap)} (${daysSinceSnap}d ago)`:""}</span></div>`;
     const snapBtn=h("button",{class:"pg-btn",style:{background:"rgba(129,178,154,0.12)",borderColor:"rgba(129,178,154,0.3)",color:"var(--g)",padding:"6px 14px"},onClick:async()=>{
       snapBtn.textContent="Loading...";snapBtn.disabled=true;
-      try{const accounts=await sb("accounts?is_active=eq.true&order=display_order");showSnapshotForm(accounts,latestSnap,()=>renderContent(),ledgerBals)}
+      try{const accounts=await sb("accounts?is_active=eq.true&order=display_order"+ownerQS());showSnapshotForm(accounts,latestSnap,()=>renderContent(),ledgerBals)}
       catch(e){alert("Error: "+e.message);snapBtn.textContent="📸 Take Snapshot";snapBtn.disabled=false}
     }},"📸 Take Snapshot");
     snapBar.append(snapBtn);
@@ -166,7 +166,7 @@ function showSnapshotForm(accounts, lastDate, onSave, liveBals){
     const rows=[];
     document.querySelectorAll(".snap-bal").forEach(inp=>{
       const val=parseFloat(inp.value);
-      if(!isNaN(val)&&val!==0)rows.push({account_id:inp.dataset.id,snapshot_date:date,balance:val,balance_usd:val});
+      if(!isNaN(val)&&val!==0)rows.push({account_id:inp.dataset.id,snapshot_date:date,balance:val,balance_usd:val,...(currentOwner!=null?{owner:currentOwner,household_id:currentHousehold}:{})});
     });
     if(!rows.length){alert("Enter at least one balance.");btn.textContent="Save Snapshot";btn.disabled=false;return}
     try{

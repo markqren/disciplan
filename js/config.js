@@ -7,6 +7,69 @@ const SB_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 const DB_SCHEMA = "disciplan";
 const supabaseClient = window.supabase.createClient(SB_URL, SB_KEY, { db: { schema: DB_SCHEMA } });
 let currentSession = null;
+
+// ── Multi-user households (FEA: multi-user) ──────────────────────────────
+// currentOwner/currentHousehold stay null until a profiles row is loaded for
+// the signed-in user. While null, NO owner/household filtering happens and the
+// app behaves exactly as the single-user version did (safe before the schema
+// migration is applied).
+let currentOwner = null;        // 'mark' | 'shilpa' | ...
+let currentHousehold = null;    // household_id (bigint)
+let currentDisplayName = null;
+let householdMembers = [];      // [{owner, display_name}]
+
+// Tables carrying owner + household_id columns (see migration 20260620000001).
+const OWNED_TABLES = new Set([
+  "transactions","accounts","balance_snapshots","tags",
+  "cashback_redemptions","cashback_cards",
+  "investment_accounts","investment_symbols","investment_lots",
+  "investment_price_history","preferences","pending_imports","group_overrides"
+]);
+
+// Active view owner: null = Combined (whole household), else a single owner.
+// Returns null unless a household is actually loaded, so a stale persisted view
+// can never apply an owner filter before the multi-user migration is in place.
+function scopeOwner(){
+  if(!state || !state.view || state.view === "combined") return null;
+  if(currentHousehold == null) return null;
+  return state.view;
+}
+
+// PostgREST filter fragment for REST list queries. Always starts with '&'.
+function ownerQS(){
+  const o = scopeOwner();
+  let qs = "";
+  if(currentHousehold != null) qs += `&household_id=eq.${currentHousehold}`;
+  if(o != null) qs += `&owner=eq.${encodeURIComponent(o)}`;
+  return qs;
+}
+
+// RPC dispatcher: Combined → original RPC (untouched, guaranteed-correct);
+// single-person → the *_scoped variant with owner/household params.
+async function scopedRPC(baseFn, params = {}){
+  const o = scopeOwner();
+  if(o == null) return sbRPC(baseFn, params);
+  return sbRPC(baseFn + "_scoped", { ...params, p_owner: o, p_household_id: currentHousehold });
+}
+
+// Load the signed-in user's profile + household roster. Fails silently so the
+// app still works if the schema migration has not been applied yet.
+async function loadProfile(){
+  currentOwner = currentHousehold = currentDisplayName = null;
+  householdMembers = [];
+  const uid = currentSession?.user?.id;
+  if(!uid) return;
+  try{
+    const me = await sb(`profiles?auth_uid=eq.${uid}&select=owner,household_id,display_name&limit=1`);
+    if(me && me.length){
+      currentOwner = me[0].owner;
+      currentHousehold = me[0].household_id;
+      currentDisplayName = me[0].display_name;
+      const roster = await sb(`profiles?household_id=eq.${currentHousehold}&select=owner,display_name&order=display_name`);
+      householdMembers = roster || [];
+    }
+  }catch(e){ /* legacy single-user mode: no filtering */ }
+}
 if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
 
 function authHeaders(extra = {}) {
@@ -37,6 +100,18 @@ function showOfflineBanner(ts){
 async function sb(path,opts={}){
   const{headers:hd,...rest}=opts;
   const method=(rest.method||"GET").toUpperCase();
+  // Auto-stamp owner/household_id on inserts into owner-bearing tables.
+  if(method==="POST"&&rest.body&&currentOwner!=null){
+    const table=path.split("?")[0];
+    if(OWNED_TABLES.has(table)){
+      try{
+        let b=JSON.parse(rest.body);
+        const stamp=o=>{if(o&&typeof o==="object"){if(o.owner===undefined)o.owner=currentOwner;if(o.household_id===undefined)o.household_id=currentHousehold}return o};
+        b=Array.isArray(b)?b.map(stamp):stamp(b);
+        rest.body=JSON.stringify(b);
+      }catch(e){/* non-JSON body: leave as-is */}
+    }
+  }
   try{
     const r=await fetch(`${SB_URL}/rest/v1/${path}`,{...rest,headers:{...authHeaders(),...(hd||{})}});
     if(!r.ok) throw new Error(`${r.status}: ${await r.text()}`);

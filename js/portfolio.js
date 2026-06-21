@@ -6,9 +6,9 @@ async function renderPortfolio(el){
     let pfCache=dcGet('portfolio');
     if(!pfCache){
       const res=await Promise.all([
-        sb("investment_accounts?order=label"),
-        sb("investment_symbols?order=symbol"),
-        sb("investment_lots?order=lot_date")
+        sb("investment_accounts?order=label"+ownerQS()),
+        sb("investment_symbols?order=symbol"+ownerQS()),
+        sb("investment_lots?order=lot_date"+ownerQS())
       ]);
       pfCache={accounts:res[0],symbols:res[1],lots:res[2]};
       dcSet('portfolio',pfCache);
