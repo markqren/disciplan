@@ -23,7 +23,8 @@ const OWNED_TABLES = new Set([
   "transactions","accounts","balance_snapshots","tags",
   "cashback_redemptions","cashback_cards",
   "investment_accounts","investment_symbols","investment_lots",
-  "investment_price_history","preferences","pending_imports","group_overrides"
+  "investment_price_history","preferences","pending_imports","group_overrides",
+  "ai_rules"
 ]);
 
 // Active view owner: null = Combined (whole household), else a single owner.
@@ -41,6 +42,16 @@ function ownerQS(){
   let qs = "";
   if(currentHousehold != null) qs += `&household_id=eq.${currentHousehold}`;
   if(o != null) qs += `&owner=eq.${encodeURIComponent(o)}`;
+  return qs;
+}
+
+// PostgREST filter scoped to the *importing* user (currentOwner), regardless of
+// the active header view. Used for AI personalization inputs (merchant patterns,
+// sample descriptions, rules) so an import learns from the person receiving it.
+function importerQS(){
+  let qs = "";
+  if(currentHousehold != null) qs += `&household_id=eq.${currentHousehold}`;
+  if(currentOwner != null) qs += `&owner=eq.${encodeURIComponent(currentOwner)}`;
   return qs;
 }
 

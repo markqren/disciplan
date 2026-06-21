@@ -33,19 +33,27 @@ async function aiGroupLabels(groups){
 }
 
 async function fetchAIRules(){
-  try{const rows=await sb("ai_rules?is_active=eq.true&order=created_at.asc");return rows||[]}
+  try{const rows=await sb("ai_rules?is_active=eq.true&order=created_at.asc"+importerQS());return rows||[]}
   catch(e){console.warn("fetchAIRules failed:",e);return[]}
 }
 
 async function fetchMerchantPatterns(){
-  const rows=await sbRPC("get_merchant_patterns");
+  // Scope to the importing user so the parser learns from their own history.
+  // Fall back to the original RPC if the scoped variant is not deployed yet.
+  let rows;
+  if(currentOwner!=null){
+    try{rows=await sbRPC("get_merchant_patterns_scoped",{p_owner:currentOwner,p_household_id:currentHousehold})}
+    catch(e){console.warn("get_merchant_patterns_scoped unavailable, using unscoped:",e);rows=await sbRPC("get_merchant_patterns")}
+  }else{
+    rows=await sbRPC("get_merchant_patterns");
+  }
   const patterns={};
   for(const r of rows){const k=normalizeMerchant(r.description);if(!patterns[k])patterns[k]={};patterns[k][r.category_id]=(patterns[k][r.category_id]||0)+Number(r.count)}
   return patterns;
 }
 
 async function fetchSampleDescriptions(){
-  const recent=await sb("transactions?select=description&order=id.desc&limit=200");
+  const recent=await sb("transactions?select=description&order=id.desc&limit=200"+importerQS());
   return[...new Set(recent.map(r=>r.description))].slice(0,50);
 }
 

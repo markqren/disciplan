@@ -9,6 +9,18 @@
 
 ## 🚀 Releases
 
+### v2.6 — Jun 20, 2026
+
+#### v2.6.0
+<sub>Onboarding import module</sub>
+
+##### Features
+- **Onboarding tab** — A new per-user Onboarding tab lets a signed-in member add accounts, import their transactions, and reconcile to a current balance. "My Accounts" creates `accounts` rows (label / type / optional current balance, owner auto-stamped); the import card reuses the existing calibrated pipeline (`detectBankProfile` → `transformCSVRow` → `aiCategorize` → `renderReviewTable`/`commitImport`) with the chosen account as `payment_type`. A Chase United Club CSV is auto-detected by the existing `chase` bank profile — no new parser. (~3,500 tokens)
+- **Per-user AI personalization** — The parser now learns from the importing user's own history: `fetchMerchantPatterns` calls a new owner-scoped RPC `get_merchant_patterns_scoped`, and `fetchSampleDescriptions` / `fetchAIRules` filter by the signed-in owner via a new `importerQS()` helper. `ai_rules` gained `owner` + `household_id` (backfilled to `mark`) so each member keeps their own description-formatting rules. (~2,000 tokens)
+- **Opening-balance reconciliation** — After import, the Reconcile card reads the account's live ledger balance (`get_ledger_balances_scoped`), compares it to the stated current balance (sign derived from account type — asset vs credit/liability), and inserts a single `adjustment`-category transaction dated just before the earliest imported row to true up the Balance Sheet. The `adjustment` category is excluded from the income statement, so historical accruals are unaffected. (~1,500 tokens)
+
+---
+
 ### v2.5 — Jun 20, 2026
 
 #### v2.5.0

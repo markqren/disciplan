@@ -138,7 +138,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.5.0</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.6.0</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
     <span class="vw-seg" id="viewSwitch" style="display:none"></span>
@@ -164,6 +164,7 @@ select.inp{cursor:pointer;appearance:auto}
 <script src="js/balance-sheet.js"></script>
 <script src="js/tags.js"></script>
 <script src="js/cashback.js"></script>
+<script src="js/onboarding.js"></script>
 <script src="js/cross-year.js"></script>
 <script src="js/export.js"></script>
 <script src="js/ai-portal.js"></script>
@@ -173,7 +174,7 @@ select.inp{cursor:pointer;appearance:auto}
 // TABS
 // ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●
 
-const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["portfolio","portfolio"],["tags","tags"],["ledger","ledger"],["cashback","cashback"],["export","export"]];
+const TABS=[["entry","+ new entry"],["income","income statement"],["balance","balance sheet"],["portfolio","portfolio"],["tags","tags"],["ledger","ledger"],["cashback","cashback"],["onboarding","onboarding"],["export","export"]];
 
 function renderTabs(){
   const bar=document.getElementById("tabBar");
@@ -234,6 +235,7 @@ async function renderContent(){
     else if(state.tab==="tags")await renderTags(el);
     else if(state.tab==="ledger")await renderLedger(el);
     else if(state.tab==="cashback")await renderCashback(el);
+    else if(state.tab==="onboarding")await renderOnboarding(el);
     else if(state.tab==="export")await renderExport(el);
     else if(state.tab==="ai")await renderAIPortal(el);
   }catch(e){
