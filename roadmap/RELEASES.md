@@ -11,6 +11,14 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.1
+<sub>Multi-file onboarding import</sub>
+
+##### Features
+- **Onboarding: multi-file CSV import** — The onboarding import accepts multiple CSV files at once, since Chase caps a single CSV download at ~1000 rows so an initial onboard spans several files. All selected files are parsed and merged into one candidate set (with a guard against mixing bank formats), rows repeated across overlapping date-range downloads are auto-skipped before AI/DB duplicate checks, and the merged set runs a single pass of AI categorization → duplicate detection → review. The status line reports file count, total rows, and cross-file duplicates skipped. (~1,500 tokens)
+
+---
+
 #### v2.6.0
 <sub>Onboarding import module</sub>
 

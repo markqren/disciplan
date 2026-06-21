@@ -79,7 +79,7 @@ async function renderOnboarding(el){
   impCard.append(h("h3",{style:{marginTop:"0"}},"Import Transactions"));
 
   const impAcctSel=h("select",{class:"inp"});
-  const fileInp=h("input",{class:"inp",type:"file",accept:".csv"});
+  const fileInp=h("input",{class:"inp",type:"file",accept:".csv",multiple:true});
   const tagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
   const apiKeyInp=h("input",{class:"inp",type:"password",placeholder:"sk-ant-...",value:getApiKey()||""});
   const apiKeyField=h("div");
@@ -98,22 +98,43 @@ async function renderOnboarding(el){
   const impBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
     const pt=impAcctSel.value;
     if(!pt)return alert("Add and select an account first.");
-    const file=fileInp.files[0];
-    if(!file)return alert("Choose a CSV file first.");
+    const files=Array.from(fileInp.files||[]);
+    if(!files.length)return alert("Choose one or more CSV files first.");
     const keyVal=apiKeyInp.value.trim();
     if(keyVal)setApiKey(keyVal);
     else if(!getApiKey()){if(!confirm("No API key set. Import with basic category mapping (no AI description cleanup)?"))return}
     impBtn.disabled=true;impBtn.textContent="Processing...";
-    impStatus.classList.remove("hidden");impStatus.style.color="rgba(255,255,255,0.4)";impStatus.textContent="Parsing CSV...";
+    impStatus.classList.remove("hidden");impStatus.style.color="rgba(255,255,255,0.4)";
     try{
-      const text=await file.text();
-      let csv=parseCSV(text);
-      if(!csv.rows.length)throw new Error("No data rows found in CSV.");
-      const profile=detectBankProfile(csv.headers);
-      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt");
-      if(profile.reparse)csv=profile.reparse(text);
       const tag=tagInp.value.trim();
-      const candidates=csv.rows.map((r,i)=>transformCSVRow(r,profile,pt,tag,i));
+      // Parse every selected file (Chase caps CSV downloads at ~1000 rows, so an
+      // initial onboard can span several files) and merge into one candidate set.
+      let candidates=[];
+      let profile=null;
+      for(let fi=0;fi<files.length;fi++){
+        const file=files[fi];
+        impStatus.textContent=`Parsing ${file.name} (${fi+1}/${files.length})...`;
+        const text=await file.text();
+        let csv=parseCSV(text);
+        if(!csv.rows.length)continue;
+        const fp=detectBankProfile(csv.headers);
+        if(!fp)throw new Error(`Unrecognized bank format in ${file.name}. Supported: Chase CC, Chase Chequing, AMEX, Bilt`);
+        if(profile&&fp.name!==profile.name)throw new Error(`Mixed bank formats: ${file.name} is ${fp.name} but earlier files are ${profile.name}. Import one account format at a time.`);
+        profile=fp;
+        if(fp.reparse)csv=fp.reparse(text);
+        for(const r of csv.rows)candidates.push(transformCSVRow(r,fp,pt,tag,candidates.length));
+      }
+      if(!candidates.length)throw new Error("No data rows found in the selected file(s).");
+      // De-duplicate rows that repeat across overlapping file ranges before any
+      // DB checks, so overlapping downloads do not double-import.
+      let intraDupes=0;
+      const seen=new Set();
+      for(const c of candidates){
+        if(c._status==="skipped")continue;
+        const key=`${c.date}|${Math.abs(Math.round((c.amount_usd||0)*100))}|${(c._rawDescription||c.description||"").trim().toLowerCase()}`;
+        if(seen.has(key)){c._status="skipped";c._isDuplicate=true;c._skipReason="Duplicate (within upload)";intraDupes++}
+        else seen.add(key);
+      }
       impStatus.textContent="AI categorizing (personalized to your history)...";
       const[patterns,samples,subs,rules]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions(),fetchSubscriptions(),fetchAIRules()]);
       const aiResults=await aiCategorize(candidates,patterns,samples,!!profile.isCheckingAccount,profile.name,subs,rules);
@@ -121,13 +142,14 @@ async function renderOnboarding(el){
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
       const pending=candidates.filter(c=>c._status==="pending").length;
-      impStatus.textContent=!pending?"All transactions are duplicates or skipped.":aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":"Using default categories (no AI key).";
+      const fileNote=files.length>1?`${files.length} files \u00b7 ${candidates.length} rows${intraDupes?` \u00b7 ${intraDupes} cross-file duplicates skipped`:""} \u00b7 `:"";
+      impStatus.textContent=fileNote+(!pending?"All transactions are duplicates or skipped.":aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":"Using default categories (no AI key).");
       renderReviewTable(impReview,candidates);
     }catch(e){impStatus.textContent="Error: "+e.message;impStatus.style.color="var(--r)"}
     impBtn.disabled=false;impBtn.textContent="Import";
   }},"Import");
 
-  impCard.append(obRow(obField("Account",impAcctSel),obField("CSV File",fileInp)));
+  impCard.append(obRow(obField("Account",impAcctSel),obField("CSV File(s) \u2014 select multiple",fileInp)));
   impCard.append(obRow(obField("Bulk Tag (optional)",tagInp),apiKeyField));
   impCard.append(obRow(modelField));
   impCard.append(impBtn);
