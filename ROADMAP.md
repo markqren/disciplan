@@ -10,6 +10,18 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.4
+<sub>Shared Claude key via auth-gated proxy + household pattern inheritance</sub>
+
+##### Features
+- **Shared Anthropic key (no per-user keys)** — Browser Claude calls now route through a new auth-gated Edge Function `ai-categorize` that holds the key server-side (`ANTHROPIC_API_KEY` secret) and only serves logged-in household members (verified via `/auth/v1/user`, `aud="authenticated"`). All AI calls go through a single `callClaude()` helper: a personal key (if set) still calls Anthropic directly, otherwise it proxies with the user's session token so the key never reaches the browser. `aiCategorize`, `aiGroupLabels`, and AI-portal synthesis were rewired; import gating now uses `aiAvailable()` (logged-in is enough). Deploy the function with Verify JWT off — auth is enforced in-code. (~3,000 tokens)
+- **Household pattern inheritance** — A new member with no history now inherits the household's merchant patterns, sample descriptions, and AI rules (i.e. the established user's formatting) until they accumulate their own, so onboarding imports are cleaned in the existing house style. (~1,000 tokens)
+
+##### Fixes
+- **Onboarding status accuracy** — The import status line distinguishes "AI call failed" from "AI unavailable / no key" instead of always blaming a missing key, and turns amber when AI did not run. (~250 tokens)
+
+---
+
 #### v2.6.3
 <sub>Fix onboarding add-account insert</sub>
 

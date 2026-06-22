@@ -1,5 +1,5 @@
 async function aiGroupLabels(groups){
-  const apiKey=getApiKey();if(!apiKey)return{};
+  if(!aiAvailable())return{};
   const result={};
   const uncached=groups.filter(g=>{const c=sessionStorage.getItem(`grp_label_${g.gid}`);if(c){result[g.gid]=c;return false}return true});
   if(!uncached.length)return result;
@@ -22,7 +22,7 @@ async function aiGroupLabels(groups){
   }catch(e){console.warn("Failed to fetch label examples:",e)}
   const prompt=`Generate short summary labels (under 40 chars) for these transaction groups. Examples: "Whole Foods x6", "Pinterest Payroll Jan 15-31", "Japan Trip Restaurants x4", "Rent + Utilities Feb".${examples}\n\nGroups:\n${uncached.map(g=>`Group ${g.gid}: ${g.members.map(m=>`${m.description} ($${m.amount_usd}, ${m.date})`).join("; ")}`).join("\n")}\n\nReturn ONLY a JSON object mapping group ID to label string.`;
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:getAIModel(),max_tokens:1000,messages:[{role:"user",content:prompt}]})});
+    const r=await callClaude({model:getAIModel(),max_tokens:1000,messages:[{role:"user",content:prompt}]});
     if(!r.ok)return result;
     const data=await r.json();const txt=data.content?.[0]?.text||"";
     const m=txt.match(/\{[\s\S]*\}/);if(!m)return result;
@@ -33,8 +33,14 @@ async function aiGroupLabels(groups){
 }
 
 async function fetchAIRules(){
-  try{const rows=await sb("ai_rules?is_active=eq.true&order=created_at.asc"+importerQS());return rows||[]}
-  catch(e){console.warn("fetchAIRules failed:",e);return[]}
+  try{
+    let rows=await sb("ai_rules?is_active=eq.true&order=created_at.asc"+importerQS());
+    // Inherit household rules until this user has defined their own.
+    if((!rows||!rows.length)&&currentHousehold!=null){
+      rows=await sb(`ai_rules?is_active=eq.true&order=created_at.asc&household_id=eq.${currentHousehold}`);
+    }
+    return rows||[];
+  }catch(e){console.warn("fetchAIRules failed:",e);return[]}
 }
 
 async function fetchMerchantPatterns(){
@@ -44,17 +50,27 @@ async function fetchMerchantPatterns(){
   if(currentOwner!=null){
     try{rows=await sbRPC("get_merchant_patterns_scoped",{p_owner:currentOwner,p_household_id:currentHousehold})}
     catch(e){console.warn("get_merchant_patterns_scoped unavailable, using unscoped:",e);rows=await sbRPC("get_merchant_patterns")}
+    // A new household member has no patterns yet — inherit the household's
+    // (i.e. the established user's) formatting so onboarding imports are clean.
+    if((!rows||rows.length<5)&&currentHousehold!=null){
+      try{const hh=await sbRPC("get_merchant_patterns_scoped",{p_owner:null,p_household_id:currentHousehold});if(hh&&hh.length>(rows?.length||0))rows=hh}catch(e){}
+    }
   }else{
     rows=await sbRPC("get_merchant_patterns");
   }
   const patterns={};
-  for(const r of rows){const k=normalizeMerchant(r.description);if(!patterns[k])patterns[k]={};patterns[k][r.category_id]=(patterns[k][r.category_id]||0)+Number(r.count)}
+  for(const r of (rows||[])){const k=normalizeMerchant(r.description);if(!patterns[k])patterns[k]={};patterns[k][r.category_id]=(patterns[k][r.category_id]||0)+Number(r.count)}
   return patterns;
 }
 
 async function fetchSampleDescriptions(){
-  const recent=await sb("transactions?select=description&order=id.desc&limit=200"+importerQS());
-  return[...new Set(recent.map(r=>r.description))].slice(0,50);
+  let recent=await sb("transactions?select=description&order=id.desc&limit=200"+importerQS());
+  // Inherit household style examples when this user has little/no history.
+  if((!recent||recent.length<10)&&currentHousehold!=null){
+    const hh=await sb(`transactions?select=description&order=id.desc&limit=200&household_id=eq.${currentHousehold}`);
+    if(hh&&hh.length>(recent?.length||0))recent=hh;
+  }
+  return[...new Set((recent||[]).map(r=>r.description))].slice(0,50);
 }
 
 async function fetchSubscriptions(){
@@ -63,8 +79,7 @@ async function fetchSubscriptions(){
 }
 
 async function aiCategorize(candidates,merchantPatterns,sampleDescriptions,isCheckingAccount,profileName,detectedSubs,aiRules){
-  const apiKey=getApiKey();
-  if(!apiKey)return null;
+  if(!aiAvailable())return null;
   const items=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
   const prompt=`You are a personal finance assistant that categorizes AND cleans up transaction descriptions for a detailed expense tracker.
 
@@ -185,12 +200,8 @@ Description style: "Restaurant - Name", "Groceries - Store", "Clothes - Store", 
 Subscriptions: include month/year like "Spotify Premium (Mar 2026)"`:""}
 Return ONLY the JSON array, no other text.`;
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:getAIModel(),max_tokens:4000,messages:[{role:"user",content:prompt}]})
-    });
-    if(r.status===401){clearApiKey();throw new Error("Invalid API key (401)")}
+    const r=await callClaude({model:getAIModel(),max_tokens:4000,messages:[{role:"user",content:prompt}]});
+    if(r.status===401){if(getApiKey())clearApiKey();throw new Error("Authentication failed (401)")}
     if(!r.ok)throw new Error(`API error ${r.status}: ${await r.text()}`);
     const data=await r.json();
     const txt=data.content?.[0]?.text||"";

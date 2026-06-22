@@ -156,3 +156,19 @@ function setApiKey(key){localStorage.setItem("anthropic_api_key",key)}
 function clearApiKey(){localStorage.removeItem("anthropic_api_key")}
 function getAIModel(){return localStorage.getItem("ai_model")||"claude-haiku-4-5-20251001"}
 function setAIModel(m){localStorage.setItem("ai_model",m)}
+
+// AI is available if the user set a personal key OR is logged in (then we proxy
+// through the auth-gated ai-categorize Edge Function using the household's key).
+function aiAvailable(){return !!(getApiKey()||currentSession?.access_token)}
+
+// Single entry point for Claude calls. A personal key (if set) calls Anthropic
+// directly; otherwise we route through the Edge Function so the shared key never
+// reaches the browser. Returns a fetch Response with Anthropic's JSON shape.
+async function callClaude(body){
+  const key=getApiKey();
+  if(key){
+    return fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"x-api-key":key,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify(body)});
+  }
+  const token=currentSession?.access_token||SB_KEY;
+  return fetch(`${SB_URL}/functions/v1/ai-categorize`,{method:"POST",headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)});
+}

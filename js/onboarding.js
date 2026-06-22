@@ -89,7 +89,7 @@ async function renderOnboarding(el){
   const apiKeyField=h("div");
   apiKeyField.append(h("label",{class:"lbl"},"Anthropic API Key"));
   apiKeyField.append(apiKeyInp);
-  apiKeyField.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"2px"}},"Stored locally in your browser"));
+  apiKeyField.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"2px"}},"Optional \u2014 leave blank to use the household's shared key"));
   const modelSel=h("select",{class:"inp",style:{maxWidth:"200px"},onChange:()=>setAIModel(modelSel.value)});
   [["claude-haiku-4-5-20251001","Haiku 4.5 (fast)"],["claude-sonnet-4-20250514","Sonnet 4 (quality)"]].forEach(([v,l])=>{const o=h("option",{value:v},l);if(v===getAIModel())o.selected=true;modelSel.append(o)});
   const modelField=h("div");
@@ -106,7 +106,7 @@ async function renderOnboarding(el){
     if(!files.length)return alert("Choose one or more CSV files first.");
     const keyVal=apiKeyInp.value.trim();
     if(keyVal)setApiKey(keyVal);
-    else if(!getApiKey()){if(!confirm("No API key set. Import with basic category mapping (no AI description cleanup)?"))return}
+    else if(!aiAvailable()){if(!confirm("No API key set. Import with basic category mapping (no AI description cleanup)?"))return}
     impBtn.disabled=true;impBtn.textContent="Processing...";
     impStatus.classList.remove("hidden");impStatus.style.color="rgba(255,255,255,0.4)";
     try{
@@ -147,7 +147,9 @@ async function renderOnboarding(el){
       await findDuplicates(candidates,pt);
       const pending=candidates.filter(c=>c._status==="pending").length;
       const fileNote=files.length>1?`${files.length} files \u00b7 ${candidates.length} rows${intraDupes?` \u00b7 ${intraDupes} cross-file duplicates skipped`:""} \u00b7 `:"";
-      impStatus.textContent=fileNote+(!pending?"All transactions are duplicates or skipped.":aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":"Using default categories (no AI key).");
+      const aiMsg=aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":aiAvailable()?"AI call failed \u2014 descriptions left raw. Check connection/credits and re-import.":"AI unavailable \u2014 descriptions left raw. Sign in (or paste a personal Anthropic key above) and re-import.";
+      impStatus.textContent=fileNote+(!pending?"All transactions are duplicates or skipped.":aiMsg);
+      if(!aiResults){impStatus.style.color="var(--y)"}
       renderReviewTable(impReview,candidates);
     }catch(e){impStatus.textContent="Error: "+e.message;impStatus.style.color="var(--r)"}
     impBtn.disabled=false;impBtn.textContent="Import";

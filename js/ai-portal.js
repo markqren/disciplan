@@ -662,8 +662,7 @@ async function renderSynthesis(el){
 }
 
 async function runSynthesis(el){
-  const apiKey=getApiKey();
-  if(!apiKey){alert("No Claude API key set. Add it in the Entry tab.");return}
+  if(!aiAvailable()){alert("AI unavailable \u2014 sign in, or add a personal Claude API key in the Entry tab.");return}
 
   const statusEl=h("div",{style:{padding:"16px",fontSize:"13px",color:"rgba(255,255,255,0.5)"}});
   el.prepend(statusEl);
@@ -702,11 +701,7 @@ Return a JSON array of suggestions:
 Return ONLY the JSON array.`;
 
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"x-api-key":apiKey,"anthropic-version":"2023-06-01","Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:"claude-opus-4-6",max_tokens:2000,messages:[{role:"user",content:prompt}]})
-    });
+    const r=await callClaude({model:"claude-opus-4-6",max_tokens:2000,messages:[{role:"user",content:prompt}]});
     if(!r.ok)throw new Error(`API error ${r.status}`);
     const data=await r.json();
     const txt=data.content?.[0]?.text||"";

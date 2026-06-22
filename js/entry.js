@@ -149,7 +149,7 @@ function renderEntry(el){
     // API key handling
     const keyVal=apiKeyInp.value.trim();
     if(keyVal)setApiKey(keyVal);
-    else if(!getApiKey()){
+    else if(!aiAvailable()){
       if(!confirm("No API key set. Import with basic category mapping (no AI description cleanup)?"))return;
     }
 
