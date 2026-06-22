@@ -2,6 +2,10 @@ function openLedgerEditModal(txn,onSaved){
   const _orig=onSaved;
   const _onSaved=()=>{dcInvalidateTxns();if(_orig)_orig()};
   onSaved=_onSaved;
+  // Members can only edit their own rows; admins edit anyone's. The DB (RLS)
+  // is the real guard — this just makes the modal read-only for clean UX.
+  const canWrite=canWriteOwner(txn.owner);
+  const ownerName=(householdMembers.find(m=>m.owner===txn.owner)||{}).display_name||txn.owner||"another member";
   let seManual=false;
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   const modal=h("div",{class:"modal"});
@@ -455,10 +459,14 @@ function openLedgerEditModal(txn,onSaved){
     modal.append(cBtnRow);
   }
 
-  btnRow.append(mSave);
-  if(mReimb)btnRow.append(mReimb);
-  if(mCashback)btnRow.append(mCashback);
-  btnRow.append(mDel,mCancel);
+  if(canWrite){
+    btnRow.append(mSave);
+    if(mReimb)btnRow.append(mReimb);
+    if(mCashback)btnRow.append(mCashback);
+    btnRow.append(mDel,mCancel);
+  }else{
+    btnRow.append(mCancel);
+  }
 
   modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
   const amtWithCur=h("div",{style:{display:"grid",gridTemplateColumns:"1fr 80px",gap:"6px"}});
@@ -543,7 +551,7 @@ function openLedgerEditModal(txn,onSaved){
         row.append(left);
         const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
         right.append(h("span",{style:{fontFamily:"var(--mono)",color:m.amount_usd<0?"var(--g)":"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(m.amount_usd)));
-        if(!isThis){
+        if(!isThis&&canWrite){
           const ub=h("button",{class:"pg-btn",style:{fontSize:"9px",color:"rgba(224,122,95,0.7)",padding:"2px 6px"},onClick:async(e)=>{
             e.stopPropagation();ub.textContent="...";ub.disabled=true;
             try{const gid=txn.transaction_group_id;await unlinkFromGroup(m.id,gid);const remaining=await sb(`transactions?transaction_group_id=eq.${gid}&select=id`);if(!remaining.some(r=>r.id===txn.id))txn.transaction_group_id=null;renderLinkGroup()}
@@ -560,19 +568,28 @@ function openLedgerEditModal(txn,onSaved){
       footer.append(h("span",{style:{fontFamily:"var(--mono)",fontWeight:"600",color:netTotal<0?"var(--g)":"rgba(255,255,255,0.8)"}},fmtF(netTotal)));
       linkBody.append(footer);
       // Link Another button
-      const linkMoreWrap=h("div",{style:{marginTop:"8px"}});
-      const linkMoreBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)"},onClick:()=>{linkMoreBtn.style.display="none";buildLinkSearchUI(linkMoreWrap,renderLinkGroup)}},"+ Link Another Transaction");
-      linkMoreWrap.append(linkMoreBtn);
-      linkBody.append(linkMoreWrap);
-    }else{
+      if(canWrite){
+        const linkMoreWrap=h("div",{style:{marginTop:"8px"}});
+        const linkMoreBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)"},onClick:()=>{linkMoreBtn.style.display="none";buildLinkSearchUI(linkMoreWrap,renderLinkGroup)}},"+ Link Another Transaction");
+        linkMoreWrap.append(linkMoreBtn);
+        linkBody.append(linkMoreWrap);
+      }
+    }else if(canWrite){
       linkHeader.textContent="\uD83D\uDD17 Link to Transaction";
       // Check remaining group after unlink — might have dissolved
       const linkToggle=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)"},onClick:()=>{linkToggle.style.display="none";buildLinkSearchUI(linkBody,renderLinkGroup)}},"\uD83D\uDD17 Link to Transaction");
       linkBody.append(linkToggle);
+    }else{
+      linkHeader.textContent="";
     }
   }
   renderLinkGroup();
   modal.append(linkSection);
+
+  if(!canWrite){
+    hdrLeft.append(h("div",{style:{marginTop:"6px",fontSize:"11px",color:"var(--y)"}},`Read-only \u2014 owned by ${ownerName}`));
+    modal.querySelectorAll("input,select,textarea").forEach(el=>{el.disabled=true});
+  }
 
   modal.append(btnRow);
   bg.append(modal);
@@ -837,8 +854,11 @@ async function renderLedger(el){
   // Floating action bar for batch operations
   const batchBar=h("div",{class:"batch-bar hidden"});
   const bbCount=h("span",{class:"bb-count"});
-  const bbEdit=h("button",{class:"bb-btn bb-edit",onClick:()=>openBatchEditModal(currentTxns.filter(t=>selected.has(t.id)),()=>{selected.clear();updateBatchBar();loadPage()})},"\u270F Edit");
-  const bbLink=h("button",{class:"bb-btn bb-link",onClick:()=>doBatchLink(currentTxns.filter(t=>selected.has(t.id)),()=>{selected.clear();updateBatchBar();loadPage()})},"\uD83D\uDD17 Link");
+  // Members can only mutate their own rows (mirrors RLS). Block any batch write
+  // that includes another member's transactions.
+  function batchWritable(sel){if(sel.some(t=>!canWriteOwner(t.owner))){alert("Some selected transactions belong to another member \u2014 you can only edit your own.");return false}return true}
+  const bbEdit=h("button",{class:"bb-btn bb-edit",onClick:()=>{const sel=currentTxns.filter(t=>selected.has(t.id));if(!batchWritable(sel))return;openBatchEditModal(sel,()=>{selected.clear();updateBatchBar();loadPage()})}},"\u270F Edit");
+  const bbLink=h("button",{class:"bb-btn bb-link",onClick:()=>{const sel=currentTxns.filter(t=>selected.has(t.id));if(!batchWritable(sel))return;doBatchLink(sel,()=>{selected.clear();updateBatchBar();loadPage()})}},"\uD83D\uDD17 Link");
   const bbCopy=h("button",{class:"bb-btn bb-copy",onClick:async()=>{
     const pMap={accommodation:"Entertainment",games:"Entertainment",groceries:"Food",restaurant:"Food",rent:"Home",furniture:"Home",clothes:"Personal",tech:"Personal"};
     const rows=currentTxns.filter(t=>selected.has(t.id));
@@ -848,6 +868,7 @@ async function renderLedger(el){
   }},"\uD83D\uDCCB Copy");
   let bbDelTimer=null;
   const bbDel=h("button",{class:"bb-btn bb-del",onClick:async()=>{
+    if(!batchWritable(currentTxns.filter(t=>selected.has(t.id))))return;
     if(bbDel.dataset.confirm!=="1"){bbDel.dataset.confirm="1";bbDel.textContent=`Confirm Delete (${selected.size})`;bbDelTimer=setTimeout(()=>{bbDel.dataset.confirm="0";bbDel.textContent="\uD83D\uDDD1 Delete"},3000);return}
     if(bbDelTimer)clearTimeout(bbDelTimer);
     bbDel.textContent="Deleting...";bbDel.disabled=true;

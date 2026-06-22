@@ -11,6 +11,15 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.6
+<sub>Household roles: admin read/write all, members read-only on others</sub>
+
+##### Features
+- **Database-enforced household access control** — Added a `role` to profiles (`admin` = Mark, `member` = Shilpa) and replaced the permissive `USING(true)` policies with real RLS: reads stay shared (Combined view unchanged), but `INSERT/UPDATE/DELETE` on every owner-stamped table (transactions, accounts, balance snapshots, tags, cashback, investments, preferences, pending imports, group overrides, ai_rules) now require `can_write(owner, household)` — admin of the household, or the row's owner. Members literally cannot edit another member's data, even via the API. Also closed a privilege-escalation hole: `profiles`/`households` writes are now admin-only, so a member can't promote themselves. Helpers (`my_household`, `is_admin`, `can_write`) are `SECURITY DEFINER` to avoid policy recursion. Edge Functions use `service_role` and bypass RLS. (migration `20260620000004_household_rls.sql`) (~6,000 tokens)
+- **Read-only ledger UX for non-owners** — The ledger edit modal renders read-only with a "Read-only - owned by {Name}" banner (no Save/Delete/link controls) for rows the signed-in member can't write, and batch Edit/Link/Delete refuse selections that include another member's transactions (Copy still works). UI mirrors the RLS so members never hit confusing save failures. (~1,500 tokens)
+
+---
+
 #### v2.6.5
 <sub>Batch AI categorization for large imports + drop redundant key field</sub>
 

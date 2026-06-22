@@ -16,7 +16,14 @@ let currentSession = null;
 let currentOwner = null;        // 'mark' | 'shilpa' | ...
 let currentHousehold = null;    // household_id (bigint)
 let currentDisplayName = null;
+let currentRole = null;         // 'admin' | 'member' (enforced by RLS, see migration 20260620000004)
 let householdMembers = [];      // [{owner, display_name}]
+
+// Admins may write any row in their household; members only their own. This
+// mirrors the DB RLS (can_write) for UX gating only — the DB is the real guard.
+// Returns true in legacy/single-user mode (no household loaded) so nothing breaks.
+function isAdmin(){return currentRole === "admin"}
+function canWriteOwner(owner){return currentHousehold == null || isAdmin() || owner == null || owner === currentOwner}
 
 // Tables carrying owner + household_id columns (see migration 20260620000001).
 const OWNED_TABLES = new Set([
@@ -66,16 +73,17 @@ async function scopedRPC(baseFn, params = {}){
 // Load the signed-in user's profile + household roster. Fails silently so the
 // app still works if the schema migration has not been applied yet.
 async function loadProfile(){
-  currentOwner = currentHousehold = currentDisplayName = null;
+  currentOwner = currentHousehold = currentDisplayName = currentRole = null;
   householdMembers = [];
   const uid = currentSession?.user?.id;
   if(!uid) return;
   try{
-    const me = await sb(`profiles?auth_uid=eq.${uid}&select=owner,household_id,display_name&limit=1`);
+    const me = await sb(`profiles?auth_uid=eq.${uid}&select=owner,household_id,display_name,role&limit=1`);
     if(me && me.length){
       currentOwner = me[0].owner;
       currentHousehold = me[0].household_id;
       currentDisplayName = me[0].display_name;
+      currentRole = me[0].role || "member";
       const roster = await sb(`profiles?household_id=eq.${currentHousehold}&select=owner,display_name&order=display_name`);
       householdMembers = roster || [];
     }
