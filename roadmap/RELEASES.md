@@ -11,6 +11,17 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.5
+<sub>Batch AI categorization for large imports + drop redundant key field</sub>
+
+##### Fixes
+- **Large imports now categorize (the real onboarding bug)** — `aiCategorize` sent every row in one Claude request capped at `max_tokens: 4000`, so a ~1,500-row Chase onboard could never fit its output and the truncated JSON silently failed (descriptions left raw, everything low-confidence). It now batches 40 rows/call, runs 4 in parallel, raises `max_tokens` to 8000, and merges results by index, keeping partial success if a batch fails. Fixes both the Onboarding and Entry importers; onboarding shows live `AI categorizing N/M` progress. (~3,000 tokens)
+
+##### Changes
+- **Removed the Anthropic key field from Onboarding** — logged-in household members proxy through the auth-gated `ai-categorize` function automatically, so the field (and its prefill/help copy) is gone. A personal key in `localStorage` still takes the direct path if present. (~500 tokens)
+
+---
+
 #### v2.6.4
 <sub>Shared Claude key via auth-gated proxy + household pattern inheritance</sub>
 

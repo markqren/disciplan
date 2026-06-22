@@ -78,10 +78,9 @@ async function fetchSubscriptions(){
   catch(e){console.warn("Subscription detection failed:",e);return[]}
 }
 
-async function aiCategorize(candidates,merchantPatterns,sampleDescriptions,isCheckingAccount,profileName,detectedSubs,aiRules){
+async function aiCategorize(candidates,merchantPatterns,sampleDescriptions,isCheckingAccount,profileName,detectedSubs,aiRules,onProgress){
   if(!aiAvailable())return null;
-  const items=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
-  const prompt=`You are a personal finance assistant that categorizes AND cleans up transaction descriptions for a detailed expense tracker.
+  const promptFor=(items)=>`You are a personal finance assistant that categorizes AND cleans up transaction descriptions for a detailed expense tracker.
 
 CATEGORY TAXONOMY (use exact IDs):
 - entertainment: Entertainment (concerts, movies, events, activities, sports — NOT accommodation or games)
@@ -199,15 +198,30 @@ These are from a Bilt credit card. Descriptions may be ALL CAPS (legacy format).
 Description style: "Restaurant - Name", "Groceries - Store", "Clothes - Store", "Tech - Item"
 Subscriptions: include month/year like "Spotify Premium (Mar 2026)"`:""}
 Return ONLY the JSON array, no other text.`;
-  try{
-    const r=await callClaude({model:getAIModel(),max_tokens:4000,messages:[{role:"user",content:prompt}]});
-    if(r.status===401){if(getApiKey())clearApiKey();throw new Error("Authentication failed (401)")}
-    if(!r.ok)throw new Error(`API error ${r.status}: ${await r.text()}`);
-    const data=await r.json();
-    const txt=data.content?.[0]?.text||"";
-    const m=txt.match(/\[[\s\S]*\]/);
-    if(!m)throw new Error("No JSON array in AI response");
-    return JSON.parse(m[0]);
-  }catch(e){console.error("aiCategorize failed:",e);return null}
+  // Batch so large imports don't blow the model's output budget. Chase caps CSV
+  // downloads at ~1000 rows and an onboard can span several files; ~1,500 rows
+  // can never fit in one response, which silently truncated the JSON and failed
+  // the whole import. 40 rows/call, 4 calls in parallel, results merged by index.
+  const all=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
+  const BATCH=40,CONC=4;
+  const batches=[];for(let i=0;i<all.length;i+=BATCH)batches.push(all.slice(i,i+BATCH));
+  const out=[];let anyOk=false,authFail=false,done=0;
+  for(let i=0;i<batches.length;i+=CONC){
+    const group=batches.slice(i,i+CONC);
+    const settled=await Promise.all(group.map(async b=>{
+      try{
+        const r=await callClaude({model:getAIModel(),max_tokens:8000,messages:[{role:"user",content:promptFor(b)}]});
+        if(r.status===401){authFail=true;return null}
+        if(!r.ok){console.warn(`aiCategorize batch ${r.status}:`,await r.text());return null}
+        const data=await r.json();const txt=data.content?.[0]?.text||"";
+        const m=txt.match(/\[[\s\S]*\]/);if(!m)return null;
+        return JSON.parse(m[0]);
+      }catch(e){console.error("aiCategorize batch failed:",e);return null}
+    }));
+    for(const arr of settled){done++;if(Array.isArray(arr)){anyOk=true;out.push(...arr)}}
+    if(onProgress)onProgress(Math.min(done*BATCH,all.length),all.length);
+  }
+  if(authFail&&getApiKey())clearApiKey();
+  return anyOk?out:null;
 }
 

@@ -85,11 +85,6 @@ async function renderOnboarding(el){
   const impAcctSel=h("select",{class:"inp"});
   const fileInp=h("input",{class:"inp",type:"file",accept:".csv",multiple:true});
   const tagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
-  const apiKeyInp=h("input",{class:"inp",type:"password",placeholder:"sk-ant-...",value:getApiKey()||""});
-  const apiKeyField=h("div");
-  apiKeyField.append(h("label",{class:"lbl"},"Anthropic API Key"));
-  apiKeyField.append(apiKeyInp);
-  apiKeyField.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"2px"}},"Optional \u2014 leave blank to use the household's shared key"));
   const modelSel=h("select",{class:"inp",style:{maxWidth:"200px"},onChange:()=>setAIModel(modelSel.value)});
   [["claude-haiku-4-5-20251001","Haiku 4.5 (fast)"],["claude-sonnet-4-20250514","Sonnet 4 (quality)"]].forEach(([v,l])=>{const o=h("option",{value:v},l);if(v===getAIModel())o.selected=true;modelSel.append(o)});
   const modelField=h("div");
@@ -104,9 +99,7 @@ async function renderOnboarding(el){
     if(!pt)return alert("Add and select an account first.");
     const files=Array.from(fileInp.files||[]);
     if(!files.length)return alert("Choose one or more CSV files first.");
-    const keyVal=apiKeyInp.value.trim();
-    if(keyVal)setApiKey(keyVal);
-    else if(!aiAvailable()){if(!confirm("No API key set. Import with basic category mapping (no AI description cleanup)?"))return}
+    if(!aiAvailable()&&!confirm("AI unavailable (not signed in). Import with basic category mapping only?"))return;
     impBtn.disabled=true;impBtn.textContent="Processing...";
     impStatus.classList.remove("hidden");impStatus.style.color="rgba(255,255,255,0.4)";
     try{
@@ -141,13 +134,13 @@ async function renderOnboarding(el){
       }
       impStatus.textContent="AI categorizing (personalized to your history)...";
       const[patterns,samples,subs,rules]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions(),fetchSubscriptions(),fetchAIRules()]);
-      const aiResults=await aiCategorize(candidates,patterns,samples,!!profile.isCheckingAccount,profile.name,subs,rules);
+      const aiResults=await aiCategorize(candidates,patterns,samples,!!profile.isCheckingAccount,profile.name,subs,rules,(n,t)=>{impStatus.textContent=`AI categorizing ${n}/${t} (personalized to your history)...`});
       applyAIResults(candidates,aiResults,subs);
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
       const pending=candidates.filter(c=>c._status==="pending").length;
       const fileNote=files.length>1?`${files.length} files \u00b7 ${candidates.length} rows${intraDupes?` \u00b7 ${intraDupes} cross-file duplicates skipped`:""} \u00b7 `:"";
-      const aiMsg=aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":aiAvailable()?"AI call failed \u2014 descriptions left raw. Check connection/credits and re-import.":"AI unavailable \u2014 descriptions left raw. Sign in (or paste a personal Anthropic key above) and re-import.";
+      const aiMsg=aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":aiAvailable()?"AI call failed \u2014 descriptions left raw. Check connection/credits and re-import.":"AI unavailable \u2014 descriptions left raw. Sign in and re-import.";
       impStatus.textContent=fileNote+(!pending?"All transactions are duplicates or skipped.":aiMsg);
       if(!aiResults){impStatus.style.color="var(--y)"}
       renderReviewTable(impReview,candidates);
@@ -156,8 +149,7 @@ async function renderOnboarding(el){
   }},"Import");
 
   impCard.append(obRow(obField("Account",impAcctSel),obField("CSV File(s) \u2014 select multiple",fileInp)));
-  impCard.append(obRow(obField("Bulk Tag (optional)",tagInp),apiKeyField));
-  impCard.append(obRow(modelField));
+  impCard.append(obRow(obField("Bulk Tag (optional)",tagInp),modelField));
   impCard.append(impBtn);
   impCard.append(impStatus);
   impCard.append(impReview);
