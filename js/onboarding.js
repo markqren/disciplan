@@ -57,9 +57,13 @@ async function renderOnboarding(el){
     addBtn.disabled=true;addBtn.textContent="Adding...";
     try{
       const maxOrder=accts.reduce((m,a)=>Math.max(m,a.display_order||0),0);
-      const created=await sb("accounts",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({label,account_type:typeSel.value,display_order:maxOrder+1,is_active:true})});
+      // accounts.id is a text slug PK (e.g. "venmo"), not auto-generated — derive one.
+      const existingIds=new Set(accts.map(a=>a.id).filter(Boolean));
+      const base=label.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||"account";
+      let id=base,n=2;while(existingIds.has(id))id=`${base}_${n++}`;
+      const created=await sb("accounts",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id,label,account_type:typeSel.value,display_order:maxOrder+1,is_active:true})});
       const row=Array.isArray(created)?created[0]:created;
-      accts.push(row||{label,account_type:typeSel.value,display_order:maxOrder+1,is_active:true});
+      accts.push(row||{id,label,account_type:typeSel.value,display_order:maxOrder+1,is_active:true});
       const balVal=parseFloat(balInp.value);
       if(!isNaN(balVal))obStatedBalance[label]=balVal;
       labelInp.value="";balInp.value="";

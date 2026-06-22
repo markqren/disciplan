@@ -11,6 +11,14 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.3
+<sub>Fix onboarding add-account insert</sub>
+
+##### Fixes
+- **Onboarding: add-account failed with null id** — Adding an account in the Onboarding tab threw `null value in column "id" of relation "accounts" violates not-null constraint`, because `accounts.id` is a text slug primary key (e.g. `venmo`, `rakuten`) with no auto-generated default. Add-account now derives a unique slug `id` from the account name (`"Chase United Club"` -> `chase_united_club`, with numeric suffixes on collision) and includes it in the insert. Transactions still key off the account label via `payment_type`, so balance-sheet joins are unaffected. (~500 tokens)
+
+---
+
 #### v2.6.2
 <sub>Ledger owner badges in Combined view</sub>
 
