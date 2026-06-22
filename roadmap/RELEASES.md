@@ -11,6 +11,14 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.2
+<sub>Ledger owner badges in Combined view</sub>
+
+##### Features
+- **Ledger: owner differentiation in Combined view** — When the header view is `Combined`, each ledger row now shows a colored owner pill (e.g. `Mark` / `Shilpa`) prepended to the description, including expanded linked-group members; collapsed group summary rows show a badge per distinct owner so cross-person reimbursement groups are obvious. The badge is gated to the Combined view of a multi-member household (`scopeOwner()==null && householdMembers.length>1`), so single-person views and the legacy single-user setup are unchanged. Owner was already in the ledger `select=*` fetch, so no query change was needed. (~1,500 tokens)
+
+---
+
 #### v2.6.1
 <sub>Multi-file onboarding import</sub>
 

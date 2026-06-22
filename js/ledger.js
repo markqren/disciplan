@@ -1027,6 +1027,10 @@ async function renderLedger(el){
     const hq=f.q&&f.q.length>=2?f.q.toLowerCase():"";
     function hilite(text,el){if(!text){el.append(document.createTextNode(""));return}if(!hq){el.append(document.createTextNode(text));return}const low=text.toLowerCase();const idx=low.indexOf(hq);if(idx===-1){el.append(document.createTextNode(text));return}el.append(document.createTextNode(text.slice(0,idx)));el.append(h("span",{style:"background:rgba(242,204,143,0.25);border-radius:2px;padding:0 1px"},text.slice(idx,idx+hq.length)));el.append(document.createTextNode(text.slice(idx+hq.length)))}
     currentTxns=txns;
+    // Owner differentiation: only meaningful in the Combined household view.
+    const showOwner=scopeOwner()==null&&householdMembers.length>1;
+    const ownerMeta={};householdMembers.forEach((m,i)=>{ownerMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    function ownerBadge(owner){const meta=ownerMeta[owner]||{name:owner,color:"#888"};return h("span",{class:"badge",style:{marginRight:"5px",background:meta.color+"22",color:meta.color,fontSize:"10px"}},meta.name)}
     const tbody=document.createElement("tbody");
     let prevGroupId=null;
     const renderedGroups=new Set();
@@ -1042,6 +1046,7 @@ async function renderLedger(el){
       tr.append(h("td",{style:{padding:"9px 4px",...(selectMode?{}:{display:"none"})}},[chk]));
       tr.append(h("td",{class:"m",style:{color:indent?"rgba(255,255,255,0.45)":"rgba(255,255,255,0.55)",whiteSpace:"nowrap",...(indent?{paddingLeft:"16px"}:{})}},fmtD(t.date)));
       const descTd=h("td",{style:{color:indent?"rgba(255,255,255,0.65)":"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",...(indent?{paddingLeft:"20px"}:{})}});
+      if(showOwner&&t.owner)descTd.append(ownerBadge(t.owner));
       if(!indent&&isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
       if(subMerchants.size&&subMerchants.has(normalizeMerchant(t.description)))descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"rgba(129,178,154,0.6)",cursor:"pointer"},title:"View subscription history",onClick:e=>{e.stopPropagation();showSubHistory(normalizeMerchant(t.description),t.description)}},"\uD83D\uDD04"));
       hilite(t.description,descTd);
@@ -1086,6 +1091,7 @@ async function renderLedger(el){
           const ch=document.querySelector(`[data-grp-chev="${gid}"]`);if(ch)ch.style.transform=state.expandedGroups.has(gid)?"rotate(90deg)":"";
         }},"\u25B6"));
         descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"var(--b)"}},`\uD83D\uDD17${summary.memberCount}`));
+        if(showOwner){[...new Set((groupMembers[gid]||[]).map(m=>m.owner).filter(Boolean))].forEach(o=>descTd.append(ownerBadge(o)))}
         descTd.append(h("span",{"data-grp-label":gid},sessionStorage.getItem(`grp_label_${gid}`)||summary.label));
         str.append(descTd);
         // Category
