@@ -285,16 +285,51 @@ async function createReimbursement(originalTxn,person,splitRatio,paymentType,not
   };
   const result=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(newTxn)});
   const newId=result[0]?.id;
+  let groupId=null;
   if(newId){
     const newTxnObj={id:newId,transaction_group_id:null};
-    await linkToGroup(originalTxn,newTxnObj);
+    groupId=await linkToGroup(originalTxn,newTxnObj);
   }
   state.txnCount++;
   // Cross-person mirror: if the reimbursing party is a household member, queue
   // a pending expense in their ledger for approval (plan Phase 5).
   try{await mirrorReimbursementToHousehold(originalTxn,person,reimbAmount,paymentType,ss,se,serviceDays)}
   catch(e){console.warn("Household reimbursement mirror failed:",e)}
-  return result;
+  // Return linkage so the caller can optionally push to Splitwise (FEA-29C).
+  return{result,newId,groupId,originalId:originalTxn.id,reimbAmount};
+}
+
+// ── Splitwise write-back (FEA-29C) ──
+// Call the auth-gated splitwise-sync Edge Function with a write action.
+async function swCallEdge(payload){
+  const token=(typeof currentSession!=="undefined"&&currentSession?.access_token)||SB_KEY;
+  const r=await fetch(`${SB_URL}/functions/v1/splitwise-sync`,{
+    method:"POST",
+    headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY,"Content-Type":"application/json"},
+    body:JSON.stringify(payload||{})
+  });
+  const txt=await r.text();
+  let data;try{data=txt?JSON.parse(txt):{}}catch(e){throw new Error(txt||"Bad response")}
+  if(!r.ok)throw new Error(typeof data.error==="string"?data.error:(data.error?JSON.stringify(data.error):`${r.status}`));
+  return data;
+}
+async function swFetchFriends(){const d=await swCallEdge({action:"friends"});return d.friends||[]}
+async function swCreateExpense(payload){return await swCallEdge({...(payload||{}),action:"create_expense"})}
+
+// Persisted label -> Splitwise friend mapping, scoped to the logged-in user.
+function normPersonLabel(s){return String(s||"").trim().toLowerCase()}
+async function getSwFriendMap(label){
+  const key=normPersonLabel(label);if(!key)return null;
+  try{
+    const rows=await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}&limit=1${importerQS()}`);
+    return (rows&&rows[0])||null;
+  }catch(e){console.warn("getSwFriendMap failed:",e);return null}
+}
+async function saveSwFriendMap(label,friend){
+  const key=normPersonLabel(label);if(!key||!friend||!friend.id)return;
+  // Replace any prior mapping for this label (scoped to the importing user).
+  try{await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}${importerQS()}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});}catch(e){}
+  await sb("splitwise_friend_map",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({person_label:key,sw_user_id:friend.id,sw_name:friend.name||""})});
 }
 
 // Resolve a free-text person name to another household member's owner key.

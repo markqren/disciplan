@@ -209,6 +209,74 @@ function openLedgerEditModal(txn,onSaved){
       }
     }).catch(()=>{personSelect.classList.add("hidden")});
 
+    // Splitwise push section (FEA-29C). Shows once a person is chosen: if the
+    // label is mapped to a Splitwise friend, a pre-checked "Also create in
+    // Splitwise" box appears; otherwise a button lets you pick + remember one.
+    let swMappedFriend=null,swLastLookup=null,swLookupTimer=null;
+    const swWrap=h("div",{style:{marginBottom:"14px",padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:"8px",display:"none"}});
+    const swMsg=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)"}});
+    const swCheckRow=h("label",{style:{display:"none",alignItems:"center",gap:"8px",fontSize:"12px",color:"#fff",cursor:"pointer"}});
+    const swCheck=h("input",{type:"checkbox",style:{width:"auto",margin:"0"}});
+    const swCheckLbl=h("span",{});
+    swCheckRow.append(swCheck,swCheckLbl);
+    const swLinkBtn=h("button",{class:"pg-btn",style:{marginTop:"8px",padding:"6px 12px",fontSize:"11px",border:"1px solid rgba(255,255,255,0.1)"},onClick:()=>openFriendPicker()},"Link Splitwise friend");
+    swWrap.append(swMsg,swCheckRow,swLinkBtn);
+    modal.append(swWrap);
+
+    function applySwMapping(friend){
+      swMappedFriend=friend;
+      const old=swWrap.querySelector(".sw-picker");if(old)old.remove();
+      if(friend){
+        swMsg.textContent="";
+        swCheckLbl.textContent=`Also create in Splitwise (with ${friend.name})`;
+        swCheck.checked=true;
+        swCheckRow.style.display="flex";
+        swLinkBtn.textContent="Change friend";
+      }else{
+        swCheck.checked=false;
+        swCheckRow.style.display="none";
+        swMsg.textContent="Link this person to a Splitwise friend to push the split there.";
+        swLinkBtn.textContent="Link Splitwise friend";
+      }
+    }
+    function refreshSwSection(){
+      const label=selectedPerson.trim();
+      if(!label){swWrap.style.display="none";swLastLookup=null;return}
+      swWrap.style.display="block";
+      const key=label.toLowerCase();
+      if(key===swLastLookup)return;
+      swLastLookup=key;
+      swCheckRow.style.display="none";swMappedFriend=null;
+      const old=swWrap.querySelector(".sw-picker");if(old)old.remove();
+      swMsg.textContent="Checking Splitwise link\u2026";
+      getSwFriendMap(label).then(m=>{
+        if(selectedPerson.trim().toLowerCase()!==key)return;
+        applySwMapping(m?{id:m.sw_user_id,name:m.sw_name||label}:null);
+      }).catch(()=>{if(selectedPerson.trim().toLowerCase()===key)applySwMapping(null)});
+    }
+    function scheduleSwRefresh(){clearTimeout(swLookupTimer);swLookupTimer=setTimeout(refreshSwSection,300)}
+    function openFriendPicker(){
+      swLinkBtn.disabled=true;swLinkBtn.textContent="Loading\u2026";
+      swFetchFriends().then(friends=>{
+        swLinkBtn.disabled=false;swLinkBtn.textContent=swMappedFriend?"Change friend":"Link Splitwise friend";
+        const old=swWrap.querySelector(".sw-picker");if(old)old.remove();
+        if(!friends.length){swMsg.textContent="No Splitwise friends found.";return}
+        const picker=h("div",{class:"sw-picker",style:{marginTop:"8px"}});
+        const sel=h("select",{class:"inp"});
+        sel.append(h("option",{value:""},"Select a Splitwise friend\u2026"));
+        friends.forEach(f=>sel.append(h("option",{value:String(f.id)},f.name)));
+        const saveB=h("button",{class:"pg-btn",style:{marginTop:"8px",padding:"6px 12px",fontSize:"11px",border:"1px solid rgba(255,255,255,0.1)"},onClick:()=>{
+          const fid=Number(sel.value);if(!fid){swMsg.textContent="Pick a friend first.";return}
+          const f=friends.find(x=>x.id===fid);const label=selectedPerson.trim();
+          saveB.disabled=true;saveB.textContent="Saving\u2026";
+          saveSwFriendMap(label,f).then(()=>applySwMapping({id:f.id,name:f.name}))
+            .catch(e=>{saveB.disabled=false;saveB.textContent="Save link";swMsg.textContent="Save failed: "+e.message});
+        }},"Save link");
+        picker.append(sel,saveB);
+        swWrap.append(picker);
+      }).catch(e=>{swLinkBtn.disabled=false;swLinkBtn.textContent="Retry";swMsg.textContent="Couldn't load friends: "+e.message});
+    }
+
     // Split presets
     const splitWrap=h("div",{style:{marginBottom:"14px"}});
     splitWrap.append(h("label",{class:"lbl"},"Split"));
@@ -283,6 +351,7 @@ function openLedgerEditModal(txn,onSaved){
         <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
         <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-amt)} \u00B7 ${rPt.value} \u00B7 ${txn.category_id}</div>
         <div style="font-size:11px;color:rgba(74,111,165,0.7);margin-top:4px">\uD83D\uDD17 Linked to: ${txn.description}</div>`;
+      scheduleSwRefresh();
     }
     updateRPreview();
 
@@ -298,12 +367,32 @@ function openLedgerEditModal(txn,onSaved){
       rCreate.textContent="Creating...";rCreate.disabled=true;
       const effectiveRatio=manualMode?manualAmt/txn.amount_usd:selectedRatio;
       try{
-        await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"");
+        const r=await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"");
+        // Capture Splitwise intent before the modal (and its closures) go away.
+        const wantSw=swCheck.checked&&swMappedFriend;
+        const swPayload=wantSw?{
+          friend_user_id:swMappedFriend.id,
+          cost:Math.round(txn.amount_usd*100)/100,
+          friend_owed:reimbAmt,
+          date:txn.date,
+          description:(txn.description||"Expense").replace(/^Reimbursed\s*-\s*/i,""),
+          currency_code:"USD",
+          details:rNote.value||"",
+          expense_txn_id:r&&r.originalId,
+          reimburse_txn_id:r&&r.newId,
+          transaction_group_id:r&&r.groupId
+        }:null;
         bg.remove();
         const msg=document.getElementById("ledgerOkMsg");
         if(msg){msg.textContent="Reimbursement created";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}
         document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
         onSaved();
+        // Splitwise push is non-fatal: the local reimbursement is already saved.
+        if(swPayload){
+          swCreateExpense(swPayload).then(()=>{
+            if(msg){msg.textContent="Reimbursement created \u00B7 pushed to Splitwise";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),3000)}
+          }).catch(e=>alert("Reimbursement saved, but Splitwise push failed: "+e.message));
+        }
       }catch(e){alert("Failed: "+e.message);rCreate.textContent="Create Reimbursement";rCreate.disabled=false}
     }},"Create Reimbursement");
     const rBack=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{

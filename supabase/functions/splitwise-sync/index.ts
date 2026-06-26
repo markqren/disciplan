@@ -161,6 +161,98 @@ function rawSnapshot(expense: SWExpense, currentUserId: number) {
   };
 }
 
+function round2(v: unknown): number {
+  const n = parseFloat(String(v));
+  return isNaN(n) ? 0 : Math.round(n * 100) / 100;
+}
+
+// ── Write-back (FEA-29C): create a Splitwise expense from a Disciplan split ──
+// The current user paid the full cost; the friend owes `friend_owed`, the user
+// owes the remainder. After creating it, we record a splitwise_expenses mapping
+// row (status='imported') so the very next sync recognizes our own write and
+// never re-imports it as a new receivable.
+// deno-lint-ignore no-explicit-any
+async function handleCreateExpense(
+  body: any,
+  currentUserId: number,
+  supabase: any,
+  owner: string | null,
+  householdId: number | null,
+) {
+  const friendId = Number(body?.friend_user_id);
+  const cost = round2(body?.cost);
+  const friendOwed = round2(body?.friend_owed);
+  if (!friendId || !(cost > 0) || !(friendOwed > 0) || friendOwed > cost + 0.005) {
+    return json({ error: "Invalid create_expense params (need friend_user_id, cost, friend_owed <= cost)" }, 400);
+  }
+  const yourOwed = round2(cost - friendOwed);
+  const date = (body?.date || new Date().toISOString().slice(0, 10)).toString().slice(0, 10);
+  const description = (body?.description || "Expense").toString().trim().slice(0, 250) || "Expense";
+  const currency = (body?.currency_code || "USD").toString();
+  const details = body?.details ? String(body.details).slice(0, 500) : "";
+
+  const form = new URLSearchParams();
+  form.set("cost", cost.toFixed(2));
+  form.set("description", description);
+  form.set("date", date);
+  form.set("currency_code", currency);
+  form.set("group_id", "0"); // non-group friend expense (v1)
+  if (details) form.set("details", details);
+  // users[0] = current user: paid the whole bill, owes their remaining share.
+  form.set("users__0__user_id", String(currentUserId));
+  form.set("users__0__paid_share", cost.toFixed(2));
+  form.set("users__0__owed_share", yourOwed.toFixed(2));
+  // users[1] = friend: paid nothing, owes their share (what they reimburse).
+  form.set("users__1__user_id", String(friendId));
+  form.set("users__1__paid_share", "0.00");
+  form.set("users__1__owed_share", friendOwed.toFixed(2));
+
+  let created: SWExpense | null = null;
+  try {
+    const r = await fetch(`${SW_BASE}/create_expense`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SPLITWISE_API_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: form.toString(),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return json({ error: "Splitwise create_expense failed", detail: d }, 502);
+    // Splitwise returns 200 with a populated `errors` object on validation failure.
+    if (d?.errors && Object.keys(d.errors).length) {
+      return json({ error: "Splitwise rejected the expense", detail: d.errors }, 502);
+    }
+    created = Array.isArray(d?.expenses) ? d.expenses[0] : null;
+    if (!created?.id) return json({ error: "create_expense returned no expense" }, 502);
+  } catch (e) {
+    return json({ error: "Splitwise request failed", detail: String(e) }, 502);
+  }
+
+  // Record the mapping so the next sync won't re-import our own write.
+  try {
+    await supabase.from("splitwise_expenses").upsert({
+      expense_id: created.id,
+      owner,
+      ...(householdId != null ? { household_id: householdId } : {}),
+      sw_updated_at: created.updated_at || new Date().toISOString(),
+      sw_deleted_at: null,
+      content_hash: contentHash(created, currentUserId),
+      sync_status: "imported",
+      raw: rawSnapshot(created, currentUserId),
+      expense_txn_id: body?.expense_txn_id ?? null,
+      reimburse_txn_id: body?.reimburse_txn_id ?? null,
+      transaction_group_id: body?.transaction_group_id ?? null,
+      first_imported_at: new Date().toISOString(),
+      last_synced_at: new Date().toISOString(),
+    }, { onConflict: "expense_id" });
+  } catch (e) {
+    // The expense exists in Splitwise; only the dedup bookkeeping failed.
+    return json({ status: "ok", expense_id: created.id, warning: "mapping insert failed: " + String(e) });
+  }
+  return json({ status: "ok", expense_id: created.id });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
@@ -215,6 +307,34 @@ Deno.serve(async (req) => {
     return json({ error: "Splitwise request failed", detail: String(e) }, 502);
   }
 
+  // 3b. Dispatch on action. Default ("sync") falls through to the reconcile path.
+  const body = await req.json().catch(() => ({}));
+  const action = (body && body.action) || "sync";
+
+  if (action === "friends") {
+    try {
+      const r = await fetch(`${SW_BASE}/get_friends`, {
+        headers: { Authorization: `Bearer ${SPLITWISE_API_KEY}` },
+      });
+      if (!r.ok) return json({ error: "Splitwise get_friends failed", detail: await r.text() }, 502);
+      const d = await r.json();
+      // deno-lint-ignore no-explicit-any
+      const friends = (Array.isArray(d?.friends) ? d.friends : []).map((f: any) => ({
+        id: f.id,
+        first_name: f.first_name || "",
+        last_name: f.last_name || "",
+        name: [f.first_name, f.last_name].filter(Boolean).join(" ") || f.email || `Friend ${f.id}`,
+      }));
+      return json({ status: "ok", friends });
+    } catch (e) {
+      return json({ error: "Splitwise request failed", detail: String(e) }, 502);
+    }
+  }
+
+  if (action === "create_expense") {
+    return await handleCreateExpense(body, currentUserId, supabase, owner, householdId);
+  }
+
   // 4. Determine the fetch window. Use the latest prior sync to fetch only
   //    expenses created/updated since then (catches edits to old expenses too).
   let updatedAfter: string | null = null;
@@ -230,7 +350,6 @@ Deno.serve(async (req) => {
     }
   } catch (_) { /* first sync */ }
 
-  const body = await req.json().catch(() => ({}));
   const params = new URLSearchParams({ limit: String(FETCH_LIMIT) });
   if (body?.dated_after) {
     // Explicit user-chosen window forces a date-range fetch (backfill / re-scan),

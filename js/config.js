@@ -31,7 +31,7 @@ const OWNED_TABLES = new Set([
   "cashback_redemptions","cashback_cards",
   "investment_accounts","investment_symbols","investment_lots",
   "investment_price_history","preferences","pending_imports","group_overrides",
-  "ai_rules"
+  "ai_rules","splitwise_friend_map"
 ]);
 
 // Active view owner: null = Combined (whole household), else a single owner.

@@ -11,6 +11,12 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.5
+<sub>Splitwise write-back: push reimbursements as Splitwise expenses</sub>
+
+##### Features
+- **Push reimbursements to Splitwise (FEA-29C v1)** — When you create a reimbursement in the ledger and the person is linked to a Splitwise friend, an opt-in "Also create in Splitwise" box (pre-checked once mapped) creates the matching Splitwise expense via `create_expense`: you paid the full `cost`, the friend owes their share, and your share is derived as `cost − friendOwed` so the paid/owed sums always reconcile to the cent. A friend picker in the reimburse form resolves the free-text person label (e.g. "Shilpa") to a real Splitwise friend via `get_friends` and remembers it in a new `disciplan.splitwise_friend_map` table, so the picker only appears once per person. The edge function inserts the returned `expense_id` into `splitwise_expenses` as `imported` with a matching `content_hash` + linkage (`expense_txn_id`/`reimburse_txn_id`/`transaction_group_id`), so the next sync recognizes Disciplan's own write and never re-imports it. Two new `splitwise-sync` actions (`friends`, `create_expense`); Splitwise push is non-fatal — the local reimbursement always saves and a failed push only surfaces a warning. (~5,500 tokens)
+
 #### v2.7.4
 <sub>Multi-owner tags with per-person sums</sub>
 
