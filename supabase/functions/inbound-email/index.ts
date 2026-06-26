@@ -9,9 +9,11 @@ const WEBHOOK_SECRET = Deno.env.get("INBOUND_EMAIL_SECRET");
 const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_API_KEY");
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-// PostgREST schema. Set DB_SCHEMA=disciplan via `supabase secrets set` after
-// running 20260513000003_disciplan_schema.sql; defaults to "public".
-const DB_SCHEMA = Deno.env.get("DB_SCHEMA") || "public";
+// PostgREST schema. Defaults to "disciplan" (where all tables live since the
+// 20260513000003_disciplan_schema.sql migration). A missing DB_SCHEMA secret
+// must NOT silently fall back to "public" — that table no longer exists there
+// and every insert would 500, dropping inbound emails. Override only if needed.
+const DB_SCHEMA = Deno.env.get("DB_SCHEMA") || "disciplan";
 
 // ── Truncation limits (prevent oversized rows) ──
 const MAX_TEXT_BODY = 10_000;

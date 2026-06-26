@@ -1,0 +1,7 @@
+project_id = "mjuannepfodstbsxweuc"
+
+# Postmark posts inbound emails here without a Supabase JWT, so JWT verification
+# MUST stay off — otherwise the gateway 401s every email before our code runs.
+# (This regressed once when a CLI deploy reset it to the default of true.)
+[functions.inbound-email]
+verify_jwt = false
