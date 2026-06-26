@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jun 21, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jun 25, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,16 @@
 ## 🚀 Releases
 
 ### v2.6 — Jun 20, 2026
+
+#### v2.6.7
+<sub>Splitwise sync foundation: dedup + update-detection via a mapping table</sub>
+
+##### Features
+- **Splitwise expense tracking + reconciliation** — New `disciplan.splitwise_expenses` mapping table (migration `20260625000001_splitwise_expenses.sql`) keyed on the stable Splitwise `expense_id` and storing `sw_updated_at`, `sw_deleted_at`, a `content_hash`, the raw payload + derived candidate, and links to the resulting transaction(s). A new auth-gated Edge Function `splitwise-sync` (uses the `SPLITWISE_API_KEY` secret, never the browser) fetches `get_expenses` since the last sync and classifies each: never-seen → `pending`, changed-after-import (newer `updated_at` AND different content hash) → `needs_review` with the new payload in `pending_raw`, soft-deleted → `needs_review`, unchanged → skip. This makes "already imported?" an `expense_id` lookup and "changed in Splitwise?" a hash compare. It never writes `transactions` directly — import is human-gated. (~7,000 tokens)
+- **Imports only the Splitwise *part*, with card-charge linking** — Rather than duplicating the full expense, sync imports only the portion that flows through your Splitwise balance (net = your `paid_share − owed_share`): when you fronted the bill, a reimbursement *credit* for what you're owed; when someone else paid, your owed *share* as an expense under the `Splitwise` payment type; when you paid exactly your share, nothing. For the you-paid case the review card auto-searches the ledger for the matching card charge (≈ amount, ±14 days, non-Splitwise) and suggests a link — on import it groups the credit with that charge, inherits its category + service window, and sets `related_transaction_id`, so the full charge (from your bank CSV) nets down to your real share without double-counting. (~4,000 tokens)
+- **Splitwise Sync review queue (Entry tab)** — New collapsible "Splitwise Sync" card with a "Sync now" button and two groups: New expenses (pick/inherit a category, optional card link, Import with one-click Undo) and Changed-in-Splitwise (old-vs-new diff for amount/date/description; Apply re-creates *only the rows we created* — never your external card charge — and re-links; Delete-imported handles Splitwise deletions; Keep-mine acknowledges the change without touching imported rows so it stops re-flagging). (~3,500 tokens)
+
+---
 
 #### v2.6.6
 <sub>Household roles: admin read/write all, members read-only on others</sub>
@@ -518,7 +528,7 @@
 
 | ID | Item | Type | Priority | Details |
 |----|------|------|----------|---------|
-| FEA-29B | **Splitwise API Sync** | Feature | **Medium** | Splitwise has a free Self-Serve API (dev.splitwise.com) that supports OAuth2 and provides `getExpenses()` with date filters, plus `getFriends()` and `getGroups()`. Build a sync feature that: (1) authenticates with Splitwise via OAuth2 (register app at secure.splitwise.com/oauth_clients), (2) fetches expenses where the user owes or is owed money, (3) maps Splitwise expenses to Disciplan transactions — expenses you paid get the actual category + a Splitwise reimbursement credit for others' shares, expenses others paid show as your owed share under the "Splitwise" payment type, (4) maintains a "Splitwise" account in the balance sheet that tracks your net balance (what you're owed minus what you owe), which should stay in sync with your actual Splitwise balance. REST API called directly with fetch(). Rate limits are conservative so sync should be periodic (manual trigger or daily), not real-time. Supersedes FEA-16. **Depends on:** FEA-29A (done), FEA-38 (Working Capital reclassification). |
+| FEA-29B | **Splitwise API Sync** | Feature | **Medium** | Splitwise has a free Self-Serve API (dev.splitwise.com) that supports OAuth2 and provides `getExpenses()` with date filters, plus `getFriends()` and `getGroups()`. Build a sync feature that: (1) authenticates with Splitwise via OAuth2 (register app at secure.splitwise.com/oauth_clients), (2) fetches expenses where the user owes or is owed money, (3) maps Splitwise expenses to Disciplan transactions — expenses you paid get the actual category + a Splitwise reimbursement credit for others' shares, expenses others paid show as your owed share under the "Splitwise" payment type, (4) maintains a "Splitwise" account in the balance sheet that tracks your net balance (what you're owed minus what you owe), which should stay in sync with your actual Splitwise balance. REST API called directly with fetch(). Rate limits are conservative so sync should be periodic (manual trigger or daily), not real-time. Supersedes FEA-16. **Depends on:** FEA-29A (done), FEA-38 (Working Capital reclassification). **Progress (v2.6.7):** dedup + update-detection FOUNDATION done — `splitwise_expenses` mapping table, `splitwise-sync` Edge Function (API-key auth, not OAuth2 yet), Splitwise-part-only mapping (receivable credit / owed share) with card-charge match + link suggestion, and the Entry-tab review queue (new + changed-in-Splitwise). **Remaining:** OAuth2 (currently personal API key), the balance-sheet "Splitwise" net-balance account, scoring/auto-confidence on card-match suggestions, and optional daily-cron sync. |
 
 ---
 

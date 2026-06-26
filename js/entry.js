@@ -347,4 +347,338 @@ function renderEntry(el){
   psCard.append(psBody);
   el.append(psCard);
 
+  // ── Splitwise Sync Section (FEA-29B) ──
+  const swCard=h("div",{class:"cd",id:"splitwiseSyncSection"});
+  let swOpen=false;
+  const swHdr=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"},onClick:()=>{
+    swOpen=!swOpen;swArrow.textContent=swOpen?"\u25BE":"\u25B8";swBody.classList.toggle("hidden");
+    if(swOpen&&!swBody._loaded){swBody._loaded=true;loadSplitwiseSync(swReview)}
+  }});
+  const swArrow=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},"\u25B8");
+  swHdr.append(swArrow,h("h3",{style:{margin:"0"}},"\uD83D\uDD17 Splitwise Sync"));
+  swCard.append(swHdr);
+
+  const swBody=h("div",{class:"hidden",style:{marginTop:"16px"}});
+  const swBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
+    swBtn.disabled=true;swBtn.textContent="Syncing\u2026";
+    try{
+      const summary=await runSplitwiseSync();
+      const c=summary.counts||{};
+      swStatus.classList.remove("hidden");swStatus.style.color="rgba(255,255,255,0.5)";
+      swStatus.textContent=`Synced ${summary.fetched} expenses \u00b7 ${c.new||0} new \u00b7 ${(c.changed||0)+(c.deleted||0)} changed \u00b7 ${c.unchanged||0} unchanged`;
+      await loadSplitwiseSync(swReview);
+    }catch(e){
+      swStatus.classList.remove("hidden");swStatus.style.color="var(--r)";
+      swStatus.textContent="Sync error: "+e.message;
+    }
+    swBtn.disabled=false;swBtn.textContent="Sync now";
+  }},"Sync now");
+  const swStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
+  const swReview=h("div");
+  swBody.append(swBtn,swStatus,swReview);
+  swCard.append(swBody);
+  el.append(swCard);
+
+}
+
+// Call the auth-gated splitwise-sync Edge Function to fetch + reconcile expenses.
+async function runSplitwiseSync(){
+  const token=currentSession?.access_token||SB_KEY;
+  const r=await fetch(`${SB_URL}/functions/v1/splitwise-sync`,{
+    method:"POST",
+    headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY,"Content-Type":"application/json"},
+    body:JSON.stringify({})
+  });
+  const txt=await r.text();
+  let data;try{data=txt?JSON.parse(txt):{}}catch(e){throw new Error(txt||"Bad response")}
+  if(!r.ok)throw new Error(data.error||`${r.status}`);
+  return data;
+}
+
+async function loadSplitwiseSync(container){
+  container.innerHTML="<div style='text-align:center;padding:20px;color:rgba(255,255,255,0.3)'>Loading\u2026</div>";
+  try{
+    const rows=await sb(`splitwise_expenses?sync_status=in.(pending,needs_review)&order=last_synced_at.desc${ownerQS()}`);
+    renderSplitwiseReview(container,rows);
+  }catch(e){container.innerHTML=`<div style="padding:16px;color:var(--r);font-size:12px">Error: ${e.message}</div>`}
+}
+
+function swExpenseSummary(snap){
+  const e=snap?.expense||{};
+  return{date:(e.date||"").slice(0,10),description:e.description||"Splitwise expense",cost:e.cost||"",currency:e.currency_code||"USD"};
+}
+function swNetAmount(snap){
+  const cands=snap?.candidates||[];
+  return cands.reduce((s,c)=>s+(parseFloat(c.amount_usd)||0),0);
+}
+
+function renderSplitwiseReview(container,rows){
+  container.innerHTML="";
+  const pending=rows.filter(r=>r.sync_status==="pending");
+  const changed=rows.filter(r=>r.sync_status==="needs_review");
+  if(!rows.length){
+    container.innerHTML="<div style='padding:16px;color:rgba(255,255,255,0.3);font-size:12px'>Nothing to review. Click Sync now to fetch Splitwise expenses.</div>";
+    return;
+  }
+  container.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"12px"}},
+    `${pending.length} new \u00b7 ${changed.length} changed in Splitwise`));
+
+  if(pending.length){
+    container.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",margin:"8px 0 6px"}},"New expenses"));
+    pending.forEach(row=>container.append(renderSwPendingCard(row,container)));
+  }
+  if(changed.length){
+    container.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",margin:"14px 0 6px"}},"Changed in Splitwise"));
+    changed.forEach(row=>container.append(renderSwChangedCard(row,container)));
+  }
+}
+
+function swCatSelect(initial){
+  const sel=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"}});
+  CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===(initial||"other"))o.selected=true;sel.append(o)});
+  return sel;
+}
+
+// Find candidate card transactions for a receivable: the charge you fronted
+// (≈ match_amount, a positive expense) near the expense date, not on Splitwise.
+async function findSwCardMatches(cand){
+  const amt=Math.abs(parseFloat(cand.match_amount)||0);
+  if(!(amt>0))return[];
+  const tol=Math.max(0.5,amt*0.02);
+  const lo=Math.round((amt-tol)*100)/100,hi=Math.round((amt+tol)*100)/100;
+  const d=cand.match_date||cand.date;
+  const from=new Date(new Date(d+"T00:00:00").getTime()-14*864e5).toISOString().slice(0,10);
+  const to=new Date(new Date(d+"T00:00:00").getTime()+14*864e5).toISOString().slice(0,10);
+  const rows=await sb(`transactions?amount_usd=gte.${lo}&amount_usd=lte.${hi}&date=gte.${from}&date=lte.${to}&payment_type=neq.Splitwise&order=date.desc&limit=8&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id,service_start,service_end${ownerQS()}`);
+  return rows.sort((a,b)=>Math.abs(new Date(a.date)-new Date(d+"T00:00:00"))-Math.abs(new Date(b.date)-new Date(d+"T00:00:00")));
+}
+
+function renderSwPendingCard(row,container){
+  const snap=row.raw||{};
+  const s=swExpenseSummary(snap);
+  const cand=(snap.candidates||[])[0];
+  const net=swNetAmount(snap);
+  const isReceivable=cand&&cand.role==="reimburse";
+  const card=h("div",{style:{border:"1px solid rgba(255,255,255,0.07)",borderLeft:"3px solid var(--g)",borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
+  const top=h("div",{style:{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"baseline"}});
+  top.append(h("div",{style:{color:"rgba(255,255,255,0.85)",fontWeight:"600",fontSize:"13px"}},s.description));
+  top.append(h("div",{class:"m",style:{color:net<0?"var(--g)":"rgba(255,255,255,0.75)",whiteSpace:"nowrap"}},fmtF(net)));
+  card.append(top);
+  card.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",marginTop:"2px"}},
+    `${fmtD(s.date)} \u00b7 total ${s.cost} ${s.currency} \u00b7 ${isReceivable?`you're owed ${fmtF(-net)} (you paid)`:`you owe ${fmtF(net)}`}`));
+
+  // ── Link suggestion (receivable only): match the card charge you fronted ──
+  let selectedMatch=null;
+  const linkWrap=h("div",{style:{marginTop:"8px"}});
+  const catSel=swCatSelect("other");
+
+  const ctrlRow=h("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
+  ctrlRow.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"Category"));
+  ctrlRow.append(catSel);
+  const importBtn=h("button",{class:"pg-btn",style:{color:"var(--g)",borderColor:"rgba(129,178,154,0.3)"},onClick:async()=>{
+    importBtn.disabled=true;importBtn.textContent="Importing\u2026";
+    try{
+      const res=await importSplitwiseRow(row,catSel.value,selectedMatch);
+      dcInvalidateTxns&&dcInvalidateTxns();
+      showUndo(`\u2713 Imported ${res.count} transaction${res.count===1?"":"s"}${res.linked?" + linked":""}`,async()=>{
+        await sb(`transactions?import_batch=eq.${encodeURIComponent(res.batchId)}`,{method:"DELETE"});
+        if(res.matchId)await sb(`transactions?id=eq.${res.matchId}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:res.priorGroup||null})});
+        await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"pending",expense_txn_id:null,reimburse_txn_id:null,transaction_group_id:null,first_imported_at:null})});
+      });
+      card.remove();
+    }catch(e){alert("Import failed: "+e.message);importBtn.disabled=false;importBtn.textContent="Import";}
+  }},"Import");
+  const dismissBtn=h("button",{class:"pg-btn",style:{color:"rgba(255,255,255,0.4)"},onClick:async()=>{
+    dismissBtn.disabled=true;
+    try{await dismissSplitwiseRow(row);card.remove();}
+    catch(e){alert("Failed: "+e.message);dismissBtn.disabled=false;}
+  }},"Dismiss");
+  ctrlRow.append(importBtn,dismissBtn);
+  card.append(ctrlRow);
+
+  if(isReceivable){
+    card.append(linkWrap);
+    linkWrap.innerHTML="<div style='font-size:11px;color:rgba(255,255,255,0.3)'>Searching for matching card charge\u2026</div>";
+    findSwCardMatches(cand).then(matches=>{
+      linkWrap.innerHTML="";
+      const lbl=h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",marginBottom:"4px"}},"Link to card charge");
+      const sel=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none",maxWidth:"100%"}});
+      sel.append(h("option",{value:""},matches.length?"\u2014 don't link \u2014":"\u2014 no match found \u2014"));
+      matches.forEach((m,i)=>sel.append(h("option",{value:String(i)},`${fmtD(m.date)} \u00b7 ${m.description.slice(0,40)} \u00b7 ${fmtF(m.amount_usd)} \u00b7 ${m.payment_type||""}`)));
+      sel.addEventListener("change",()=>{
+        selectedMatch=sel.value===""?null:matches[+sel.value];
+        if(selectedMatch&&selectedMatch.category_id){catSel.value=selectedMatch.category_id;}
+      });
+      // Auto-select the closest match when it's an unambiguous amount match.
+      if(matches.length){sel.value="0";selectedMatch=matches[0];if(matches[0].category_id)catSel.value=matches[0].category_id;}
+      linkWrap.append(lbl,sel);
+      if(selectedMatch)linkWrap.append(h("div",{style:{fontSize:"10px",color:"rgba(129,178,154,0.7)",marginTop:"4px"}},"Will link \u2192 net cost stays your share; category inherited from the charge."));
+    }).catch(()=>{linkWrap.innerHTML="<div style='font-size:11px;color:rgba(255,255,255,0.3)'>Could not search for a match.</div>"});
+  }
+  return card;
+}
+
+function renderSwChangedCard(row,container){
+  const oldSnap=row.raw||{};
+  const newSnap=row.pending_raw||{};
+  const oldS=swExpenseSummary(oldSnap),newS=swExpenseSummary(newSnap);
+  const oldNet=swNetAmount(oldSnap),newNet=swNetAmount(newSnap);
+  const isDeleted=!!(newSnap.expense&&newSnap.expense.deleted_at);
+  const card=h("div",{style:{border:"1px solid rgba(255,255,255,0.07)",borderLeft:`3px solid ${isDeleted?"var(--r)":"var(--y)"}`,borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
+  card.append(h("div",{style:{color:"rgba(255,255,255,0.85)",fontWeight:"600",fontSize:"13px"}},newS.description||oldS.description));
+  card.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:isDeleted?"var(--r)":"var(--y)",margin:"4px 0 6px"}},
+    isDeleted?"Deleted in Splitwise":"Updated in Splitwise"));
+
+  function diffLine(label,oldV,newV){
+    const changedV=String(oldV)!==String(newV);
+    const d=h("div",{style:{display:"grid",gridTemplateColumns:"70px 1fr 14px 1fr",gap:"6px",alignItems:"baseline",fontSize:"11px",marginBottom:"2px"}});
+    d.append(h("span",{style:{color:"rgba(255,255,255,0.35)"}},label));
+    d.append(h("span",{style:{color:"rgba(255,255,255,0.4)",textDecoration:changedV?"line-through":"none"}},String(oldV)));
+    d.append(h("span",{style:{color:"rgba(255,255,255,0.3)"}},changedV?"\u2192":""));
+    d.append(h("span",{style:{color:changedV?"var(--y)":"rgba(255,255,255,0.5)"}},isDeleted?"\u2014":String(newV)));
+    return d;
+  }
+  card.append(diffLine("Amount",fmtF(oldNet),isDeleted?"removed":fmtF(newNet)));
+  card.append(diffLine("Date",fmtD(oldS.date),fmtD(newS.date)));
+  card.append(diffLine("Desc",oldS.description,newS.description));
+
+  const ctrlRow=h("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
+  const applyBtn=h("button",{class:"pg-btn",style:{color:isDeleted?"var(--r)":"var(--y)",borderColor:isDeleted?"rgba(224,122,95,0.3)":"rgba(242,204,143,0.3)"},onClick:async()=>{
+    applyBtn.disabled=true;applyBtn.textContent="Applying\u2026";
+    try{
+      await applySplitwiseUpdate(row);
+      dcInvalidateTxns&&dcInvalidateTxns();
+      card.remove();
+    }catch(e){alert("Apply failed: "+e.message);applyBtn.disabled=false;applyBtn.textContent=isDeleted?"Delete imported":"Apply update";}
+  }},isDeleted?"Delete imported":"Apply update");
+  const keepBtn=h("button",{class:"pg-btn",style:{color:"rgba(255,255,255,0.4)"},onClick:async()=>{
+    keepBtn.disabled=true;
+    try{await keepSplitwiseVersion(row);card.remove();}
+    catch(e){alert("Failed: "+e.message);keepBtn.disabled=false;}
+  }},"Keep mine");
+  ctrlRow.append(applyBtn,keepBtn);
+  card.append(ctrlRow);
+  return card;
+}
+
+// Build the single "Splitwise part" transaction row. When linked to a card
+// charge (match), inherit its category + service window so the credit accrues
+// per-day against the same period and the net cost lands on your share.
+function swBuildRow(cand,categoryId,batchId,match){
+  let cat=categoryId||cand.category_id||"other";
+  let ss=cand.service_start||cand.date,se=cand.service_end||cand.date;
+  if(match){
+    if(match.category_id)cat=match.category_id;
+    ss=match.service_start||ss;se=match.service_end||se;
+  }
+  const d1=new Date(ss+"T00:00:00"),d2=new Date(se+"T00:00:00");
+  const days=Math.max(1,Math.floor((d2-d1)/864e5)+1);
+  const amt=Math.round((parseFloat(cand.amount_usd)||0)*100)/100;
+  return{
+    date:cand.date,service_start:ss,service_end:se,
+    description:cand.description,category_id:cat,
+    amount_usd:amt,original_amount:amt,currency:cand.currency||"USD",fx_rate:1,
+    payment_type:cand.payment_type||"Splitwise",tag:"",
+    service_days:days,daily_cost:Math.round(amt/days*1e6)/1e6,credit:"",
+    import_batch:batchId
+  };
+}
+
+async function importSplitwiseRow(row,categoryId,matchTxn){
+  const snap=row.raw||{};
+  const cand=(snap.candidates||[])[0];
+  if(!cand)throw new Error("No transaction to import.");
+  const isReceivable=cand.role==="reimburse";
+  const useMatch=isReceivable?(matchTxn||null):null;
+  const batchId="splitwise-"+new Date().toISOString().slice(0,16)+"-"+row.expense_id;
+  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch);
+  const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify([txnRow])});
+  const created=inserted[0];
+  state.txnCount+=1;
+  document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  let groupId=null,expenseTxnId=null,reimburseTxnId=null,linked=false,priorGroup=null,matchId=null;
+  if(isReceivable){
+    reimburseTxnId=created?.id||null;
+    if(useMatch&&created?.id){
+      matchId=useMatch.id;priorGroup=useMatch.transaction_group_id||null;
+      groupId=await linkToGroup({id:useMatch.id,transaction_group_id:priorGroup},{id:created.id,transaction_group_id:null});
+      await sb(`transactions?id=eq.${created.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({related_transaction_id:useMatch.id})});
+      expenseTxnId=useMatch.id; // the external card charge is the "main" expense
+      linked=true;
+    }
+  }else{
+    expenseTxnId=created?.id||null;
+  }
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+    sync_status:"imported",
+    expense_txn_id:expenseTxnId,reimburse_txn_id:reimburseTxnId,transaction_group_id:groupId,
+    first_imported_at:new Date().toISOString()
+  })});
+  return{count:1,batchId,linked,matchId,priorGroup};
+}
+
+async function applySplitwiseUpdate(row){
+  const snap=row.pending_raw||{};
+  // Only delete transactions WE created. For a receivable, expense_txn_id points
+  // at the user's external card charge — never delete that.
+  const wasReceivable=!!row.reimburse_txn_id;
+  const ownedIds=wasReceivable?[row.reimburse_txn_id]:(row.expense_txn_id?[row.expense_txn_id]:[]);
+  if(ownedIds.length){
+    await sb(`transactions?id=in.(${ownedIds.join(",")})`,{method:"DELETE"});
+    state.txnCount-=ownedIds.length;
+  }
+  const cand=(snap.candidates||[])[0];
+  const isDeleted=!!(snap.expense&&snap.expense.deleted_at);
+  if(isDeleted||!cand){
+    document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+    await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+      sync_status:"dismissed",raw:snap,pending_raw:null,
+      sw_updated_at:snap.expense?.updated_at||null,sw_deleted_at:snap.expense?.deleted_at||null,content_hash:snap.content_hash||null,
+      expense_txn_id:null,reimburse_txn_id:null,transaction_group_id:null
+    })});
+    return;
+  }
+  const isReceivable=cand.role==="reimburse";
+  // Re-link a receivable to the still-existing card charge, if any.
+  let match=null;
+  if(isReceivable&&row.expense_txn_id){
+    try{const m=await sb(`transactions?id=eq.${row.expense_txn_id}&select=id,category_id,transaction_group_id,service_start,service_end&limit=1`);if(m.length)match=m[0]}catch(_){}
+  }
+  const prevCat=(row.raw?.candidates||[])[0]?.category_id||null;
+  const batchId="splitwise-"+new Date().toISOString().slice(0,16)+"-"+row.expense_id;
+  const txnRow=swBuildRow(cand,prevCat,batchId,match);
+  const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify([txnRow])});
+  const created=inserted[0];
+  state.txnCount+=1;
+  document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  let groupId=null,expenseTxnId=null,reimburseTxnId=null;
+  if(isReceivable){
+    reimburseTxnId=created?.id||null;
+    if(match&&created?.id){
+      groupId=await linkToGroup({id:match.id,transaction_group_id:match.transaction_group_id||null},{id:created.id,transaction_group_id:null});
+      await sb(`transactions?id=eq.${created.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({related_transaction_id:match.id})});
+      expenseTxnId=match.id;
+    }
+  }else{
+    expenseTxnId=created?.id||null;
+  }
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+    sync_status:"imported",raw:snap,pending_raw:null,
+    sw_updated_at:snap.expense?.updated_at||null,sw_deleted_at:null,content_hash:snap.content_hash||null,
+    expense_txn_id:expenseTxnId,reimburse_txn_id:reimburseTxnId,transaction_group_id:groupId
+  })});
+}
+
+// Acknowledge a Splitwise change but keep the already-imported transactions as-is.
+// Advances the tracking pointers so the expense is not re-flagged next sync.
+async function keepSplitwiseVersion(row){
+  const snap=row.pending_raw||{};
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+    sync_status:"imported",pending_raw:null,
+    sw_updated_at:snap.expense?.updated_at||null,sw_deleted_at:snap.expense?.deleted_at||null,content_hash:snap.content_hash||null
+  })});
+}
+
+async function dismissSplitwiseRow(row){
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed"})});
 }
