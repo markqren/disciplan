@@ -257,6 +257,23 @@ function renderEntry(el){
       const ptGroups={};
       for(const c of emailCandidates){const pt=c.payment_type;if(!ptGroups[pt])ptGroups[pt]=[];ptGroups[pt].push(c)}
       for(const[pt,group]of Object.entries(ptGroups)){await findDuplicates(group,pt)}
+      // Pre-resolve Rakuten cashback → parent purchase so the reviewer sees (and can
+      // adjust) the link target before approving. Matched on store + order total + date.
+      await Promise.all(emailCandidates.map(async c=>{
+        if(c._parsedData?.type!=="cashback_earned")return;
+        try{
+          const parent=await findRakutenParentMatch(
+            c._parsedData.store_name||c.description,
+            parseFloat(c._parsedData.order_amount)||0,
+            c._parsedData.order_date||c.date
+          );
+          if(parent){
+            c._linkToTransactionId=parent.id;
+            c._linkToGroupId=parent.transaction_group_id||null;
+            c._linkDisplay={description:parent.description,date:parent.date,amount_usd:parent.amount_usd,category_id:parent.category_id,payment_type:parent.payment_type};
+          }
+        }catch(e){console.warn("Rakuten parent lookup failed:",e)}
+      }));
       renderEmailReviewTable(emailReview,emailCandidates);
     }catch(e){emailReview.innerHTML=`<div style="padding:16px;color:var(--r);font-size:12px">Error: ${e.message}</div>`}
   }
@@ -456,11 +473,15 @@ function swNetAmount(snap){
   return cands.reduce((s,c)=>s+(parseFloat(c.amount_usd)||0),0);
 }
 
+// Expense date for default recency ordering (newest first).
+function swSortDate(row){const snap=row.raw||row.pending_raw||{};return (snap.expense&&snap.expense.date)||"";}
+function swByRecency(a,b){return String(swSortDate(b)).localeCompare(String(swSortDate(a)));}
+
 function renderSplitwiseReview(container,rows,dismissed){
   container.innerHTML="";
   dismissed=dismissed||[];
-  const pending=rows.filter(r=>r.sync_status==="pending");
-  const changed=rows.filter(r=>r.sync_status==="needs_review");
+  const pending=rows.filter(r=>r.sync_status==="pending").sort(swByRecency);
+  const changed=rows.filter(r=>r.sync_status==="needs_review").sort(swByRecency);
   if(!rows.length&&!dismissed.length){
     container.innerHTML="<div style='padding:16px;color:rgba(255,255,255,0.3);font-size:12px'>Nothing to review. Click Sync now to fetch Splitwise expenses.</div>";
     return;
@@ -488,7 +509,7 @@ function renderSwDismissedSection(container,dismissed){
   const hdr=h("div",{style:{cursor:"pointer",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",display:"flex",gap:"6px",alignItems:"center"},onClick:()=>{open=!open;arrow.textContent=open?"\u25BE":"\u25B8";list.classList.toggle("hidden")}});
   hdr.append(arrow,h("span",{},`Dismissed (${dismissed.length})`));
   wrap.append(hdr,list);
-  dismissed.forEach(row=>{
+  dismissed.slice().sort(swByRecency).forEach(row=>{
     const snap=row.raw||row.pending_raw||{};
     const s=swExpenseSummary(snap);
     const net=swNetAmount(snap);
@@ -575,7 +596,25 @@ function renderSwPendingCard(row,container){
   swTagNames().then(names=>names.forEach(n=>tagList.append(h("option",{value:n}))));
   const tagInp=h("input",{class:"inp",type:"text",placeholder:"tag (optional)",list:tagListId,style:{fontSize:"11px",padding:"4px 8px",maxWidth:"160px"}});
 
+  // ── Service period (estimated default by category, editable) ──
+  let svcManual=false;
+  const initSs=getDefStart(defaultCat,s.date)||s.date;
+  const initSe=getDefEnd(defaultCat,initSs)||initSs;
+  const ssInp=h("input",{class:"inp",type:"date",value:initSs,style:{fontSize:"11px",padding:"4px 8px",maxWidth:"150px"}});
+  const seInp=h("input",{class:"inp",type:"date",value:initSe,style:{fontSize:"11px",padding:"4px 8px",maxWidth:"150px"}});
+  const svcHint=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)"}});
+  function svcUpdateHint(){const r=ACCRUAL_D[catSel.value];svcHint.textContent=!svcManual&&!selectedMatch&&r?(r==="month"?"(auto: month)":`(auto: ${r}d)`):""}
+  function syncSvcFromCat(){if(svcManual)return;const ss=getDefStart(catSel.value,s.date)||s.date;ssInp.value=ss;seInp.value=getDefEnd(catSel.value,ss)||ss}
+  ssInp.addEventListener("input",()=>{if(!svcManual){seInp.value=getDefEnd(catSel.value,ssInp.value)||ssInp.value}});
+  seInp.addEventListener("change",()=>{svcManual=true;svcUpdateHint()});
+  catSel.addEventListener("change",()=>{if(!selectedMatch)syncSvcFromCat();svcUpdateHint()});
+  svcUpdateHint();
+
   card.append(descInp);
+
+  const svcRow=h("div",{style:{display:"flex",gap:"6px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
+  svcRow.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"Service"),ssInp,h("span",{style:{color:"rgba(255,255,255,0.3)",fontSize:"11px"}},"\u2192"),seInp,svcHint);
+  card.append(svcRow);
 
   const ctrlRow=h("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
   ctrlRow.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"Category"));
@@ -584,7 +623,8 @@ function renderSwPendingCard(row,container){
     importBtn.disabled=true;importBtn.textContent="Importing\u2026";
     try{
       const finalLabel=(descInp.value||"").trim()||finalDesc;
-      const res=await importSplitwiseRow(row,catSel.value,selectedMatch,finalLabel,tagInp.value);
+      const svc=(ssInp.value&&seInp.value)?{start:ssInp.value,end:seInp.value}:null;
+      const res=await importSplitwiseRow(row,catSel.value,selectedMatch,finalLabel,tagInp.value,svc);
       dcInvalidateTxns&&dcInvalidateTxns();
       showUndo(`\u2713 Imported ${res.count} transaction${res.count===1?"":"s"}${res.linked?" + linked":""}`,async()=>{
         await sb(`transactions?import_batch=eq.${encodeURIComponent(res.batchId)}`,{method:"DELETE"});
@@ -620,6 +660,10 @@ function renderSwPendingCard(row,container){
       function applySelection(){
         selectedMatch=sel.value===""?null:opts[+sel.value];
         if(selectedMatch&&selectedMatch.category_id)catSel.value=selectedMatch.category_id;
+        // Linked: inherit the charge's service window. Unlinked: category default.
+        if(selectedMatch&&selectedMatch.service_start){ssInp.value=selectedMatch.service_start;seInp.value=selectedMatch.service_end||selectedMatch.service_start;}
+        else syncSvcFromCat();
+        svcUpdateHint();
         hint.textContent=selectedMatch?"Will link \u2192 net cost stays your share; category + dates inherited from the charge.":"Not linked \u2014 imported as a standalone Splitwise credit.";
       }
       sel.addEventListener("change",applySelection);
@@ -712,12 +756,17 @@ function renderSwChangedCard(row,container){
 // Build the single "Splitwise part" transaction row. When linked to a card
 // charge (match), inherit its category + service window so the credit accrues
 // per-day against the same period and the net cost lands on your share.
-function swBuildRow(cand,categoryId,batchId,match,descOverride,tag){
+function swBuildRow(cand,categoryId,batchId,match,descOverride,tag,svc){
   let cat=categoryId||cand.category_id||"other";
-  let ss=cand.service_start||cand.date,se=cand.service_end||cand.date;
-  if(match){
-    if(match.category_id)cat=match.category_id;
-    ss=match.service_start||ss;se=match.service_end||se;
+  if(match&&match.category_id)cat=match.category_id;
+  let ss,se;
+  if(svc&&svc.start&&svc.end){
+    ss=svc.start;se=svc.end; // explicit override from the review card
+  }else if(match){
+    ss=match.service_start||cand.date;se=match.service_end||match.service_start||cand.date;
+  }else{
+    // Default to the category's estimated accrual window (e.g. furniture = 2yr).
+    ss=getDefStart(cat,cand.date)||cand.date;se=getDefEnd(cat,ss)||ss;
   }
   const d1=new Date(ss+"T00:00:00"),d2=new Date(se+"T00:00:00");
   const days=Math.max(1,Math.floor((d2-d1)/864e5)+1);
@@ -732,7 +781,7 @@ function swBuildRow(cand,categoryId,batchId,match,descOverride,tag){
   };
 }
 
-async function importSplitwiseRow(row,categoryId,matchTxn,descOverride,tag){
+async function importSplitwiseRow(row,categoryId,matchTxn,descOverride,tag,svc){
   const snap=row.raw||{};
   const cand=(snap.candidates||[])[0];
   if(!cand)throw new Error("No transaction to import.");
@@ -741,7 +790,7 @@ async function importSplitwiseRow(row,categoryId,matchTxn,descOverride,tag){
   const cleanTag=(tag||"").toLowerCase().trim();
   if(cleanTag)await ensureTagExists(cleanTag);
   const batchId="splitwise-"+new Date().toISOString().slice(0,16)+"-"+row.expense_id;
-  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch,descOverride,cleanTag);
+  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch,descOverride,cleanTag,svc);
   const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify([txnRow])});
   const created=inserted[0];
   state.txnCount+=1;

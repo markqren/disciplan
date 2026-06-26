@@ -1,18 +1,56 @@
+// Strip Rakuten cruft from a store name so it matches the ledger description.
+// "Rakuten - Chewy" / "Chewy is confirmed" / "Chewy!" → "Chewy"
+function cleanRakutenStore(s){
+  return String(s||"")
+    .replace(/^rakuten\s*[-\u2013]\s*/i,"")
+    .replace(/\s+is\s+(?:now\s+)?confirmed\b.*$/i,"")
+    .replace(/\s+is\s+now\b.*$/i,"")
+    .replace(/[!.].*$/,"")
+    .trim();
+}
+
+// Find the original purchase a Rakuten cashback should attach to.
+// Strategy: ilike the store name within a date window around the order date, then
+// prefer the row whose amount matches the order total (the full purchase price),
+// falling back to the closest-dated store match. Returns the txn row or null.
+async function findRakutenParentMatch(storeName,orderAmount,searchDate){
+  const clean=cleanRakutenStore(storeName);
+  if(!clean)return null;
+  const base=searchDate?new Date(searchDate+"T00:00:00"):new Date();
+  if(isNaN(base))return null;
+  const from=new Date(base.getTime()-45*864e5).toISOString().slice(0,10);
+  const to=new Date(base.getTime()+15*864e5).toISOString().slice(0,10);
+  const matches=await sb(`transactions?description=ilike.*${encodeURIComponent(clean)}*&date=gte.${from}&date=lte.${to}&amount_usd=gt.0&order=date.desc&limit=25&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id,service_start,service_end`+ownerQS());
+  if(!matches.length)return null;
+  const byDate=(a,b)=>Math.abs(new Date(a.date+"T00:00:00")-base)-Math.abs(new Date(b.date+"T00:00:00")-base);
+  if(orderAmount>0){
+    const tol=Math.max(0.5,orderAmount*0.02);
+    const exact=matches.filter(m=>Math.abs(Math.abs(m.amount_usd)-orderAmount)<=tol);
+    if(exact.length)return exact.sort(byDate)[0];
+  }
+  return matches.sort(byDate)[0];
+}
+
 async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
   for(const c of rakutenCandidates){
     const idx=allValid.indexOf(c);
     const newTxn=createdTxns[idx];
     if(!newTxn?.id)continue;
-    const store=c._parsedData.store_name;
+    const store=c._parsedData.store_name||c.description;
+    const orderAmt=parseFloat(c._parsedData.order_amount)||0;
     const searchDate=c._parsedData.order_date||c.date;
-    const from=new Date(new Date(searchDate).getTime()-30*864e5).toISOString().slice(0,10);
-    const to=new Date(new Date(searchDate).getTime()+30*864e5).toISOString().slice(0,10);
     try{
-      const matches=await sb(`transactions?description=ilike.*${encodeURIComponent(store)}*&date=gte.${from}&date=lte.${to}&amount_usd=gt.0&order=date.desc&limit=5`);
-      if(matches.length){
-        const parent=matches[0];
+      // Use the link the reviewer saw/confirmed before approving; otherwise search.
+      // An explicit unlink (_linkCleared) suppresses the fallback search.
+      let parent=null;
+      if(c._linkToTransactionId){
+        const got=await sb(`transactions?id=eq.${c._linkToTransactionId}&limit=1&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id,service_start,service_end`);
+        parent=got&&got[0];
+      }
+      if(!parent&&!c._linkCleared)parent=await findRakutenParentMatch(store,orderAmt,searchDate);
+      if(parent){
         await linkToGroup(parent,{id:newTxn.id,transaction_group_id:newTxn.transaction_group_id||null});
-        // Update category and service dates to match parent purchase
+        // Inherit category and service dates from the parent purchase.
         const patch={};
         if(parent.category_id)patch.category_id=parent.category_id;
         if(parent.service_start)patch.service_start=parent.service_start;
@@ -23,23 +61,17 @@ async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
           patch.daily_cost=Math.round(c.amount_usd/sd*1e6)/1e6;
         }
         if(Object.keys(patch).length)await sb(`transactions?id=eq.${newTxn.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify(patch)});
-        const dv=Math.abs(c.amount_usd);
-        await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
-          date:c.date,item:c.description,payment_type:"Rakuten",
-          cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
-          dollar_value:dv,transaction_id:newTxn.id
-        })});
-        console.log(`Rakuten: linked "${c.description}" to "${parent.description}" (cat: ${parent.category_id}) + created cashback record`);
-      }else{
-        console.log(`Rakuten: no parent found for "${store}" around ${searchDate}`);
-        // Still create cashback_redemptions even without parent link
-        const dv=Math.abs(c.amount_usd);
-        await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
-          date:c.date,item:c.description,payment_type:"Rakuten",
-          cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
-          dollar_value:dv,transaction_id:newTxn.id
-        })});
       }
+      // Always record the cashback in the rewards ledger.
+      const dv=Math.abs(c.amount_usd);
+      await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+        date:c.date,item:c.description,payment_type:"Rakuten",
+        cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
+        dollar_value:dv,transaction_id:newTxn.id
+      })});
+      console.log(parent
+        ?`Rakuten: linked "${c.description}" to "${parent.description}" (cat: ${parent.category_id}) + cashback record`
+        :`Rakuten: no parent found for "${store}" around ${searchDate} \u2014 cashback record only`);
     }catch(e){console.error(`Rakuten link error for "${store}":`,e)}
   }
 }

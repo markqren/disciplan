@@ -373,7 +373,8 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
   // Extract cashback amount from the email body
   // Rakuten emails prominently show the dollar amount at the top: "$147.00"
   // This appears as the cashback amount in the "Cash Back is now in your Pending balance" context
-  let cashbackAmount: number | null = null;
+  let cashbackAmount: number | null = null;   // money Rakuten owes Mark (the credit)
+  let orderAmount: number | null = null;       // the purchase total — used to find the parent txn
   let storeName: string | null = null;
   let orderDate: string | null = null;
   let orderId: string | null = null;
@@ -385,20 +386,28 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
   // Strip HTML tags for cleaner regex matching on HTML content
   const stripped = bodyToSearch.replace(/<[^>]+>/g, " ").replace(/&\w+;/g, " ");
 
-  // Amount: In the HTML, the cashback amount appears in a table cell right before
-  // "Order number". Match the dollar amount closest to order data, not nav links like "Earn $50".
-  // HTML structure: <td>$14.83</td> ... <td>Order number</td>
-  // After stripping: "  $14.83   Order number  9731724334"
-  const amtNearOrder = stripped.match(/\$([0-9]+(?:\.[0-9]{2})?)\s+Order number/i);
-  if (amtNearOrder) {
-    cashbackAmount = parseFloat(amtNearOrder[1]);
+  // Cashback amount: the newer Rakuten layout labels it explicitly, e.g. "$2.41 Cash Back".
+  // Prefer that — it is unambiguous and never collides with the order total.
+  const cbLabeled = stripped.match(/\$([0-9]+(?:\.[0-9]{2})?)\s*Cash\s*Back/i);
+  if (cbLabeled) {
+    cashbackAmount = parseFloat(cbLabeled[1]);
   } else {
-    // Fallback: find dollar amount with cents (excludes round numbers like "$50")
-    const amtWithCents = stripped.match(/\$([0-9]+\.[0-9]{2})/);
-    if (amtWithCents) {
-      cashbackAmount = parseFloat(amtWithCents[1]);
+    // Older layout: cashback dollar cell sits right before "Order number".
+    // After stripping: "  $14.83   Order number  9731724334"
+    const amtNearOrder = stripped.match(/\$([0-9]+(?:\.[0-9]{2})?)\s+Order number/i);
+    if (amtNearOrder) {
+      cashbackAmount = parseFloat(amtNearOrder[1]);
+    } else {
+      // Last resort: first dollar amount with cents (excludes round nav links like "$50").
+      const amtWithCents = stripped.match(/\$([0-9]+\.[0-9]{2})/);
+      if (amtWithCents) cashbackAmount = parseFloat(amtWithCents[1]);
     }
   }
+
+  // Order amount (the purchase total): labeled "Amount $120.47" in the details block.
+  // This is what we search the ledger for to find the original purchase to link to.
+  const orderAmtMatch = stripped.match(/\bAmount\b\s*\$\s*([0-9][0-9,]*\.[0-9]{2})/i);
+  if (orderAmtMatch) orderAmount = parseFloat(orderAmtMatch[1].replace(/,/g, ""));
 
   // Order number: in HTML as "Order number</td>...<td>9731724334</td>"
   // After stripping: "Order number  9731724334"
@@ -416,10 +425,22 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
     }
   }
 
-  // Try to extract store name from subject
-  // Subject patterns: "You've earned Cash Back at Vrbo" or "Cash Back from Vrbo"
-  const storeSubjMatch = subject.match(/(?:earned|from|at)\s+(?:Cash\s*Back\s+(?:at|from)\s+)?(.+?)(?:\s*[!.]|$)/i);
-  if (storeSubjMatch) storeName = storeSubjMatch[1].trim();
+  // Try to extract store name from subject. Patterns Rakuten uses:
+  //   "You've earned Cash Back at Vrbo"
+  //   "Cash Back from Vrbo"
+  //   "Good news! Cash Back at Chewy is confirmed"
+  // Drop the leading "Good news!" lead-in, capture the merchant after at/from, then
+  // trim trailing status phrases ("is confirmed", "is now ...") so we get just "Chewy".
+  const subjClean = subject.replace(/^good news[!.\u2019']*\s*/i, "").trim();
+  const storeSubjMatch = subjClean.match(/(?:Cash\s*Back\s+(?:at|from)|\bat|\bfrom)\s+(.+)$/i);
+  if (storeSubjMatch) {
+    storeName = storeSubjMatch[1]
+      .replace(/\s+is\s+(?:now\s+)?confirmed\b.*$/i, "")
+      .replace(/\s+is\s+now\b.*$/i, "")
+      .replace(/\s+cash\s*back\b.*$/i, "")
+      .replace(/[!.].*$/, "")
+      .trim() || null;
+  }
 
   // Use forwarding note as store name hint (user types "Sixt" when forwarding)
   if (!storeName && forwardingNote?.descriptionHint) {
@@ -461,6 +482,7 @@ function parseRakutenEmail({ subject: rawSubject, text, html, forwardingNote }: 
       type: "cashback_earned",
       store_name: storeName,
       cashback_amount: cashbackAmount,
+      order_amount: orderAmount,
       order_id: orderId,
       order_date: orderDate,
       forwarding_note: forwardingNote?.raw || null,

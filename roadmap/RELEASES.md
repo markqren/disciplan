@@ -11,6 +11,18 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.1
+<sub>Splitwise import service periods + recency; Rakuten cashback linking in email import</sub>
+
+##### Features
+- **Estimated service periods on Splitwise import** — Imported expenses now derive their service window from the category's accrual default (`getDefStart`/`getDefEnd` + `ACCRUAL_D`, e.g. furniture = 2 years, clothes = 1 year, rent/utilities = full month) instead of a static single day — so a "Furniture - Rubber Tree Plant" accrues over 730 days like every other transaction. The review card now shows editable Service Start → End fields that auto-update with the category (with an "auto: Nd" hint), stay overridable, and inherit the linked card charge's window when a receivable is linked. (~1,500 tokens)
+- **Recency ordering in the Splitwise review queue** — New, changed, and dismissed lists now sort by expense date (newest first) instead of last-synced order. (~500 tokens)
+- **Manual link-to-transaction for Rakuten cashback** — The email-import edit modal now has a "Link to Transaction" section: search the ledger and attach a forwarded Rakuten cashback to its original purchase (or Unlink / Change Link) before approving, with a 🔗 indicator + link summary in the review table. `commitEmailImports` applies the chosen link, and the reviewer's choice takes precedence over the auto-matcher. (~2,500 tokens)
+
+##### Fixes
+- **Smarter Rakuten parent-purchase matching** — `linkRakutenCashback` now uses the order *total* (new `order_amount` parsed from the email) to find the matching purchase: it `ilike`s the cleaned store name in a -45/+15-day window and prefers the row whose amount matches the order total (±2%), falling back to the closest-dated match. Cashback is now **always** recorded in the rewards ledger even when no parent is found, and an explicit Unlink suppresses the fallback search. (~2,000 tokens)
+- **Rakuten email parsing hardened (`inbound-email`)** — Prefers the explicitly-labeled "$X Cash Back" amount (new layout) over positional guesses, parses the "Amount $X" order total, and cleans store names from subjects like "Good news! Cash Back at Chewy is confirmed" → "Chewy". (~1,500 tokens)
+
 #### v2.7.0
 <sub>Import AI: learns recurring-subscription categories, fixes stale subscription months</sub>
 

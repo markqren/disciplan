@@ -517,9 +517,13 @@ function renderEmailReviewTable(container,candidates){
 
     const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openEmailEditModal(candidates,idx,container)}});
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
-    descMain.textContent=c.description;
-    const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
-    descSub.textContent=c._skipReason||c._emailSubject||"";
+    descMain.textContent=c.description+(c._linkToTransactionId?" \uD83D\uDD17":"");
+    const descSub=h("div",{style:{fontSize:"10px",color:c._linkToTransactionId?"rgba(74,111,165,0.85)":"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+    if(c._linkToTransactionId&&c._linkDisplay){
+      descSub.textContent=`\u2192 ${c._linkDisplay.description||"transaction"} ${fmtF(c._linkDisplay.amount_usd)}${c._linkDisplay.date?" \u00b7 "+fmtD(c._linkDisplay.date):""}`;
+    }else{
+      descSub.textContent=c._skipReason||c._emailSubject||"";
+    }
     descTd.append(descMain,descSub);
     tr.append(descTd);
 
@@ -778,6 +782,65 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   }
   refSection.innerHTML=refLines.map(l=>`<div style="margin-bottom:2px">${l.replace(/</g,"&lt;")}</div>`).join("");
 
+  // Link-to-transaction section (shows the parent purchase a Rakuten cashback will
+  // attach to, and lets the reviewer change or remove it before approving).
+  const linkSection=h("div",{style:{marginTop:"4px",marginBottom:"14px"}});
+  const linkBody=h("div");
+  function emRenderLink(){
+    linkBody.innerHTML="";
+    if(c._linkToTransactionId){
+      const info=c._linkDisplay||{};
+      const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"rgba(74,111,165,0.12)",borderRadius:"6px"}});
+      const left=h("div");
+      left.innerHTML=`<div style="color:rgba(255,255,255,0.75);font-size:12px">\uD83D\uDD17 ${(info.description||"Transaction #"+c._linkToTransactionId).replace(/</g,"&lt;")}</div><div style="color:rgba(255,255,255,0.4);font-size:10px">${info.date?fmtD(info.date):""}${info.category_id?" \u00b7 "+info.category_id:""}${info.payment_type?" \u00b7 "+info.payment_type:""}</div>`;
+      row.append(left);
+      const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
+      if(info.amount_usd!=null)right.append(h("span",{style:{fontFamily:"var(--mono)",color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(info.amount_usd)));
+      right.append(h("button",{class:"pg-btn",style:{fontSize:"9px",color:"rgba(224,122,95,0.8)",padding:"2px 6px"},onClick:()=>{
+        delete c._linkToTransactionId;delete c._linkToGroupId;delete c._linkDisplay;c._linkCleared=true;emRenderLink();
+      }},"Unlink"));
+      row.append(right);
+      linkBody.append(row);
+      const changeBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)",marginTop:"6px"},onClick:()=>{changeBtn.style.display="none";emBuildLinkSearch(linkBody)}},"\u2026 Change Link");
+      linkBody.append(changeBtn);
+    }else{
+      const toggle=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"var(--b)"},onClick:()=>{toggle.style.display="none";emBuildLinkSearch(linkBody)}},"\uD83D\uDD17 Link to Transaction");
+      linkBody.append(toggle);
+    }
+  }
+  function emBuildLinkSearch(parent){
+    const wrap=h("div",{style:{marginTop:"6px"}});
+    const lsRow=h("div",{style:{display:"flex",gap:"6px",marginBottom:"8px"}});
+    const lsInput=h("input",{class:"inp",type:"text",placeholder:"Search description...",value:cleanRakutenStore(c.description||""),style:{flex:"1",fontSize:"11px",padding:"5px 8px"}});
+    const lsBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"5px 10px"}},"Search");
+    lsRow.append(lsInput,lsBtn);wrap.append(lsRow);
+    const results=h("div",{style:{maxHeight:"250px",overflowY:"auto"}});wrap.append(results);
+    async function doSearch(){
+      const q=lsInput.value.trim();if(!q){results.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>Type a description to search</div>";return}
+      lsBtn.textContent="...";lsBtn.disabled=true;
+      try{
+        const rows=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&order=date.desc&limit=20&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id`+ownerQS());
+        results.innerHTML="";
+        if(!rows.length){results.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>No transactions found</div>";return}
+        rows.forEach(r=>{
+          const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
+            c._linkToTransactionId=r.id;c._linkToGroupId=r.transaction_group_id||null;delete c._linkCleared;
+            c._linkDisplay={description:r.description,date:r.date,amount_usd:r.amount_usd,category_id:r.category_id,payment_type:r.payment_type};
+            wrap.remove();emRenderLink();
+          }});
+          row.innerHTML=`<div><div style="color:rgba(255,255,255,0.7)">${(r.description||"").replace(/</g,"&lt;")}</div><div style="color:rgba(255,255,255,0.35);font-size:10px">${fmtD(r.date)} \u00b7 ${r.category_id||""} \u00b7 ${r.payment_type||""}</div></div><div style="font-family:var(--mono);color:rgba(255,255,255,0.6);white-space:nowrap;margin-left:8px">${fmtF(r.amount_usd)}</div>`;
+          results.append(row);
+        });
+      }catch(e){results.innerHTML=`<div style='color:var(--r);padding:8px'>Error: ${e.message}</div>`}
+      finally{lsBtn.textContent="Search";lsBtn.disabled=false}
+    }
+    lsBtn.addEventListener("click",doSearch);
+    lsInput.addEventListener("keydown",e=>{if(e.key==="Enter")doSearch()});
+    parent.append(wrap);lsInput.focus();doSearch();
+  }
+  emRenderLink();
+  linkSection.append(linkBody);
+
   const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
   btnRow.append(h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
     c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
@@ -802,6 +865,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
   modal.append(emPreviewEl);
   modal.append(refSection);
+  modal.append(linkSection);
   modal.append(btnRow);
   bg.append(modal);
   document.body.append(bg);
@@ -938,6 +1002,17 @@ async function commitEmailImports(candidates){
     const wasEdited=!!(c.category_id!==c.ai_category||c.description!==c.ai_description);
     await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"committed",committed_at:now,final_category_id:c.category_id,final_description:c.description,was_edited:wasEdited})});
   }
+  // Apply pre-set links for non-Rakuten rows (Rakuten links + cashback records are
+  // handled below by linkRakutenCashback so the category/service-date inheritance runs).
+  for(let i=0;i<valid.length;i++){
+    const c=valid[i];
+    if(c._parsedData?.type==="cashback_earned")continue;
+    if(!c._linkToTransactionId)continue;
+    const ins=created[i];if(!ins?.id)continue;
+    const targetGroup=c._linkToGroupId||Math.min(ins.id,c._linkToTransactionId);
+    await sb(`transactions?id=eq.${ins.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:targetGroup})});
+    if(!c._linkToGroupId)await sb(`transactions?id=eq.${c._linkToTransactionId}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:targetGroup})});
+  }
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   valid.forEach(c=>c._status="committed");
@@ -948,7 +1023,7 @@ async function commitEmailImports(candidates){
   const newReimb=valid.filter(c=>c.amount_usd<0&&c.payment_type==="Venmo");
   if(newReimb.length)setTimeout(()=>scanForReimbursementLinks().catch(e=>console.error("Post-commit link scan:",e)),1000);
   // Auto-link Rakuten cashback to parent purchases and create cashback_redemptions
-  const rakutenCB=valid.filter(c=>c._parsedData?.type==="cashback_earned"&&c._parsedData?.store_name);
+  const rakutenCB=valid.filter(c=>c._parsedData?.type==="cashback_earned");
   if(rakutenCB.length&&created?.length)setTimeout(()=>linkRakutenCashback(rakutenCB,valid,created).catch(e=>console.error("Rakuten cashback link:",e)),1000);
   return{
     count:valid.length,
