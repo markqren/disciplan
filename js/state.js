@@ -1,4 +1,4 @@
-let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set(),tagsView:{q:"",sort:"total"},view:(()=>{try{return localStorage.getItem("dc_view")||"combined"}catch(e){return"combined"}})()};
+let state={tab:"income",year:2026,txnCount:0,page:0,pendingEmails:0,expandedGroups:new Set(),tagsView:{q:"",sort:"total"},view:(()=>{try{return localStorage.getItem("dc_view")||null}catch(e){return null}})()};
 
 // In-session data cache (FEA-89)
 // Prevents redundant API calls when switching tabs without making edits.

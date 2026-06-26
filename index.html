@@ -199,8 +199,10 @@ function renderViewSwitch(){
   if(!householdMembers||householdMembers.length<2){el.style.display="none";return}
   el.style.display="inline-flex";
   const opts=[...householdMembers.map(m=>[m.owner,m.display_name]),["combined","Combined"]];
-  // Guard against a persisted view that is no longer a valid owner.
-  if(!opts.some(o=>o[0]===state.view))state.view="combined";
+  // Default to the user's own account when they haven't explicitly chosen a
+  // view (or a persisted view is no longer valid); an explicit "Combined" pick
+  // is persisted to dc_view and respected.
+  if(!opts.some(o=>o[0]===state.view))state.view=currentOwner||"combined";
   opts.forEach(([val,label])=>{
     const b=h("button",{class:"vw-btn"+(state.view===val?" on":""),onClick:()=>{
       if(state.view===val)return;

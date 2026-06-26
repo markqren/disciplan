@@ -19,6 +19,9 @@
 - **Recency ordering in the Splitwise review queue** — New, changed, and dismissed lists now sort by expense date (newest first) instead of last-synced order. (~500 tokens)
 - **Manual link-to-transaction for Rakuten cashback** — The email-import edit modal now has a "Link to Transaction" section: search the ledger and attach a forwarded Rakuten cashback to its original purchase (or Unlink / Change Link) before approving, with a 🔗 indicator + link summary in the review table. `commitEmailImports` applies the chosen link, and the reviewer's choice takes precedence over the auto-matcher. (~2,500 tokens)
 
+##### Changes
+- **Header view defaults to your own account** — New sessions now open scoped to the signed-in member's own ledger instead of Combined. `state.view` initializes to `null` when nothing is stored, and `renderViewSwitch()` resolves an unset/invalid view to `currentOwner` (Combined only as a no-owner fallback). An explicit "Combined" pick is still persisted to `dc_view` and respected on reload. (~500 tokens)
+
 ##### Fixes
 - **Smarter Rakuten parent-purchase matching** — `linkRakutenCashback` now uses the order *total* (new `order_amount` parsed from the email) to find the matching purchase: it `ilike`s the cleaned store name in a -45/+15-day window and prefers the row whose amount matches the order total (±2%), falling back to the closest-dated match. Cashback is now **always** recorded in the rewards ledger even when no parent is found, and an explicit Unlink suppresses the fallback search. (~2,000 tokens)
 - **Rakuten email parsing hardened (`inbound-email`)** — Prefers the explicitly-labeled "$X Cash Back" amount (new layout) over positional guesses, parses the "Amount $X" order total, and cleans store names from subjects like "Good news! Cash Back at Chewy is confirmed" → "Chewy". (~1,500 tokens)
