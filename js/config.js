@@ -52,6 +52,13 @@ function ownerQS(){
   return qs;
 }
 
+// PostgREST filter for the whole household, never owner-scoped. Used where a
+// row's visibility should not depend on the active person view — e.g. tag
+// metadata, which is shared and whose "ownership" is derived from tagged txns.
+function householdQS(){
+  return currentHousehold != null ? `&household_id=eq.${currentHousehold}` : "";
+}
+
 // PostgREST filter scoped to the *importing* user (currentOwner), regardless of
 // the active header view. Used for AI personalization inputs (merchant patterns,
 // sample descriptions, rules) so an import learns from the person receiving it.

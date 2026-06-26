@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jun 25, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jun 26, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,13 @@
 ## 🚀 Releases
 
 ### v2.7 — Jun 25, 2026
+
+#### v2.7.4
+<sub>Multi-owner tags with per-person sums</sub>
+
+##### Features
+- **Tags now have derived multi-owner ownership** — A tag's owners are derived from who actually has transactions tagged with it, not the single `tags.owner` creator column. The Tags grid metadata fetch is no longer owner-scoped (`householdQS()` instead of `ownerQS()`), so a tag created by Shilpa but contributed to by Mark (e.g. `tahiti`) now appears in Mark's single-person view showing only his accrual ("my half"). The Combined view shows the household total plus separate per-owner sum chips on each tag card, and a per-owner subtotal panel in the tag detail modal — both colored with the same owner palette as the Ledger. Powered by a new additive `get_tag_summaries_by_owner(p_household_id)` RPC (`GROUP BY tag, owner`); the original `get_tag_summaries`/`_scoped` RPCs are untouched so `daily-insight` and Combined aggregates are unchanged. Single-person views also only list tags that person contributed to or created. (~7,000 tokens)
+
 
 #### v2.7.3
 <sub>Balance Adjustment sign fix</sub>

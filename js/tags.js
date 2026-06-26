@@ -1,16 +1,35 @@
 async function renderTags(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Tags</h2><p class="sub">Loading...</p></div><div id="tagsFilterBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div><div id="tagsBody"></div>`;
   try{
-    const [tagRows,summaries]=await Promise.all([
-      sb("tags?order=start_date.desc"+ownerQS()),
-      scopedRPC("get_tag_summaries")
-    ]);
-    const tm={};
-    for(const s of summaries){
-      tm[s.tag_name]={total:s.total_accrual,count:s.txn_count,cats:s.category_totals||{}};
+    const o=scopeOwner();
+    const multi=(householdMembers||[]).length>1;
+    const ownerMeta={};(householdMembers||[]).forEach((m,i)=>{ownerMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    // Tag metadata is shared across the household; ownership is DERIVED from who
+    // has tagged transactions (see get_tag_summaries_by_owner). The metadata
+    // fetch is never owner-scoped — otherwise a tag contributed to by Mark but
+    // created by Shilpa would vanish from Mark's single-person view.
+    const tagRows=await sb("tags?order=start_date.desc"+householdQS());
+    // byOwner: tagName -> { owner -> {total,count,cats} }. One RPC result serves
+    // every view; we collapse it per-view client-side. Legacy single-user mode
+    // (no household) falls back to the original single-total RPC.
+    const byOwner={};
+    if(currentHousehold!=null){
+      const rows=await sbRPC("get_tag_summaries_by_owner",{p_household_id:currentHousehold});
+      for(const r of rows)(byOwner[r.tag_name]||(byOwner[r.tag_name]={}))[r.owner||"_"]={total:r.total_accrual,count:r.txn_count,cats:r.category_totals||{}};
+    }else{
+      const summaries=await sbRPC("get_tag_summaries");
+      for(const s of summaries)(byOwner[s.tag_name]||(byOwner[s.tag_name]={}))["_"]={total:s.total_accrual,count:s.txn_count,cats:s.category_totals||{}};
     }
-
-    const tags=tagRows.map(t=>({...t,...(tm[t.name]||{total:0,count:0,cats:{}})}));
+    function viewSummary(name){
+      const owners=byOwner[name]||{};
+      if(o!=null){const mine=owners[o];return {total:mine?mine.total:0,count:mine?mine.count:0,cats:mine?mine.cats:{},owners}}
+      let total=0,count=0;const cats={};
+      for(const ow in owners){const s=owners[ow];total+=s.total;count+=s.count;for(const c in s.cats)cats[c]=(cats[c]||0)+s.cats[c]}
+      return {total,count,cats,owners};
+    }
+    const tags=tagRows.map(t=>{const vs=viewSummary(t.name);return {...t,total:vs.total,count:vs.count,cats:vs.cats,_owners:vs.owners}})
+      // Single-person view: only show tags this person contributed to (or created).
+      .filter(t=>o==null||(t._owners&&t._owners[o])||t.owner===o);
     const tv=state.tagsView||(state.tagsView={q:"",sort:"total"});
     const fS="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:6px 10px;color:#e8e8e4;font-size:11px;font-family:var(--sans);outline:none";
     const bar=el.querySelector("#tagsFilterBar");
@@ -49,6 +68,16 @@ async function renderTags(el){
             inner+=`<div style="display:flex;gap:2px;margin-top:6px;height:4px;border-radius:2px;overflow:hidden">`;
             posCats.sort((a,b)=>b[1]-a[1]).forEach(([c,v])=>inner+=`<div style="width:${(v/barTotal)*100}%;background:${CC[c]||"#666"};min-width:2px"></div>`);
             inner+=`</div>`;}
+          }
+        }
+        // Combined view: separate per-owner sums under the tag total.
+        if(o==null&&multi){
+          const obs=Object.entries(tag._owners||{}).filter(([ow,s])=>ow!=="_"&&Math.abs(s.total)>0.5);
+          if(obs.length>1){
+            obs.sort((a,b)=>b[1].total-a[1].total);
+            inner+=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">`;
+            obs.forEach(([ow,s])=>{const meta=ownerMeta[ow]||{name:ow,color:"#888"};inner+=`<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:${meta.color}1a;border:1px solid ${meta.color}33;padding:2px 7px;border-radius:5px"><span style="color:${meta.color};font-weight:600">${meta.name}</span><span style="font-family:var(--mono);color:rgba(255,255,255,0.6)">${fmtF(s.total)}</span></span>`});
+            inner+=`</div>`;
           }
         }
         card.innerHTML=inner;
@@ -108,6 +137,7 @@ async function showTagDetail(tag){
   const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
   const txns=await sb(`transactions?tag=eq.${encodeURIComponent(tag.name)}&category_id=neq.income&category_id=neq.investment&category_id=neq.adjustment&order=date.desc`+ownerQS());
   const cats={};let total=0;
+  const ownerTotals={};
   const txnAccruals=[];
   for(const t of txns){
     let accrual=0,oDays=0;
@@ -120,6 +150,7 @@ async function showTagDetail(tag){
         cats[t.category_id]=(cats[t.category_id]||0)+accrual;total+=accrual;
       }
     }else if(t.amount_usd>0){accrual=t.amount_usd;cats[t.category_id]=(cats[t.category_id]||0)+t.amount_usd;total+=t.amount_usd}
+    if(accrual)ownerTotals[t.owner||"_"]=(ownerTotals[t.owner||"_"]||0)+accrual;
     const noOverlap=accrual===0&&tag.start_date&&tag.end_date&&t.service_start&&t.service_end&&(t.service_end<tag.start_date||t.service_start>tag.end_date);
     if(Math.abs(accrual)>=0.01||noOverlap)txnAccruals.push({...t,_accrual:accrual,_oDays:oDays,_noOverlap:noOverlap});
   }
@@ -161,6 +192,16 @@ async function showTagDetail(tag){
   mhtml+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px">`;
   [["Total",fmtF(total),"var(--r)"],["Days",days,"var(--b)"],["Per Day",days>0?fmtF(total/days):"—","var(--g)"]].forEach(([l,v,c])=>mhtml+=`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`);
   mhtml+=`</div>`;
+  // Combined view: separate per-owner sums.
+  if(scopeOwner()==null&&(householdMembers||[]).length>1){
+    const oMeta={};householdMembers.forEach((m,i)=>{oMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    const obs=Object.entries(ownerTotals).filter(([ow,v])=>ow!=="_"&&Math.abs(v)>0.5).sort((a,b)=>b[1]-a[1]);
+    if(obs.length>1){
+      mhtml+=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-12px 0 24px">`;
+      obs.forEach(([ow,v])=>{const meta=oMeta[ow]||{name:ow,color:"#888"};mhtml+=`<div style="flex:1;min-width:120px;background:${meta.color}14;border:1px solid ${meta.color}33;border-radius:10px;padding:10px 14px"><div style="font-size:10px;text-transform:uppercase;color:${meta.color};font-weight:600">${meta.name}</div><div style="font-size:17px;font-weight:700;font-family:var(--mono);color:rgba(255,255,255,0.85)">${fmtF(v)}</div></div>`});
+      mhtml+=`</div>`;
+    }
+  }
 
   Object.entries(cats).filter(([,v])=>Math.abs(v)>0.5).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).forEach(([cat,val])=>{
     const isNeg=val<0;
