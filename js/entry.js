@@ -448,10 +448,20 @@ async function loadSplitwiseSync(container){
 
 // Run the same AI categorization/description cleanup used for CSV/email imports
 // over the underlying Splitwise expense, stashing the suggestion on each row.
+// Suggestions are cached per expense_id+content_hash for the session so repeated
+// syncs don't re-categorize (and re-bill) the same unchanged pending backlog.
+function swAiCacheKey(r){return `sw_ai_${r.expense_id}_${r.content_hash||""}`;}
 async function aiEnrichSplitwiseRows(rows){
   if(!aiAvailable())return;
+  // Restore cached suggestions; only send the uncached/changed rows to the model.
+  const todo=[];
+  rows.forEach(r=>{
+    try{const c=sessionStorage.getItem(swAiCacheKey(r));if(c){r._ai=JSON.parse(c);return}}catch(_){}
+    todo.push(r);
+  });
+  if(!todo.length)return;
   try{
-    const cands=rows.map(r=>{
+    const cands=todo.map(r=>{
       const c=(r.raw?.candidates||[])[0]||{};
       const e=r.raw?.expense||{};
       return{_rawDescription:(e.description||c.description||"").replace(/^Reimbursed - /,""),amount_usd:Math.abs(parseFloat(c.amount_usd)||0),_bankCategory:""};
@@ -460,7 +470,7 @@ async function aiEnrichSplitwiseRows(rows){
     const res=await aiCategorize(cands,patterns,samples,false,"splitwise",subs,rules);
     if(!res)return;
     const byIdx={};res.forEach(x=>byIdx[x.i]=x);
-    rows.forEach((r,i)=>{const a=byIdx[i];if(a)r._ai={cat:a.cat,conf:a.conf,desc:a.desc}});
+    todo.forEach((r,i)=>{const a=byIdx[i];if(a){r._ai={cat:a.cat,conf:a.conf,desc:a.desc};try{sessionStorage.setItem(swAiCacheKey(r),JSON.stringify(r._ai))}catch(_){}}});
   }catch(e){console.warn("Splitwise AI enrich failed:",e)}
 }
 
@@ -490,7 +500,16 @@ function renderSplitwiseReview(container,rows,dismissed){
     `${pending.length} new \u00b7 ${changed.length} changed in Splitwise`));
 
   if(pending.length){
-    container.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",margin:"8px 0 6px"}},"New expenses"));
+    const newHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",margin:"8px 0 6px"}});
+    newHdr.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)"}},"New expenses"));
+    const dismissRestBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"3px 8px",color:"rgba(224,122,95,0.8)"},onClick:async()=>{
+      if(!confirm(`Dismiss all ${pending.length} remaining new expense${pending.length===1?"":"s"}?`))return;
+      dismissRestBtn.disabled=true;dismissRestBtn.textContent="Dismissing\u2026";
+      try{await bulkDismissSplitwise(pending);await loadSplitwiseSync(container);}
+      catch(e){alert("Failed: "+e.message);dismissRestBtn.disabled=false;dismissRestBtn.textContent=`Dismiss rest (${pending.length})`;}
+    }},`Dismiss rest (${pending.length})`);
+    newHdr.append(dismissRestBtn);
+    container.append(newHdr);
     pending.forEach(row=>container.append(renderSwPendingCard(row,container)));
   }
   if(changed.length){
@@ -880,6 +899,13 @@ async function keepSplitwiseVersion(row){
 
 async function dismissSplitwiseRow(row){
   await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
+}
+
+// Bulk-dismiss a batch of pending rows in a single request.
+async function bulkDismissSplitwise(rows){
+  const ids=rows.map(r=>r.expense_id).filter(v=>v!=null);
+  if(!ids.length)return;
+  await sb(`splitwise_expenses?expense_id=in.(${ids.join(",")})`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
 }
 
 // Fuzzy duplicate check against transactions already on the Splitwise account
