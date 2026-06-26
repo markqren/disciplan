@@ -11,6 +11,12 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.2
+<sub>Right-click balance adjustment on the Balance Sheet</sub>
+
+##### Features
+- **Balance Adjustment from the Balance Sheet** — Right-clicking any asset or liability account row now opens a context menu whose first action is "Balance Adjustment". It pulls the freshest scoped ledger balance (`scopedRPC("get_ledger_balances")`), lets you state the account's real current value with a live preview of the plug, and writes a single `category_id:"adjustment"` transaction (`amount_usd = net − target`) so the live ledger trues up to reality without touching the income statement. Liabilities normalize the entered "amount owed" via `-abs()`; the new txn is dated today, clears the cache, re-renders the Balance Sheet, and offers an Undo. Mirrors the existing onboarding "Reconcile to Current Balance" math. (~2,500 tokens)
+
 #### v2.7.1
 <sub>Splitwise import service periods + recency; Rakuten cashback linking in email import</sub>
 

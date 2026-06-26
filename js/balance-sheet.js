@@ -96,24 +96,32 @@ async function renderBS(el){
 
     // Live ledger account groups
     const row2=h("div",{class:"g2"});
-    function acctGroup(title,accts,color){
+    function acctGroup(title,accts,color,isAsset){
       if(!accts.length)return"";
       const total=accts.reduce((s,a)=>s+a.bal,0);
       let html=`<div class="acct-grp"><div class="acct-hdr"><span style="font-size:12px;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.05em">${title}</span><span style="font-size:13px;font-weight:700;color:${color};font-family:var(--mono)">${fmtF(total)}</span></div>`;
-      accts.forEach(a=>{const isTD=a.name.startsWith("TD");const cadRate=DFX.CAD||0.73;const cadVal=isTD?`<span style="color:rgba(255,255,255,0.28);font-size:11px;margin-right:6px;font-family:var(--mono)">CA$${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(a.bal/cadRate))}</span>`:"";html+=`<div class="acct-row"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${isTD?` title="CA$${(a.bal/cadRate).toFixed(2)}"`:""} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${cadVal}${fmtF(a.bal)}</span></div>`});
+      accts.forEach(a=>{const isTD=a.name.startsWith("TD");const cadRate=DFX.CAD||0.73;const cadVal=isTD?`<span style="color:rgba(255,255,255,0.28);font-size:11px;margin-right:6px;font-family:var(--mono)">CA$${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(a.bal/cadRate))}</span>`:"";html+=`<div class="acct-row" data-acct="${a.name}" data-asset="${isAsset?1:0}" data-bal="${a.bal}" title="Right-click for actions"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${isTD?` title="CA$${(a.bal/cadRate).toFixed(2)}"`:""} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${cadVal}${fmtF(a.bal)}</span></div>`});
       return html+"</div>";
     }
     const assetsCard=h("div",{class:"cd"});
-    assetsCard.innerHTML=`<h3 style="color:var(--b)">Assets</h3>`+acctGroup("Cash & Equivalents",[...byType.checking,...byType.savings,...byType.other],"var(--b)")+acctGroup("Investments",byType.investment,"#2A9D8F");
+    assetsCard.innerHTML=`<h3 style="color:var(--b)">Assets</h3>`+acctGroup("Cash & Equivalents",[...byType.checking,...byType.savings,...byType.other],"var(--b)",true)+acctGroup("Investments",byType.investment,"#2A9D8F",true);
     row2.append(assetsCard);
 
     const liabCard=h("div",{class:"cd"});
-    liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)");
+    liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)",false);
     const workCap=[...byType.working_capital,...byType.liability];
-    if(workCap.length)liabCard.innerHTML+=acctGroup("Working Capital",workCap,"var(--y)");
+    if(workCap.length)liabCard.innerHTML+=acctGroup("Working Capital",workCap,"var(--y)",false);
     if(!byType.credit.length&&!workCap.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`
     row2.append(liabCard);
     body.append(row2);
+
+    // Right-click an account row → context menu (Balance Adjustment, ...)
+    row2.addEventListener("contextmenu",e=>{
+      const rowEl=e.target.closest(".acct-row[data-acct]");
+      if(!rowEl)return;
+      e.preventDefault();
+      showAcctContextMenu(e.clientX,e.clientY,rowEl.dataset.acct,rowEl.dataset.asset==="1",parseFloat(rowEl.dataset.bal)||0);
+    });
 
     // Credits & Transfers — standalone expandable card
     if(creditRows.length){
@@ -175,5 +183,105 @@ function showSnapshotForm(accounts, lastDate, onSave, liveBals){
       bg.remove();
       if(onSave)onSave();
     }catch(e){alert("Error saving: "+e.message);btn.textContent="Save Snapshot";btn.disabled=false}
+  });
+}
+
+// ── Account row context menu (Balance Sheet) ──────────────────────────────
+// Right-clicking an account row opens a small dropdown. First action lets the
+// user state the account's real current value; a single "adjustment" txn trues
+// up the ledger without touching the income statement.
+function showAcctContextMenu(x,y,name,isAsset,bal){
+  document.querySelectorAll(".acct-ctx-menu").forEach(m=>m.remove());
+  const menu=h("div",{class:"acct-ctx-menu",style:{position:"fixed",zIndex:"9999",minWidth:"190px",background:"#1c1c22",border:"1px solid var(--bdr)",borderRadius:"8px",padding:"4px",boxShadow:"0 10px 30px rgba(0,0,0,0.5)"}});
+  menu.append(h("div",{style:{padding:"4px 12px 6px",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"220px"}},name));
+  function menuItem(label,onClick){
+    const it=h("div",{style:{padding:"8px 12px",fontSize:"13px",color:"rgba(255,255,255,0.85)",cursor:"pointer",borderRadius:"6px"},onClick:()=>{menu.remove();onClick()}},label);
+    it.addEventListener("mouseenter",()=>{it.style.background="rgba(255,255,255,0.06)"});
+    it.addEventListener("mouseleave",()=>{it.style.background="transparent"});
+    return it;
+  }
+  menu.append(menuItem("Balance Adjustment",()=>showBalanceAdjustment(name,isAsset,bal)));
+  document.body.append(menu);
+  const r=menu.getBoundingClientRect();
+  if(x+r.width>window.innerWidth)x=Math.max(8,window.innerWidth-r.width-8);
+  if(y+r.height>window.innerHeight)y=Math.max(8,window.innerHeight-r.height-8);
+  menu.style.left=x+"px";menu.style.top=y+"px";
+  const close=ev=>{if(!menu.contains(ev.target)){menu.remove();document.removeEventListener("mousedown",close);document.removeEventListener("contextmenu",close);window.removeEventListener("blur",close)}};
+  setTimeout(()=>{document.addEventListener("mousedown",close);document.addEventListener("contextmenu",close);window.addEventListener("blur",close)},0);
+}
+
+// Modal: set an account's real current value. Computes the plug (delta) needed
+// and writes one category="adjustment" transaction so the live ledger balance
+// matches reality. Liabilities are stored negative, so any sign the user types
+// is normalized via -abs().
+function showBalanceAdjustment(name,isAsset,fallbackBal){
+  const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"440px"}});
+  modal.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><h2 style="font-size:20px;margin:0">Balance Adjustment</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${name}</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">\u2715</button></div>`;
+
+  const liveRow=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.6)",marginBottom:"14px"}},"Current ledger balance: \u2026");
+  const valLbl=h("label",{class:"lbl"},isAsset?"Current value":"Current value (amount owed)");
+  const valInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"0.00",style:{maxWidth:"200px",fontFamily:"var(--mono)"}});
+  const valField=h("div",{style:{marginBottom:"14px"}});valField.append(valLbl,valInp);
+  const preview=h("div",{style:{fontSize:"12px",lineHeight:"1.7",margin:"4px 0 14px"}});
+  const saveBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},disabled:true},"Create Adjustment");
+
+  modal.append(liveRow,valField,preview,saveBtn);
+  bg.append(modal);document.body.append(bg);
+
+  let net=fallbackBal;
+  function recompute(){
+    const raw=parseFloat(valInp.value);
+    if(isNaN(raw)){preview.innerHTML="";saveBtn.disabled=true;return}
+    const target=isAsset?raw:-Math.abs(raw);
+    const delta=Math.round((net-target)*100)/100;
+    if(Math.abs(delta)<0.01){
+      preview.innerHTML=`<div style="color:var(--g)">\u2713 Already at ${fmtF(target)} \u2014 no adjustment needed.</div>`;
+      saveBtn.disabled=true;
+    }else{
+      preview.innerHTML=`<div>New balance: <b style="font-family:var(--mono)">${fmtF(target)}</b></div>`+
+        `<div>Adjustment recorded: <b style="font-family:var(--mono);color:var(--y)">${fmtF(delta)}</b> (category: adjustment)</div>`;
+      saveBtn.disabled=false;
+    }
+  }
+  valInp.addEventListener("input",recompute);
+
+  // Pull the freshest scoped ledger balance so the plug is exact.
+  scopedRPC("get_ledger_balances").then(bals=>{
+    const found=(bals||[]).find(b=>b.payment_type===name);
+    if(found)net=parseFloat(found.net_balance)||0;
+    liveRow.textContent=`Current ledger balance: ${fmtF(net)}`;
+    valInp.value=(isAsset?net:Math.abs(net)).toFixed(2);
+    valInp.focus();valInp.select();
+    recompute();
+  }).catch(()=>{liveRow.textContent=`Current ledger balance: ${fmtF(net)} (cached)`;valInp.value=(isAsset?net:Math.abs(net)).toFixed(2);recompute()});
+
+  saveBtn.addEventListener("click",async()=>{
+    const raw=parseFloat(valInp.value);if(isNaN(raw))return;
+    const target=isAsset?raw:-Math.abs(raw);
+    const delta=Math.round((net-target)*100)/100;
+    if(Math.abs(delta)<0.01)return;
+    saveBtn.disabled=true;saveBtn.textContent="Creating\u2026";
+    try{
+      const d=today();
+      const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({
+        date:d,service_start:d,service_end:d,service_days:1,
+        description:`Balance Adjustment - ${name}`,category_id:"adjustment",
+        amount_usd:delta,original_amount:delta,currency:"USD",fx_rate:1,
+        daily_cost:delta,payment_type:name,tag:"",credit:""
+      })});
+      const newId=Array.isArray(created)?created[0]?.id:created?.id;
+      state.txnCount++;
+      const ds=document.getElementById("dbStatus");if(ds)ds.textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      dcClearAll();
+      bg.remove();
+      if(newId&&typeof showUndo==="function")showUndo(`\u2713 ${name} adjusted to ${fmtF(target)}`,async()=>{
+        await sb(`transactions?id=eq.${newId}`,{method:"DELETE"});
+        state.txnCount--;const d2=document.getElementById("dbStatus");if(d2)d2.textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        dcClearAll();renderContent();
+      });
+      renderContent();
+    }catch(e){alert("Error creating adjustment: "+e.message);saveBtn.disabled=false;saveBtn.textContent="Create Adjustment"}
   });
 }
