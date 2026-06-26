@@ -359,10 +359,28 @@ function renderEntry(el){
   swCard.append(swHdr);
 
   const swBody=h("div",{class:"hidden",style:{marginTop:"16px"}});
-  const swBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
+
+  // ── Sync period control ──
+  const swPeriodSel=h("select",{class:"inp",style:{maxWidth:"220px"}});
+  [["","New since last sync"],["30","Last 30 days"],["90","Last 90 days"],["180","Last 6 months"],["365","Last 12 months"],["all","All time"],["custom","Custom range\u2026"]]
+    .forEach(([v,l])=>swPeriodSel.append(h("option",{value:v},l)));
+  const swFrom=h("input",{class:"inp",type:"date"});
+  const swTo=h("input",{class:"inp",type:"date",value:today()});
+  const swCustom=h("div",{class:"hidden",style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginTop:"8px"}});
+  swCustom.append(field("From",swFrom),field("To",swTo));
+  swPeriodSel.addEventListener("change",()=>{swCustom.classList.toggle("hidden",swPeriodSel.value!=="custom")});
+  function swSyncOpts(){
+    const v=swPeriodSel.value;
+    if(v==="")return{};
+    if(v==="all")return{dated_after:"2015-01-01T00:00:00Z"};
+    if(v==="custom"){const o={};if(swFrom.value)o.dated_after=swFrom.value+"T00:00:00Z";if(swTo.value)o.dated_before=swTo.value+"T23:59:59Z";return o}
+    return{dated_after:new Date(Date.now()-parseInt(v)*864e5).toISOString()};
+  }
+
+  const swBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",marginTop:"10px"},onClick:async()=>{
     swBtn.disabled=true;swBtn.textContent="Syncing\u2026";
     try{
-      const summary=await runSplitwiseSync();
+      const summary=await runSplitwiseSync(swSyncOpts());
       const c=summary.counts||{};
       swStatus.classList.remove("hidden");swStatus.style.color="rgba(255,255,255,0.5)";
       swStatus.textContent=`Synced ${summary.fetched} expenses \u00b7 ${c.new||0} new \u00b7 ${(c.changed||0)+(c.deleted||0)} changed \u00b7 ${c.unchanged||0} unchanged`;
@@ -375,19 +393,19 @@ function renderEntry(el){
   }},"Sync now");
   const swStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
   const swReview=h("div");
-  swBody.append(swBtn,swStatus,swReview);
+  swBody.append(field("Sync period",swPeriodSel),swCustom,swBtn,swStatus,swReview);
   swCard.append(swBody);
   el.append(swCard);
 
 }
 
 // Call the auth-gated splitwise-sync Edge Function to fetch + reconcile expenses.
-async function runSplitwiseSync(){
+async function runSplitwiseSync(opts){
   const token=currentSession?.access_token||SB_KEY;
   const r=await fetch(`${SB_URL}/functions/v1/splitwise-sync`,{
     method:"POST",
     headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY,"Content-Type":"application/json"},
-    body:JSON.stringify({})
+    body:JSON.stringify(opts||{})
   });
   const txt=await r.text();
   let data;try{data=txt?JSON.parse(txt):{}}catch(e){throw new Error(txt||"Bad response")}
@@ -398,9 +416,35 @@ async function runSplitwiseSync(){
 async function loadSplitwiseSync(container){
   container.innerHTML="<div style='text-align:center;padding:20px;color:rgba(255,255,255,0.3)'>Loading\u2026</div>";
   try{
-    const rows=await sb(`splitwise_expenses?sync_status=in.(pending,needs_review)&order=last_synced_at.desc${ownerQS()}`);
-    renderSplitwiseReview(container,rows);
+    const [active,dismissed]=await Promise.all([
+      sb(`splitwise_expenses?sync_status=in.(pending,needs_review)&order=last_synced_at.desc${ownerQS()}`),
+      sb(`splitwise_expenses?sync_status=eq.dismissed&order=last_synced_at.desc&limit=100${ownerQS()}`)
+    ]);
+    const pending=active.filter(r=>r.sync_status==="pending");
+    if(pending.length&&aiAvailable()){
+      container.innerHTML="<div style='text-align:center;padding:20px;color:rgba(255,255,255,0.3)'>AI categorizing\u2026</div>";
+      await aiEnrichSplitwiseRows(pending);
+    }
+    renderSplitwiseReview(container,active,dismissed);
   }catch(e){container.innerHTML=`<div style="padding:16px;color:var(--r);font-size:12px">Error: ${e.message}</div>`}
+}
+
+// Run the same AI categorization/description cleanup used for CSV/email imports
+// over the underlying Splitwise expense, stashing the suggestion on each row.
+async function aiEnrichSplitwiseRows(rows){
+  if(!aiAvailable())return;
+  try{
+    const cands=rows.map(r=>{
+      const c=(r.raw?.candidates||[])[0]||{};
+      const e=r.raw?.expense||{};
+      return{_rawDescription:(e.description||c.description||"").replace(/^Reimbursed - /,""),amount_usd:Math.abs(parseFloat(c.amount_usd)||0),_bankCategory:""};
+    });
+    const[patterns,samples,subs,rules]=await Promise.all([fetchMerchantPatterns(),fetchSampleDescriptions(),fetchSubscriptions(),fetchAIRules()]);
+    const res=await aiCategorize(cands,patterns,samples,false,"splitwise",subs,rules);
+    if(!res)return;
+    const byIdx={};res.forEach(x=>byIdx[x.i]=x);
+    rows.forEach((r,i)=>{const a=byIdx[i];if(a)r._ai={cat:a.cat,conf:a.conf,desc:a.desc}});
+  }catch(e){console.warn("Splitwise AI enrich failed:",e)}
 }
 
 function swExpenseSummary(snap){
@@ -412,11 +456,12 @@ function swNetAmount(snap){
   return cands.reduce((s,c)=>s+(parseFloat(c.amount_usd)||0),0);
 }
 
-function renderSplitwiseReview(container,rows){
+function renderSplitwiseReview(container,rows,dismissed){
   container.innerHTML="";
+  dismissed=dismissed||[];
   const pending=rows.filter(r=>r.sync_status==="pending");
   const changed=rows.filter(r=>r.sync_status==="needs_review");
-  if(!rows.length){
+  if(!rows.length&&!dismissed.length){
     container.innerHTML="<div style='padding:16px;color:rgba(255,255,255,0.3);font-size:12px'>Nothing to review. Click Sync now to fetch Splitwise expenses.</div>";
     return;
   }
@@ -431,6 +476,35 @@ function renderSplitwiseReview(container,rows){
     container.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",margin:"14px 0 6px"}},"Changed in Splitwise"));
     changed.forEach(row=>container.append(renderSwChangedCard(row,container)));
   }
+  if(dismissed.length)renderSwDismissedSection(container,dismissed);
+}
+
+// Collapsible list of dismissed Splitwise expenses with a one-click Restore.
+function renderSwDismissedSection(container,dismissed){
+  const wrap=h("div",{style:{marginTop:"16px",borderTop:"1px solid rgba(255,255,255,0.06)",paddingTop:"10px"}});
+  let open=false;
+  const list=h("div",{class:"hidden",style:{marginTop:"6px"}});
+  const arrow=h("span",{style:{fontSize:"9px"}},"\u25B8");
+  const hdr=h("div",{style:{cursor:"pointer",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",display:"flex",gap:"6px",alignItems:"center"},onClick:()=>{open=!open;arrow.textContent=open?"\u25BE":"\u25B8";list.classList.toggle("hidden")}});
+  hdr.append(arrow,h("span",{},`Dismissed (${dismissed.length})`));
+  wrap.append(hdr,list);
+  dismissed.forEach(row=>{
+    const snap=row.raw||row.pending_raw||{};
+    const s=swExpenseSummary(snap);
+    const net=swNetAmount(snap);
+    const item=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px",padding:"6px 8px",borderBottom:"1px solid rgba(255,255,255,0.04)",opacity:"0.7"}});
+    const info=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",overflow:"hidden"}});
+    info.append(h("div",{style:{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}},s.description));
+    info.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)"}},`${fmtD(s.date)} \u00b7 ${fmtF(net)}`));
+    const restore=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"4px 8px",flexShrink:"0"},onClick:async()=>{
+      restore.disabled=true;restore.textContent="\u2026";
+      try{await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"pending"})});item.remove();}
+      catch(e){alert("Failed: "+e.message);restore.disabled=false;restore.textContent="Restore"}
+    }},"Restore");
+    item.append(info,restore);
+    list.append(item);
+  });
+  container.append(wrap);
 }
 
 function swCatSelect(initial){
@@ -459,18 +533,22 @@ function renderSwPendingCard(row,container){
   const cand=(snap.candidates||[])[0];
   const net=swNetAmount(snap);
   const isReceivable=cand&&cand.role==="reimburse";
+  // AI-cleaned description + suggested category (falls back to the raw expense).
+  const cleanDesc=(row._ai&&row._ai.desc)||s.description;
+  const defaultCat=(row._ai&&row._ai.cat)||"other";
+  const finalDesc=isReceivable?`Reimbursed - ${cleanDesc}`:cleanDesc;
+
   const card=h("div",{style:{border:"1px solid rgba(255,255,255,0.07)",borderLeft:"3px solid var(--g)",borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
   const top=h("div",{style:{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"baseline"}});
-  top.append(h("div",{style:{color:"rgba(255,255,255,0.85)",fontWeight:"600",fontSize:"13px"}},s.description));
+  top.append(h("div",{style:{color:"rgba(255,255,255,0.85)",fontWeight:"600",fontSize:"13px"}},finalDesc));
   top.append(h("div",{class:"m",style:{color:net<0?"var(--g)":"rgba(255,255,255,0.75)",whiteSpace:"nowrap"}},fmtF(net)));
   card.append(top);
   card.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",marginTop:"2px"}},
     `${fmtD(s.date)} \u00b7 total ${s.cost} ${s.currency} \u00b7 ${isReceivable?`you're owed ${fmtF(-net)} (you paid)`:`you owe ${fmtF(net)}`}`));
 
-  // ── Link suggestion (receivable only): match the card charge you fronted ──
   let selectedMatch=null;
   const linkWrap=h("div",{style:{marginTop:"8px"}});
-  const catSel=swCatSelect("other");
+  const catSel=swCatSelect(defaultCat);
 
   const ctrlRow=h("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
   ctrlRow.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"Category"));
@@ -478,7 +556,7 @@ function renderSwPendingCard(row,container){
   const importBtn=h("button",{class:"pg-btn",style:{color:"var(--g)",borderColor:"rgba(129,178,154,0.3)"},onClick:async()=>{
     importBtn.disabled=true;importBtn.textContent="Importing\u2026";
     try{
-      const res=await importSplitwiseRow(row,catSel.value,selectedMatch);
+      const res=await importSplitwiseRow(row,catSel.value,selectedMatch,finalDesc);
       dcInvalidateTxns&&dcInvalidateTxns();
       showUndo(`\u2713 Imported ${res.count} transaction${res.count===1?"":"s"}${res.linked?" + linked":""}`,async()=>{
         await sb(`transactions?import_batch=eq.${encodeURIComponent(res.batchId)}`,{method:"DELETE"});
@@ -503,16 +581,57 @@ function renderSwPendingCard(row,container){
       linkWrap.innerHTML="";
       const lbl=h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",marginBottom:"4px"}},"Link to card charge");
       const sel=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none",maxWidth:"100%"}});
-      sel.append(h("option",{value:""},matches.length?"\u2014 don't link \u2014":"\u2014 no match found \u2014"));
-      matches.forEach((m,i)=>sel.append(h("option",{value:String(i)},`${fmtD(m.date)} \u00b7 ${m.description.slice(0,40)} \u00b7 ${fmtF(m.amount_usd)} \u00b7 ${m.payment_type||""}`)));
-      sel.addEventListener("change",()=>{
-        selectedMatch=sel.value===""?null:matches[+sel.value];
-        if(selectedMatch&&selectedMatch.category_id){catSel.value=selectedMatch.category_id;}
-      });
-      // Auto-select the closest match when it's an unambiguous amount match.
-      if(matches.length){sel.value="0";selectedMatch=matches[0];if(matches[0].category_id)catSel.value=matches[0].category_id;}
+      // Track matches by a stable key so a manually-searched txn can be added.
+      const opts=matches.slice();
+      function rebuildOptions(selectIdx){
+        sel.innerHTML="";
+        sel.append(h("option",{value:""},opts.length?"\u2014 don't link \u2014":"\u2014 no match \u2014 (search below)"));
+        opts.forEach((m,i)=>sel.append(h("option",{value:String(i)},`${fmtD(m.date)} \u00b7 ${(m.description||"").slice(0,40)} \u00b7 ${fmtF(m.amount_usd)} \u00b7 ${m.payment_type||""}`)));
+        if(selectIdx!=null){sel.value=String(selectIdx);}
+      }
+      function applySelection(){
+        selectedMatch=sel.value===""?null:opts[+sel.value];
+        if(selectedMatch&&selectedMatch.category_id)catSel.value=selectedMatch.category_id;
+        hint.textContent=selectedMatch?"Will link \u2192 net cost stays your share; category + dates inherited from the charge.":"Not linked \u2014 imported as a standalone Splitwise credit.";
+      }
+      sel.addEventListener("change",applySelection);
+      const hint=h("div",{style:{fontSize:"10px",color:"rgba(129,178,154,0.7)",marginTop:"4px"}});
+      rebuildOptions(matches.length?0:null);
       linkWrap.append(lbl,sel);
-      if(selectedMatch)linkWrap.append(h("div",{style:{fontSize:"10px",color:"rgba(129,178,154,0.7)",marginTop:"4px"}},"Will link \u2192 net cost stays your share; category inherited from the charge."));
+
+      // ── Manual search: link to a different transaction than the auto matches ──
+      const searchToggle=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"3px 8px",marginTop:"6px"},onClick:()=>{searchBox.classList.toggle("hidden")}},"Search for a different charge\u2026");
+      const searchBox=h("div",{class:"hidden",style:{marginTop:"6px"}});
+      const sInp=h("input",{class:"inp",type:"text",placeholder:"Search description\u2026",style:{fontSize:"11px",padding:"4px 8px"}});
+      const sBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"4px 8px",marginTop:"4px"}},"Search");
+      const sResults=h("div",{style:{marginTop:"4px",maxHeight:"160px",overflowY:"auto"}});
+      async function doSearch(){
+        const q=(sInp.value||"").trim();
+        if(!q){sResults.innerHTML="<div style='font-size:10px;color:rgba(255,255,255,0.3);padding:4px'>Type a search term.</div>";return}
+        sBtn.disabled=true;sBtn.textContent="\u2026";
+        try{
+          const found=await sb(`transactions?description=ilike.*${encodeURIComponent(q)}*&payment_type=neq.Splitwise&order=date.desc&limit=20&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id,service_start,service_end${ownerQS()}`);
+          sResults.innerHTML="";
+          if(!found.length){sResults.innerHTML="<div style='font-size:10px;color:rgba(255,255,255,0.3);padding:4px'>No matches.</div>"}
+          found.forEach(m=>{
+            const r=h("div",{style:{display:"flex",justifyContent:"space-between",gap:"8px",padding:"5px 6px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",fontSize:"11px"},onClick:()=>{
+              let idx=opts.findIndex(o=>o.id===m.id);
+              if(idx<0){opts.push(m);idx=opts.length-1;}
+              rebuildOptions(idx);applySelection();
+              searchBox.classList.add("hidden");
+            }});
+            r.append(h("div",{style:{color:"rgba(255,255,255,0.7)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},`${fmtD(m.date)} \u00b7 ${m.description}`));
+            r.append(h("div",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap"}},`${fmtF(m.amount_usd)} \u00b7 ${m.payment_type||""}`));
+            sResults.append(r);
+          });
+        }catch(e){sResults.innerHTML=`<div style='font-size:10px;color:var(--r);padding:4px'>Error: ${e.message}</div>`}
+        sBtn.disabled=false;sBtn.textContent="Search";
+      }
+      sBtn.addEventListener("click",doSearch);
+      sInp.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();doSearch()}});
+      searchBox.append(sInp,sBtn,sResults);
+      linkWrap.append(searchToggle,searchBox,hint);
+      applySelection();
     }).catch(()=>{linkWrap.innerHTML="<div style='font-size:11px;color:rgba(255,255,255,0.3)'>Could not search for a match.</div>"});
   }
   return card;
@@ -564,7 +683,7 @@ function renderSwChangedCard(row,container){
 // Build the single "Splitwise part" transaction row. When linked to a card
 // charge (match), inherit its category + service window so the credit accrues
 // per-day against the same period and the net cost lands on your share.
-function swBuildRow(cand,categoryId,batchId,match){
+function swBuildRow(cand,categoryId,batchId,match,descOverride){
   let cat=categoryId||cand.category_id||"other";
   let ss=cand.service_start||cand.date,se=cand.service_end||cand.date;
   if(match){
@@ -576,7 +695,7 @@ function swBuildRow(cand,categoryId,batchId,match){
   const amt=Math.round((parseFloat(cand.amount_usd)||0)*100)/100;
   return{
     date:cand.date,service_start:ss,service_end:se,
-    description:cand.description,category_id:cat,
+    description:descOverride||cand.description,category_id:cat,
     amount_usd:amt,original_amount:amt,currency:cand.currency||"USD",fx_rate:1,
     payment_type:cand.payment_type||"Splitwise",tag:"",
     service_days:days,daily_cost:Math.round(amt/days*1e6)/1e6,credit:"",
@@ -584,14 +703,14 @@ function swBuildRow(cand,categoryId,batchId,match){
   };
 }
 
-async function importSplitwiseRow(row,categoryId,matchTxn){
+async function importSplitwiseRow(row,categoryId,matchTxn,descOverride){
   const snap=row.raw||{};
   const cand=(snap.candidates||[])[0];
   if(!cand)throw new Error("No transaction to import.");
   const isReceivable=cand.role==="reimburse";
   const useMatch=isReceivable?(matchTxn||null):null;
   const batchId="splitwise-"+new Date().toISOString().slice(0,16)+"-"+row.expense_id;
-  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch);
+  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch,descOverride);
   const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify([txnRow])});
   const created=inserted[0];
   state.txnCount+=1;

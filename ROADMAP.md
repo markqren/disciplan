@@ -10,6 +10,15 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.8
+<sub>Splitwise sync refinements: AI parsing, sync window, manual linking, dismissed queue</sub>
+
+##### Features
+- **AI parsing for Splitwise imports** — New expenses now run through the same Claude categorization + description-cleanup pipeline used for CSV/email imports (merchant patterns, sample-description style, detected subscriptions, user rules). On load the review cards pre-fill the cleaned merchant name and suggested category (still editable), and import writes the cleaned description (`Reimbursed - <merchant>` for receivables), so Splitwise rows read like the rest of the ledger instead of raw Splitwise text. (~2,500 tokens)
+- **Choose the sync window** — Added a "Sync period" control to the card: New-since-last-sync (incremental default), Last 30/90 days, Last 6/12 months, All time, or a Custom From/To range. Explicit windows pass `dated_after`/`dated_before` to the Edge Function and force a date-range fetch (for backfills), overriding the incremental `updated_after`. (~1,500 tokens)
+- **Link to any transaction (manual search)** — The card-charge linker now has a "Search for a different charge" box: free-text search the ledger (non-Splitwise, by description) and pick any result to link the receivable to — not just the auto-matched candidates. Selected matches are added to the dropdown and inherit category + service window like the auto matches. (~1,500 tokens)
+- **Dismissed transactions, reviewable** — Dismissed Splitwise expenses now appear in a collapsible "Dismissed (N)" section at the bottom of the queue, each with a one-click Restore that flips the row back to `pending` so it can be re-imported. (~1,000 tokens)
+
 #### v2.6.7
 <sub>Splitwise sync foundation: dedup + update-detection via a mapping table</sub>
 

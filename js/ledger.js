@@ -1085,7 +1085,7 @@ async function renderLedger(el){
       const gid=t.transaction_group_id;
       const gSize=isLinked?groupCounts[gid]:0;
       const summary=gid?groupSummaries[gid]:null;
-      const isExpanded=state.expandedGroups.has(gid);
+      const isExpanded=state.expandedGroups.has(gid)||!!f.pt;
       // Group with 2+ members: render summary + child rows
       if(isLinked&&gSize>=2&&summary&&!renderedGroups.has(gid)){
         renderedGroups.add(gid);

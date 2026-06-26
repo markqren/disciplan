@@ -9,3 +9,8 @@ references/
 
 # Local DB dumps (sensitive)
 backups/
+
+# Local secrets (Supabase PAT for scripts/dbq.sh, etc.) — never commit
+.secrets/
+*.pat
+.env.local

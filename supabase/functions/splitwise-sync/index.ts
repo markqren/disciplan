@@ -232,13 +232,15 @@ Deno.serve(async (req) => {
 
   const body = await req.json().catch(() => ({}));
   const params = new URLSearchParams({ limit: String(FETCH_LIMIT) });
-  if (updatedAfter) {
+  if (body?.dated_after) {
+    // Explicit user-chosen window forces a date-range fetch (backfill / re-scan),
+    // overriding the incremental updated_after default.
+    params.set("dated_after", String(body.dated_after));
+    if (body?.dated_before) params.set("dated_before", String(body.dated_before));
+  } else if (updatedAfter) {
     params.set("updated_after", updatedAfter);
   } else {
-    const since = body?.dated_after
-      ? String(body.dated_after)
-      : new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * 864e5).toISOString();
-    params.set("dated_after", since);
+    params.set("dated_after", new Date(Date.now() - DEFAULT_LOOKBACK_DAYS * 864e5).toISOString());
   }
 
   // 5. Fetch expenses.
@@ -357,7 +359,11 @@ Deno.serve(async (req) => {
   return json({
     status: "ok",
     fetched: expenses.length,
-    window: updatedAfter ? { updated_after: updatedAfter } : { dated_after: params.get("dated_after") },
+    window: {
+      updated_after: params.get("updated_after"),
+      dated_after: params.get("dated_after"),
+      dated_before: params.get("dated_before"),
+    },
     counts,
   });
 });
