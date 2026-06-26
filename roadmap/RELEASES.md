@@ -9,6 +9,18 @@
 
 ## 🚀 Releases
 
+### v2.7 — Jun 25, 2026
+
+#### v2.7.0
+<sub>Import AI: learns recurring-subscription categories, fixes stale subscription months</sub>
+
+##### Fixes
+- **AI now learns recurring-subscription categories** — `get_merchant_patterns` / `_scoped` grouped by the *full* description, so every monthly charge ("Amazon Prime - June 2026", "Claude AI Subscription (Feb 2026)") counted as a unique group of 1, got dropped by `HAVING COUNT(*) > 2`, and never reached the AI's `HISTORICAL MERCHANT PATTERNS` map. New migration `20260626000002_merchant_patterns_normalized.sql` adds `disciplan.normalize_merchant()` (mirrors `normalizeMerchant` in `js/helpers.js`) and groups by the normalized merchant key *before* counting, so subscriptions accumulate across months and expose their dominant category. Amazon Prime / Claude (filed as Utilities for years) now surface as Utilities to the parser instead of guessing Tech/Personal. (~3,500 tokens)
+- **Prompt defers to history over hardcoded merchant rules** — The categorize prompt previously hardcoded "Subscriptions (CLAUDE.AI) -> tech" and "Amazon -> personal", actively overriding the user's own history. Those are now last-resort defaults; `HISTORICAL MERCHANT PATTERNS` is the authoritative signal (after user rules), with explicit instruction to use a merchant's dominant historical category even when it contradicts the generic defaults. (~1,000 tokens)
+- **Stale subscription month corrected deterministically** — The AI tended to copy a month from the few-shot sample descriptions (e.g. "April 2026" on a June charge). New `fixMonthSuffix()` rewrites any trailing `(Month YYYY)` / `- Month YYYY` to match the transaction's service month, applied in `applyAIResults`, so the displayed month always matches the accrual period regardless of what the model emitted. (~1,500 tokens)
+
+---
+
 ### v2.6 — Jun 20, 2026
 
 #### v2.6.9

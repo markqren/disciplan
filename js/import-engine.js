@@ -84,6 +84,9 @@ function applyAIResults(candidates,aiResults,detectedSubs){
     const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
     c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    // The AI often copies a stale month from the few-shot examples; force any
+    // trailing "(Month YYYY)"/"- Month YYYY" to match the service month.
+    if(c.description)c.description=fixMonthSuffix(c.description,c.service_start);
   }
   // Auto-apply month accrual for detected subscriptions
   if(detectedSubs&&detectedSubs.length){
@@ -96,6 +99,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
         const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
         c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
         c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+        if(c.description)c.description=fixMonthSuffix(c.description,c.service_start);
       }
     }
   }

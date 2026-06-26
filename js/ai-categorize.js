@@ -126,7 +126,13 @@ Key patterns:
 - Use Title Case for merchant names
 - Keep it concise but descriptive — the user should be able to remember what this was
 
-HISTORICAL MERCHANT PATTERNS (merchant -> {category: count}):
+HISTORICAL MERCHANT PATTERNS (normalized merchant key -> {category: count}):
+These are how the user has ACTUALLY categorized each merchant in the past. They are
+the highest-priority signal after USER-DEFINED RULES. Match a transaction to a key by
+its merchant words (ignore store numbers, codes, and month/date suffixes). When a key
+has a dominant category, USE IT even if it contradicts the generic defaults below
+(e.g. if "amazon prime" or "claude ai" map to utilities here, categorize them as
+utilities, not tech/personal).
 ${JSON.stringify(merchantPatterns)}
 
 SAMPLE OF USER'S EXISTING DESCRIPTIONS (for style reference):
@@ -150,11 +156,11 @@ For each transaction, return a JSON array of objects:
 
 Rules:
 - "desc" must be a clean, human-readable description matching the style guide above
-- Use historical patterns when available and clear (one dominant category >70%)
+- HISTORICAL MERCHANT PATTERNS win: if the merchant has a dominant category there, use it (overrides every default below)
 - Use bank category as a secondary signal but don't trust it blindly
 - "Shopping" from Chase is ambiguous — look at the merchant name and amount
-- Subscriptions (CLAUDE.AI, software) -> tech
-- Amazon -> personal unless description suggests otherwise
+- For a recurring "(Month YYYY)" suffix, ALWAYS derive the month/year from THIS transaction's date — never copy a month from the sample descriptions above
+- Defaults ONLY when the merchant has no history: software subscriptions -> tech; Amazon -> personal unless description suggests otherwise
 - Negative amounts (credits/refunds) that clearly offset an expense -> same category as the expense, NOT income
 - Positive amounts that are clearly income (paycheck, reimbursement) -> income
 - confidence: high = historical match or obvious merchant, medium = reasonable guess from bank category + description, low = ambiguous

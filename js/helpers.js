@@ -10,6 +10,22 @@ function getDefStart(cat,d){const r=ACCRUAL_D[cat];if(!r||!d)return d;if(r==="mo
 function getDefEnd(cat,ss){const r=ACCRUAL_D[cat];if(!r||!ss)return ss;if(r==="month")return endOfMonth(ss);return addDays(ss,r)}
 function getQuarterlyVestingPeriod(d){const dt=new Date(d+"T00:00:00"),y=dt.getFullYear(),m=dt.getMonth();if(m<3)return{start:`${y}-01-01`,end:`${y}-03-31`};if(m<6)return{start:`${y}-04-01`,end:`${y}-06-30`};if(m<9)return{start:`${y}-07-01`,end:`${y}-09-30`};return{start:`${y}-10-01`,end:`${y}-12-31`}}
 function convertMMDDYYYY(s){const p=s.split("/");return`${p[2]}-${p[0].padStart(2,"0")}-${p[1].padStart(2,"0")}`}
+const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
+function monthLabel(d){const dt=new Date(d+"T00:00:00");if(isNaN(dt))return"";return`${MONTH_NAMES[dt.getMonth()]} ${dt.getFullYear()}`}
+// Rewrite a trailing "(Month YYYY)" or "- Month YYYY" suffix to match the given
+// date's month. The AI tends to copy a stale month from the few-shot examples
+// (e.g. "April 2026" on a June charge), so we correct it deterministically while
+// preserving whichever format the model chose. No-op when no suffix is present.
+function fixMonthSuffix(desc,d){
+  if(!desc||!d)return desc;
+  const ml=monthLabel(d);if(!ml)return desc;
+  const mo="(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  const paren=new RegExp(`\\s*\\(\\s*${mo}\\s+20\\d{2}\\s*\\)\\s*$`,"i");
+  if(paren.test(desc))return desc.replace(paren,` (${ml})`);
+  const dash=new RegExp(`\\s*-\\s*${mo}\\s+20\\d{2}\\s*$`,"i");
+  if(dash.test(desc))return desc.replace(dash,` - ${ml}`);
+  return desc;
+}
 
 function parseCSV(text){
   const s=text.charCodeAt(0)===0xFEFF?text.slice(1):text;
