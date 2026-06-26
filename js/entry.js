@@ -527,6 +527,10 @@ async function findSwCardMatches(cand){
   return rows.sort((a,b)=>Math.abs(new Date(a.date)-new Date(d+"T00:00:00"))-Math.abs(new Date(b.date)-new Date(d+"T00:00:00")));
 }
 
+// Lazily-cached list of existing tag names for the import tag datalist.
+let _swTagsCache=null;
+function swTagNames(){if(!_swTagsCache)_swTagsCache=sb("tags?select=name&order=name").then(r=>(r||[]).map(t=>t.name)).catch(()=>[]);return _swTagsCache;}
+
 function renderSwPendingCard(row,container){
   const snap=row.raw||{};
   const s=swExpenseSummary(snap);
@@ -540,23 +544,47 @@ function renderSwPendingCard(row,container){
 
   const card=h("div",{style:{border:"1px solid rgba(255,255,255,0.07)",borderLeft:"3px solid var(--g)",borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
   const top=h("div",{style:{display:"flex",justifyContent:"space-between",gap:"8px",alignItems:"baseline"}});
-  top.append(h("div",{style:{color:"rgba(255,255,255,0.85)",fontWeight:"600",fontSize:"13px"}},finalDesc));
+  top.append(h("div",{style:{color:"rgba(255,255,255,0.55)",fontSize:"12px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},s.description));
   top.append(h("div",{class:"m",style:{color:net<0?"var(--g)":"rgba(255,255,255,0.75)",whiteSpace:"nowrap"}},fmtF(net)));
   card.append(top);
   card.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",marginTop:"2px"}},
     `${fmtD(s.date)} \u00b7 total ${s.cost} ${s.currency} \u00b7 ${isReceivable?`you're owed ${fmtF(-net)} (you paid)`:`you owe ${fmtF(net)}`}`));
+  if(row.dismissed_at)card.append(h("div",{style:{display:"inline-block",fontSize:"9px",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--y)",background:"rgba(242,204,143,0.12)",border:"1px solid rgba(242,204,143,0.25)",borderRadius:"4px",padding:"1px 6px",marginTop:"6px"}},`Previously dismissed \u00b7 ${fmtD((row.dismissed_at||"").slice(0,10))}`));
+
+  // ── Possible-duplicate flag (existing Splitwise-account transactions) ──
+  const dupWrap=h("div");
+  card.append(dupWrap);
+  if(cand)findSwDuplicates(cand,row).then(dups=>{
+    if(!dups.length)return;
+    const box=h("div",{style:{marginTop:"8px",border:"1px solid rgba(224,122,95,0.3)",background:"rgba(224,122,95,0.08)",borderRadius:"6px",padding:"6px 8px"}});
+    box.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--r)",marginBottom:"3px"}},`Possible duplicate (${dups.length})`));
+    dups.forEach(dp=>box.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.55)"}},`${fmtD(dp.date)} \u00b7 ${(dp.description||"").slice(0,44)} \u00b7 ${fmtF(dp.amount_usd)}`)));
+    dupWrap.append(box);
+  }).catch(()=>{});
+
+  // ── Editable label ──
+  const descInp=h("input",{class:"inp",type:"text",value:finalDesc,style:{marginTop:"8px",fontSize:"12px",padding:"6px 8px"}});
 
   let selectedMatch=null;
   const linkWrap=h("div",{style:{marginTop:"8px"}});
   const catSel=swCatSelect(defaultCat);
 
+  // ── Tag input (datalist of existing tags) ──
+  const tagListId=`swtags-${row.expense_id}`;
+  const tagList=h("datalist",{id:tagListId});
+  swTagNames().then(names=>names.forEach(n=>tagList.append(h("option",{value:n}))));
+  const tagInp=h("input",{class:"inp",type:"text",placeholder:"tag (optional)",list:tagListId,style:{fontSize:"11px",padding:"4px 8px",maxWidth:"160px"}});
+
+  card.append(descInp);
+
   const ctrlRow=h("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
   ctrlRow.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"Category"));
-  ctrlRow.append(catSel);
+  ctrlRow.append(catSel,tagInp,tagList);
   const importBtn=h("button",{class:"pg-btn",style:{color:"var(--g)",borderColor:"rgba(129,178,154,0.3)"},onClick:async()=>{
     importBtn.disabled=true;importBtn.textContent="Importing\u2026";
     try{
-      const res=await importSplitwiseRow(row,catSel.value,selectedMatch,finalDesc);
+      const finalLabel=(descInp.value||"").trim()||finalDesc;
+      const res=await importSplitwiseRow(row,catSel.value,selectedMatch,finalLabel,tagInp.value);
       dcInvalidateTxns&&dcInvalidateTxns();
       showUndo(`\u2713 Imported ${res.count} transaction${res.count===1?"":"s"}${res.linked?" + linked":""}`,async()=>{
         await sb(`transactions?import_batch=eq.${encodeURIComponent(res.batchId)}`,{method:"DELETE"});
@@ -647,6 +675,7 @@ function renderSwChangedCard(row,container){
   card.append(h("div",{style:{color:"rgba(255,255,255,0.85)",fontWeight:"600",fontSize:"13px"}},newS.description||oldS.description));
   card.append(h("div",{style:{fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:isDeleted?"var(--r)":"var(--y)",margin:"4px 0 6px"}},
     isDeleted?"Deleted in Splitwise":"Updated in Splitwise"));
+  if(row.dismissed_at)card.append(h("div",{style:{display:"inline-block",fontSize:"9px",textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--y)",background:"rgba(242,204,143,0.12)",border:"1px solid rgba(242,204,143,0.25)",borderRadius:"4px",padding:"1px 6px",marginBottom:"6px"}},`Previously dismissed \u00b7 ${fmtD((row.dismissed_at||"").slice(0,10))}`));
 
   function diffLine(label,oldV,newV){
     const changedV=String(oldV)!==String(newV);
@@ -683,7 +712,7 @@ function renderSwChangedCard(row,container){
 // Build the single "Splitwise part" transaction row. When linked to a card
 // charge (match), inherit its category + service window so the credit accrues
 // per-day against the same period and the net cost lands on your share.
-function swBuildRow(cand,categoryId,batchId,match,descOverride){
+function swBuildRow(cand,categoryId,batchId,match,descOverride,tag){
   let cat=categoryId||cand.category_id||"other";
   let ss=cand.service_start||cand.date,se=cand.service_end||cand.date;
   if(match){
@@ -697,20 +726,22 @@ function swBuildRow(cand,categoryId,batchId,match,descOverride){
     date:cand.date,service_start:ss,service_end:se,
     description:descOverride||cand.description,category_id:cat,
     amount_usd:amt,original_amount:amt,currency:cand.currency||"USD",fx_rate:1,
-    payment_type:cand.payment_type||"Splitwise",tag:"",
+    payment_type:cand.payment_type||"Splitwise",tag:tag||"",
     service_days:days,daily_cost:Math.round(amt/days*1e6)/1e6,credit:"",
     import_batch:batchId
   };
 }
 
-async function importSplitwiseRow(row,categoryId,matchTxn,descOverride){
+async function importSplitwiseRow(row,categoryId,matchTxn,descOverride,tag){
   const snap=row.raw||{};
   const cand=(snap.candidates||[])[0];
   if(!cand)throw new Error("No transaction to import.");
   const isReceivable=cand.role==="reimburse";
   const useMatch=isReceivable?(matchTxn||null):null;
+  const cleanTag=(tag||"").toLowerCase().trim();
+  if(cleanTag)await ensureTagExists(cleanTag);
   const batchId="splitwise-"+new Date().toISOString().slice(0,16)+"-"+row.expense_id;
-  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch,descOverride);
+  const txnRow=swBuildRow(cand,categoryId,batchId,useMatch,descOverride,cleanTag);
   const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify([txnRow])});
   const created=inserted[0];
   state.txnCount+=1;
@@ -799,5 +830,22 @@ async function keepSplitwiseVersion(row){
 }
 
 async function dismissSplitwiseRow(row){
-  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed"})});
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
+}
+
+// Fuzzy duplicate check against transactions already on the Splitwise account
+// (manually entered, or imported some other way). Matches on net amount (±2% or
+// $0.50) and date (±7 days); the user judges the label. Excludes the rows this
+// expense already created so re-renders don't self-flag.
+async function findSwDuplicates(cand,row){
+  const amt=Math.round((parseFloat(cand.amount_usd)||0)*100)/100;
+  if(!amt)return[];
+  const tol=Math.max(0.5,Math.abs(amt)*0.02);
+  const lo=Math.round((amt-tol)*100)/100,hi=Math.round((amt+tol)*100)/100;
+  const d=cand.date;
+  const from=new Date(new Date(d+"T00:00:00").getTime()-7*864e5).toISOString().slice(0,10);
+  const to=new Date(new Date(d+"T00:00:00").getTime()+7*864e5).toISOString().slice(0,10);
+  const rows=await sb(`transactions?payment_type=eq.Splitwise&amount_usd=gte.${lo}&amount_usd=lte.${hi}&date=gte.${from}&date=lte.${to}&order=date.desc&limit=5&select=id,date,description,amount_usd${ownerQS()}`);
+  const ownIds=new Set([row?.expense_txn_id,row?.reimburse_txn_id].filter(Boolean));
+  return rows.filter(r=>!ownIds.has(r.id));
 }

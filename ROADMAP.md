@@ -10,6 +10,14 @@
 
 ### v2.6 — Jun 20, 2026
 
+#### v2.6.9
+<sub>Splitwise import: editable labels, tags, duplicate flagging, dismissed memory</sub>
+
+##### Features
+- **Editable label + tags on Splitwise import** — Each new-expense card now has an editable description field (pre-filled with the AI suggestion) and an optional tag input backed by a datalist of existing tags (auto-creates the tag via `ensureTagExists` on import). Because the corrected label is written straight to `transactions`, it feeds the same merchant-pattern / sample-description learning the AI uses for every future import — so corrections refine the model over time. (~2,000 tokens)
+- **Fuzzy duplicate flagging** — Before importing, each card cross-references existing **Splitwise-account** transactions (manually entered or imported another way) and flags a "Possible duplicate" if one matches on net amount (±2% / $0.50) and date (±7 days), listing the candidates so you can judge by label. This complements the exact `expense_id` dedup for rows that entered the ledger outside the sync. (~1,500 tokens)
+- **Dismissed memory** — Dismissing an expense now records `dismissed_at` (migration `20260626000001_splitwise_dismissed_at.sql`). A dismissed expense is re-surfaced only when it materially changes in Splitwise (or is manually Restored), and whenever it reappears the card shows a "Previously dismissed" badge with the date — so you never silently re-review something you already decided on. (~2,000 tokens)
+
 #### v2.6.8
 <sub>Splitwise sync refinements: AI parsing, sync window, manual linking, dismissed queue</sub>
 

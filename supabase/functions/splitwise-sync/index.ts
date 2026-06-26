@@ -302,12 +302,30 @@ Deno.serve(async (req) => {
     }
 
     const status = existing.sync_status as string;
+    const contentChanged = hash !== existing.content_hash;
 
     if (status === "dismissed") {
-      await supabase.from("splitwise_expenses")
-        .update({ last_synced_at: nowIso })
-        .eq("expense_id", expense.id);
-      counts.skipped++;
+      // Re-surface a dismissed expense only when it materially changed (and still
+      // has a Splitwise effect). dismissed_at is kept so the card flags it as
+      // "previously dismissed". Otherwise leave it dismissed (don't nag).
+      if (contentChanged && !swDeleted && snapshot.candidates.length > 0) {
+        await supabase.from("splitwise_expenses")
+          .update({
+            sync_status: "pending",
+            sw_updated_at: swUpdated,
+            sw_deleted_at: swDeleted,
+            content_hash: hash,
+            raw: snapshot,
+            last_synced_at: nowIso,
+          })
+          .eq("expense_id", expense.id);
+        counts.changed++;
+      } else {
+        await supabase.from("splitwise_expenses")
+          .update({ last_synced_at: nowIso })
+          .eq("expense_id", expense.id);
+        counts.skipped++;
+      }
       continue;
     }
 
@@ -337,7 +355,6 @@ Deno.serve(async (req) => {
 
     // status === 'imported'
     const becameDeleted = !!swDeleted && !existing.sw_deleted_at;
-    const contentChanged = hash !== existing.content_hash;
     if (becameDeleted || contentChanged) {
       await supabase.from("splitwise_expenses")
         .update({
