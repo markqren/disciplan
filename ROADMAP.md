@@ -10,6 +10,12 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.3
+<sub>Balance Adjustment sign fix</sub>
+
+##### Fixes
+- **Balance Adjustment no longer flips the sign on mis-classified accounts** — The modal previously normalized liability-type accounts via `target = -abs(entered)`, which mangled the plug for an account typed as a liability but holding a positive balance (e.g. Venmo at +$1,474.01 → a $2,922.11 adjustment instead of $25.91). The entered value is now taken literally as displayed on the Balance Sheet (assets positive, liabilities negative) with no sign flipping, so `delta = net − target` is always correct regardless of classification. Input prefills with the signed current balance and the label/hint were updated accordingly. (~1,000 tokens)
+
 #### v2.7.2
 <sub>Right-click balance adjustment on the Balance Sheet</sub>
 

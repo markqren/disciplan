@@ -210,31 +210,32 @@ function showAcctContextMenu(x,y,name,isAsset,bal){
   setTimeout(()=>{document.addEventListener("mousedown",close);document.addEventListener("contextmenu",close);window.addEventListener("blur",close)},0);
 }
 
-// Modal: set an account's real current value. Computes the plug (delta) needed
-// and writes one category="adjustment" transaction so the live ledger balance
-// matches reality. Liabilities are stored negative, so any sign the user types
-// is normalized via -abs().
-function showBalanceAdjustment(name,isAsset,fallbackBal){
+// Modal: set an account's real current value. The target is taken literally as
+// shown on the Balance Sheet (assets positive, liabilities negative) — no sign
+// flipping — so it works regardless of how the account is classified. Writes one
+// category="adjustment" transaction (amount_usd = net - target) to true up the
+// live ledger without touching the income statement.
+function showBalanceAdjustment(name,_isAsset,fallbackBal){
   const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
   const modal=h("div",{class:"modal",style:{maxWidth:"440px"}});
   modal.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><h2 style="font-size:20px;margin:0">Balance Adjustment</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${name}</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">\u2715</button></div>`;
 
   const liveRow=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.6)",marginBottom:"14px"}},"Current ledger balance: \u2026");
-  const valLbl=h("label",{class:"lbl"},isAsset?"Current value":"Current value (amount owed)");
+  const valLbl=h("label",{class:"lbl"},"New value (as shown on Balance Sheet)");
   const valInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"0.00",style:{maxWidth:"200px",fontFamily:"var(--mono)"}});
   const valField=h("div",{style:{marginBottom:"14px"}});valField.append(valLbl,valInp);
+  const hint=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",marginTop:"-8px",marginBottom:"14px"}},"Enter the value exactly as it appears on the sheet (liabilities are negative).");
   const preview=h("div",{style:{fontSize:"12px",lineHeight:"1.7",margin:"4px 0 14px"}});
   const saveBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},disabled:true},"Create Adjustment");
 
-  modal.append(liveRow,valField,preview,saveBtn);
+  modal.append(liveRow,valField,hint,preview,saveBtn);
   bg.append(modal);document.body.append(bg);
 
   let net=fallbackBal;
   function recompute(){
-    const raw=parseFloat(valInp.value);
-    if(isNaN(raw)){preview.innerHTML="";saveBtn.disabled=true;return}
-    const target=isAsset?raw:-Math.abs(raw);
+    const target=parseFloat(valInp.value);
+    if(isNaN(target)){preview.innerHTML="";saveBtn.disabled=true;return}
     const delta=Math.round((net-target)*100)/100;
     if(Math.abs(delta)<0.01){
       preview.innerHTML=`<div style="color:var(--g)">\u2713 Already at ${fmtF(target)} \u2014 no adjustment needed.</div>`;
@@ -252,14 +253,13 @@ function showBalanceAdjustment(name,isAsset,fallbackBal){
     const found=(bals||[]).find(b=>b.payment_type===name);
     if(found)net=parseFloat(found.net_balance)||0;
     liveRow.textContent=`Current ledger balance: ${fmtF(net)}`;
-    valInp.value=(isAsset?net:Math.abs(net)).toFixed(2);
+    valInp.value=net.toFixed(2);
     valInp.focus();valInp.select();
     recompute();
-  }).catch(()=>{liveRow.textContent=`Current ledger balance: ${fmtF(net)} (cached)`;valInp.value=(isAsset?net:Math.abs(net)).toFixed(2);recompute()});
+  }).catch(()=>{liveRow.textContent=`Current ledger balance: ${fmtF(net)} (cached)`;valInp.value=net.toFixed(2);recompute()});
 
   saveBtn.addEventListener("click",async()=>{
-    const raw=parseFloat(valInp.value);if(isNaN(raw))return;
-    const target=isAsset?raw:-Math.abs(raw);
+    const target=parseFloat(valInp.value);if(isNaN(target))return;
     const delta=Math.round((net-target)*100)/100;
     if(Math.abs(delta)<0.01)return;
     saveBtn.disabled=true;saveBtn.textContent="Creating\u2026";
