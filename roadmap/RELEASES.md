@@ -11,6 +11,12 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.6
+<sub>Migration history reconciliation</sub>
+
+##### Infra
+- **Reconciled the Supabase migration history** — `supabase db push` had been failing with "Remote migration versions not found in local migrations directory" and migrations kept showing as un-applied even though their objects were live. Root causes: migrations applied out-of-band (dashboard SQL editor / `db query`, which don't record history), eight legacy 8-digit `YYYYMMDD` version names the CLI can't parse, and two duplicate version numbers (`20260410`, `20260626000003`). Fixed by normalizing all version filenames to valid 14-digit timestamps, renaming the duplicate `splitwise_friend_map` to `…0004`, and repairing the remote history table to match (every object was verified already-applied, so it was bookkeeping only — no SQL re-ran). `migration list` is now fully aligned and `db push` reports "up to date". Also deployed two previously-orphaned migrations (`get_tag_summaries_by_owner`, `normalize_merchant`). Runbook + prevention rules in `tasks/migration-history-reconcile.md`. (~9,000 tokens)
+
 #### v2.7.5
 <sub>Splitwise write-back: push reimbursements as Splitwise expenses</sub>
 
