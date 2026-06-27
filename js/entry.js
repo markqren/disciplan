@@ -4,7 +4,7 @@ function renderEntry(el){
   card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">New Transaction</h3><span id="okMsg" class="ok-msg hidden">✓ Saved to Supabase</span></div>`;
 
   const t=today();
-  let f={date:t,desc:"",cat:"groceries",amt:"",cur:"USD",pt:"Chase Sapphire",tag:"",fx:"",ss:t,se:getDefEnd("groceries",t),seManual:false};
+  let f={date:t,desc:"",cat:"groceries",amt:"",cur:"USD",pt:"Chase Sapphire",tag:"",fx:"",ss:t,se:getDefEnd("groceries",t),seManual:false,transfer:false,toPt:"Cash"};
 
   function row(...children){const d=h("div",{style:{display:"grid",gridTemplateColumns:children.length===3?"1fr 1fr 1fr":children.length===2?"1fr 1fr":"1fr 2fr",gap:"12px",marginBottom:"14px"}});children.forEach(c=>d.append(c));return d}
   function field(lbl,input){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(input);return d}
@@ -12,7 +12,7 @@ function renderEntry(el){
   const dateInp=h("input",{class:"inp",type:"date",value:f.date,onInput:e=>{f.date=e.target.value}});
   const descInp=h("input",{class:"inp",type:"text",placeholder:"e.g., Whole Foods groceries",onInput:e=>{f.desc=e.target.value}});
 
-  const catSel=h("select",{class:"inp",onChange:e=>{f.cat=e.target.value;if(!f.seManual){f.ss=getDefStart(f.cat,f.date)||f.date;ssInp.value=f.ss;f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se;updateHint()}updatePreview()}});
+  const catSel=h("select",{class:"inp",onChange:e=>{f.cat=e.target.value;if(!f.seManual){f.ss=getDefStart(f.cat,f.date)||f.date;ssInp.value=f.ss;f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se;updateHint()}updateXferVisibility()}});
   CATS_LIST.forEach(c=>{const o=h("option",{value:c.id},c.l);if(c.id==="groceries")o.selected=true;catSel.append(o)});
 
   const amtInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"0.00",onInput:e=>{f.amt=e.target.value;updatePreview()}});
@@ -40,13 +40,32 @@ function renderEntry(el){
   const creditSel=buildCreditSelect("");
   const creditRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
   creditRow.append(field("Credit Sub-Account",creditSel));
-  const ptSel=h("select",{class:"inp",onChange:e=>{f.pt=e.target.value;creditRow.style.display=f.pt==="Transfer"?"grid":"none"}});
+  const ptSel=h("select",{class:"inp",onChange:e=>{f.pt=e.target.value;creditRow.style.display=f.pt==="Transfer"?"grid":"none";updatePreview()}});
   PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Chase Sapphire")o.selected=true;ptSel.append(o)});
+  const ptLabel=h("label",{class:"lbl"},"Payment Account");
+  const ptField=h("div");ptField.append(ptLabel,ptSel);
+  const toPtSel=h("select",{class:"inp",onChange:e=>{f.toPt=e.target.value;updatePreview()}});
+  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Cash")o.selected=true;toPtSel.append(o)});
+  const toRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
+  toRow.append(field("To Account",toPtSel));
   const tagInp=h("input",{class:"inp",type:"text",placeholder:"e.g., cozumel",onInput:e=>f.tag=e.target.value});
 
   const previewEl=h("div",{class:"preview hidden",id:"entryPreview"});
   function updatePreview(){
-    const a=parseFloat(f.amt);if(isNaN(a)||!f.ss||!f.se){previewEl.classList.add("hidden");return}
+    const a=parseFloat(f.amt);
+    if(f.transfer){
+      if(isNaN(a)||a<=0){previewEl.classList.add("hidden");return}
+      const fx=f.fx?parseFloat(f.fx):DFX[f.cur]||1;
+      const usd=Math.round((f.cur==="USD"?Math.abs(a):Math.abs(a)*fx)*100)/100;
+      const same=f.pt===f.toPt;
+      previewEl.classList.remove("hidden");
+      previewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Balance Transfer</div>
+      <div style="font-size:13px;color:rgba(255,255,255,0.7)">Moves <b style="font-family:var(--mono)">${fmtF(usd)}</b> from <b>${f.pt}</b> \u2192 <b>${f.toPt}</b></div>
+      <div style="font-size:11px;color:rgba(129,178,154,0.7);margin-top:4px">Creates 2 linked rows \u00b7 nets to ${fmtF(0)}</div>
+      ${same?`<div style="font-size:11px;color:var(--r);margin-top:4px">Pick two different accounts.</div>`:""}`;
+      return;
+    }
+    if(isNaN(a)||!f.ss||!f.se){previewEl.classList.add("hidden");return}
     const ss=new Date(f.ss+"T00:00:00"),se=new Date(f.se+"T00:00:00");
     if(se<ss){previewEl.classList.add("hidden");return}
     const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
@@ -63,9 +82,49 @@ function renderEntry(el){
     </div>`;
   }
 
+  function applyXferMode(){
+    if(f.transfer){ptLabel.textContent="From Account";toRow.style.display="grid"}
+    else{ptLabel.textContent="Payment Account";toRow.style.display="none"}
+    submitBtn.textContent=f.transfer?"Add Transfer":"Add Transaction";
+    updatePreview();
+  }
+  function updateXferVisibility(){
+    const isFin=f.cat==="financial";
+    xferWrap.classList.toggle("hidden",!isFin);
+    if(!isFin&&f.transfer){f.transfer=false;xferChk.checked=false}
+    applyXferMode();
+  }
+
   const submitBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
     const a=parseFloat(f.amt);if(isNaN(a)||!f.desc)return;
     const fx=f.fx?parseFloat(f.fx):DFX[f.cur]||1;
+    if(f.transfer){
+      if(f.pt===f.toPt){alert("Pick two different accounts for a transfer.");return}
+      const orig=Math.abs(a);
+      const usd=Math.round((f.cur==="USD"?orig:orig*fx)*100)/100;
+      submitBtn.textContent="Saving...";
+      try{
+        const tagVal=f.tag.toLowerCase().trim();
+        if(tagVal)await ensureTagExists(tagVal);
+        const legs=[{pt:f.pt,usd:usd,oa:orig,sfx:`(from ${f.pt})`},{pt:f.toPt,usd:-usd,oa:-orig,sfx:`(to ${f.toPt})`}];
+        const body=legs.map(l=>({date:f.date,service_start:f.date,service_end:f.date,description:`${f.desc} ${l.sfx}`,category_id:"financial",original_amount:l.oa,currency:f.cur,fx_rate:fx,amount_usd:l.usd,payment_type:l.pt,tag:tagVal,daily_cost:l.usd,service_days:1,credit:"",is_subscription:false}));
+        const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(body)});
+        dcInvalidateTxns();
+        const ids=(created||[]).map(c=>c.id).filter(Boolean);
+        if(ids.length===2)await linkToGroup({id:ids[0],transaction_group_id:null},{id:ids[1],transaction_group_id:null});
+        const savedDesc=f.desc;
+        descInp.value="";amtInp.value="";tagInp.value="";f.desc="";f.amt="";f.tag="";
+        previewEl.classList.add("hidden");
+        state.txnCount+=ids.length;
+        document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        if(ids.length)showUndo("\u2713 Transfer: "+savedDesc,async()=>{
+          await sb(`transactions?id=in.(${ids.join(",")})`,{method:"DELETE"});
+          state.txnCount-=ids.length;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        });
+      }catch(e){alert("Error: "+e.message)}
+      submitBtn.textContent=f.transfer?"Add Transfer":"Add Transaction";
+      return;
+    }
     const isInc=f.cat==="income";
     const orig=isInc?-Math.abs(a):a;
     const usd=f.cur==="USD"?orig:orig*fx;
@@ -101,10 +160,16 @@ function renderEntry(el){
   const subChk=h("input",{type:"checkbox",style:{accentColor:"var(--g)",cursor:"pointer"}});
   const subLabel=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"rgba(255,255,255,0.6)",cursor:"pointer"}});
   subLabel.append(subChk,document.createTextNode("Subscription"));
-  const subWrap=h("div",{style:{display:"flex",alignItems:"flex-end",paddingBottom:"4px"}});
-  subWrap.append(subLabel);
-  card.append(row(field("Payment Account",ptSel),field("Tag (optional)",tagInp),subWrap));
+  const xferChk=h("input",{type:"checkbox",style:{accentColor:"var(--b)",cursor:"pointer"},onChange:()=>{f.transfer=xferChk.checked;applyXferMode()}});
+  const xferLabel=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"rgba(255,255,255,0.6)",cursor:"pointer"}});
+  xferLabel.append(xferChk,document.createTextNode("Balance transfer / withdrawal"));
+  const xferWrap=h("div",{class:f.cat==="financial"?"":"hidden"});
+  xferWrap.append(xferLabel);
+  const subWrap=h("div",{style:{display:"flex",flexDirection:"column",gap:"8px",justifyContent:"flex-end",paddingBottom:"4px"}});
+  subWrap.append(subLabel,xferWrap);
+  card.append(row(ptField,field("Tag (optional)",tagInp),subWrap));
   card.append(creditRow);
+  card.append(toRow);
   card.append(previewEl);
   card.append(submitBtn);
   el.append(card);
@@ -369,7 +434,7 @@ function renderEntry(el){
   let swOpen=false;
   const swHdr=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"},onClick:()=>{
     swOpen=!swOpen;swArrow.textContent=swOpen?"\u25BE":"\u25B8";swBody.classList.toggle("hidden");
-    if(swOpen&&!swBody._loaded){swBody._loaded=true;loadSplitwiseSync(swReview)}
+    if(swOpen&&!swBody._loaded){swBody._loaded=true;refreshSwAccount();loadSplitwiseSync(swReview)}
   }});
   const swArrow=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},"\u25B8");
   swHdr.append(swArrow,h("h3",{style:{margin:"0"}},"\uD83D\uDD17 Splitwise Sync"));
@@ -410,7 +475,49 @@ function renderEntry(el){
   }},"Sync now");
   const swStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
   const swReview=h("div");
-  swBody.append(field("Sync period",swPeriodSel),swCustom,swBtn,swStatus,swReview);
+
+  // ── Per-account connection (FEA-29D) ──
+  // Each logged-in user connects their OWN Splitwise key; the sync controls are
+  // gated until a connection exists so no one syncs against another's account.
+  const swAccountLine=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.55)",marginBottom:"10px"}});
+  const swKeyInp=h("input",{class:"inp",type:"password",placeholder:"Paste your Splitwise API key",style:{maxWidth:"320px"}});
+  const swConnectBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)",marginTop:"8px"}},"Connect Splitwise");
+  const swConnectWrap=h("div",{class:"hidden",style:{marginBottom:"12px"}});
+  swConnectWrap.append(
+    h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",marginBottom:"6px"}},"Get a key at secure.splitwise.com \u2192 Your account \u2192 API keys. Stored server-side only."),
+    swKeyInp,h("div",{},swConnectBtn)
+  );
+  const swControls=h("div",{class:"hidden"});
+  swControls.append(field("Sync period",swPeriodSel),swCustom,swBtn,swStatus,swReview);
+  swBody.append(swAccountLine,swConnectWrap,swControls);
+
+  async function refreshSwAccount(){
+    swAccountLine.textContent="Checking Splitwise connection\u2026";
+    try{
+      const st=await swAccountStatus();
+      if(st.connected){
+        swAccountLine.innerHTML="";
+        const who=st.name?`Connected as ${st.name}`:"Connected (shared key)";
+        swAccountLine.append(h("span",{},`\u2705 ${who}`));
+        swAccountLine.append(h("span",{style:{marginLeft:"10px",color:"var(--b)",cursor:"pointer",fontSize:"11px"},onClick:()=>swConnectWrap.classList.toggle("hidden")},"Change key"));
+        swControls.classList.remove("hidden");
+        swConnectWrap.classList.add("hidden");
+      }else{
+        swAccountLine.textContent="Not connected to Splitwise.";
+        swConnectWrap.classList.remove("hidden");
+        swControls.classList.add("hidden");
+      }
+    }catch(e){swAccountLine.textContent="Connection check failed: "+e.message}
+  }
+  swConnectBtn.onclick=async()=>{
+    const key=swKeyInp.value.trim();
+    if(!key){swKeyInp.focus();return}
+    swConnectBtn.disabled=true;swConnectBtn.textContent="Connecting\u2026";
+    try{await swSetKey(key);swKeyInp.value="";await refreshSwAccount();}
+    catch(e){alert("Connect failed: "+e.message)}
+    swConnectBtn.disabled=false;swConnectBtn.textContent="Connect Splitwise";
+  };
+
   swCard.append(swBody);
   el.append(swCard);
 
@@ -434,8 +541,8 @@ async function loadSplitwiseSync(container){
   container.innerHTML="<div style='text-align:center;padding:20px;color:rgba(255,255,255,0.3)'>Loading\u2026</div>";
   try{
     const [active,dismissed]=await Promise.all([
-      sb(`splitwise_expenses?sync_status=in.(pending,needs_review)&order=last_synced_at.desc${ownerQS()}`),
-      sb(`splitwise_expenses?sync_status=eq.dismissed&order=last_synced_at.desc&limit=100${ownerQS()}`)
+      sb(`splitwise_expenses?sync_status=in.(pending,needs_review)&order=last_synced_at.desc${importerQS()}`),
+      sb(`splitwise_expenses?sync_status=eq.dismissed&order=last_synced_at.desc&limit=100${importerQS()}`)
     ]);
     const pending=active.filter(r=>r.sync_status==="pending");
     if(pending.length&&aiAvailable()){
@@ -538,7 +645,7 @@ function renderSwDismissedSection(container,dismissed){
     info.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.3)"}},`${fmtD(s.date)} \u00b7 ${fmtF(net)}`));
     const restore=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"4px 8px",flexShrink:"0"},onClick:async()=>{
       restore.disabled=true;restore.textContent="\u2026";
-      try{await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"pending"})});item.remove();}
+      try{await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"pending"})});item.remove();}
       catch(e){alert("Failed: "+e.message);restore.disabled=false;restore.textContent="Restore"}
     }},"Restore");
     item.append(info,restore);
@@ -648,7 +755,7 @@ function renderSwPendingCard(row,container){
       showUndo(`\u2713 Imported ${res.count} transaction${res.count===1?"":"s"}${res.linked?" + linked":""}`,async()=>{
         await sb(`transactions?import_batch=eq.${encodeURIComponent(res.batchId)}`,{method:"DELETE"});
         if(res.matchId)await sb(`transactions?id=eq.${res.matchId}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:res.priorGroup||null})});
-        await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"pending",expense_txn_id:null,reimburse_txn_id:null,transaction_group_id:null,first_imported_at:null})});
+        await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"pending",expense_txn_id:null,reimburse_txn_id:null,transaction_group_id:null,first_imported_at:null})});
       });
       card.remove();
     }catch(e){alert("Import failed: "+e.message);importBtn.disabled=false;importBtn.textContent="Import";}
@@ -827,7 +934,7 @@ async function importSplitwiseRow(row,categoryId,matchTxn,descOverride,tag,svc){
   }else{
     expenseTxnId=created?.id||null;
   }
-  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
     sync_status:"imported",
     expense_txn_id:expenseTxnId,reimburse_txn_id:reimburseTxnId,transaction_group_id:groupId,
     first_imported_at:new Date().toISOString()
@@ -849,7 +956,7 @@ async function applySplitwiseUpdate(row){
   const isDeleted=!!(snap.expense&&snap.expense.deleted_at);
   if(isDeleted||!cand){
     document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
-    await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+    await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
       sync_status:"dismissed",raw:snap,pending_raw:null,
       sw_updated_at:snap.expense?.updated_at||null,sw_deleted_at:snap.expense?.deleted_at||null,content_hash:snap.content_hash||null,
       expense_txn_id:null,reimburse_txn_id:null,transaction_group_id:null
@@ -880,7 +987,7 @@ async function applySplitwiseUpdate(row){
   }else{
     expenseTxnId=created?.id||null;
   }
-  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
     sync_status:"imported",raw:snap,pending_raw:null,
     sw_updated_at:snap.expense?.updated_at||null,sw_deleted_at:null,content_hash:snap.content_hash||null,
     expense_txn_id:expenseTxnId,reimburse_txn_id:reimburseTxnId,transaction_group_id:groupId
@@ -891,21 +998,21 @@ async function applySplitwiseUpdate(row){
 // Advances the tracking pointers so the expense is not re-flagged next sync.
 async function keepSplitwiseVersion(row){
   const snap=row.pending_raw||{};
-  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
     sync_status:"imported",pending_raw:null,
     sw_updated_at:snap.expense?.updated_at||null,sw_deleted_at:snap.expense?.deleted_at||null,content_hash:snap.content_hash||null
   })});
 }
 
 async function dismissSplitwiseRow(row){
-  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
+  await sb(`splitwise_expenses?expense_id=eq.${row.expense_id}${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
 }
 
 // Bulk-dismiss a batch of pending rows in a single request.
 async function bulkDismissSplitwise(rows){
   const ids=rows.map(r=>r.expense_id).filter(v=>v!=null);
   if(!ids.length)return;
-  await sb(`splitwise_expenses?expense_id=in.(${ids.join(",")})`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
+  await sb(`splitwise_expenses?expense_id=in.(${ids.join(",")})${importerQS()}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sync_status:"dismissed",dismissed_at:new Date().toISOString()})});
 }
 
 // Fuzzy duplicate check against transactions already on the Splitwise account

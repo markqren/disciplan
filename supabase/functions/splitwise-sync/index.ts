@@ -176,8 +176,9 @@ async function handleCreateExpense(
   body: any,
   currentUserId: number,
   supabase: any,
-  owner: string | null,
+  owner: string,
   householdId: number | null,
+  swKey: string,
 ) {
   const friendId = Number(body?.friend_user_id);
   const cost = round2(body?.cost);
@@ -214,7 +215,7 @@ async function handleCreateExpense(
     const r = await fetch(`${SW_BASE}/create_expense`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${SPLITWISE_API_KEY}`,
+        Authorization: `Bearer ${swKey}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body: form.toString(),
@@ -247,7 +248,7 @@ async function handleCreateExpense(
       transaction_group_id: body?.transaction_group_id ?? null,
       first_imported_at: new Date().toISOString(),
       last_synced_at: new Date().toISOString(),
-    }, { onConflict: "expense_id" });
+    }, { onConflict: "owner,expense_id" });
   } catch (e) {
     // The expense exists in Splitwise; only the dedup bookkeeping failed.
     return json({ status: "ok", expense_id: created.id, warning: "mapping insert failed: " + String(e) });
@@ -258,7 +259,6 @@ async function handleCreateExpense(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "Method not allowed" }, 405);
-  if (!SPLITWISE_API_KEY) return json({ error: "Server missing SPLITWISE_API_KEY" }, 500);
 
   // 1. Require a valid logged-in user.
   const authHeader = req.headers.get("Authorization") || "";
@@ -294,12 +294,69 @@ Deno.serve(async (req) => {
       householdId = prof[0].household_id ?? null;
     }
   } catch (_) { /* legacy single-user mode: leave null, table default applies */ }
+  const ownerKey = owner ?? "mark";
 
-  // 3. Identify the Splitwise current user.
+  // 2b. Parse body + action up front. set_key must run before we require an
+  //     existing key (the user is connecting one).
+  const body = await req.json().catch(() => ({}));
+  const action = (body && body.action) || "sync";
+
+  // Connect / store this owner's personal Splitwise key (validated first).
+  if (action === "set_key") {
+    const apiKey = String(body?.api_key || "").trim();
+    if (!apiKey) return json({ error: "Missing api_key" }, 400);
+    // deno-lint-ignore no-explicit-any
+    let swUser: any;
+    try {
+      const r = await fetch(`${SW_BASE}/get_current_user`, { headers: { Authorization: `Bearer ${apiKey}` } });
+      if (!r.ok) return json({ error: "Invalid Splitwise key", detail: await r.text() }, 400);
+      swUser = (await r.json())?.user;
+    } catch (e) {
+      return json({ error: "Splitwise request failed", detail: String(e) }, 502);
+    }
+    if (!swUser?.id) return json({ error: "Could not resolve Splitwise user" }, 400);
+    const swName = [swUser.first_name, swUser.last_name].filter(Boolean).join(" ") || swUser.email || `User ${swUser.id}`;
+    const { error } = await supabase.from("splitwise_accounts").upsert({
+      owner: ownerKey,
+      ...(householdId != null ? { household_id: householdId } : {}),
+      api_key: apiKey,
+      sw_user_id: swUser.id,
+      sw_name: swName,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "owner" });
+    if (error) return json({ error: "Failed to store key", detail: error.message }, 500);
+    return json({ status: "ok", connected: true, name: swName, sw_user_id: swUser.id });
+  }
+
+  // Remove this owner's stored key.
+  if (action === "disconnect") {
+    try { await supabase.from("splitwise_accounts").delete().eq("owner", ownerKey); } catch (_) { /* ignore */ }
+    return json({ status: "ok", connected: false });
+  }
+
+  // 3. Resolve this owner's Splitwise key: personal account row, else the
+  //    shared env secret (the original default / Mark account).
+  let swKey: string | null = null;
+  let acctName: string | null = null;
+  try {
+    const { data } = await supabase.from("splitwise_accounts").select("api_key, sw_name").eq("owner", ownerKey).limit(1);
+    if (data?.length && data[0].api_key) { swKey = data[0].api_key; acctName = data[0].sw_name ?? null; }
+  } catch (_) { /* no row */ }
+  let keySource = "account";
+  if (!swKey && SPLITWISE_API_KEY) { swKey = SPLITWISE_API_KEY; keySource = "env"; }
+
+  // Report whether this owner has a usable Splitwise connection (gates UI).
+  if (action === "account_status") {
+    return json({ status: "ok", connected: !!swKey, name: acctName, source: swKey ? keySource : null });
+  }
+
+  if (!swKey) return json({ error: "No Splitwise account connected for this user" }, 400);
+
+  // 4. Identify the Splitwise current user (with the resolved key).
   let currentUserId: number;
   try {
     const r = await fetch(`${SW_BASE}/get_current_user`, {
-      headers: { Authorization: `Bearer ${SPLITWISE_API_KEY}` },
+      headers: { Authorization: `Bearer ${swKey}` },
     });
     if (!r.ok) return json({ error: "Splitwise auth failed", detail: await r.text() }, 502);
     const d = await r.json();
@@ -309,14 +366,10 @@ Deno.serve(async (req) => {
     return json({ error: "Splitwise request failed", detail: String(e) }, 502);
   }
 
-  // 3b. Dispatch on action. Default ("sync") falls through to the reconcile path.
-  const body = await req.json().catch(() => ({}));
-  const action = (body && body.action) || "sync";
-
   if (action === "friends") {
     try {
       const r = await fetch(`${SW_BASE}/get_friends`, {
-        headers: { Authorization: `Bearer ${SPLITWISE_API_KEY}` },
+        headers: { Authorization: `Bearer ${swKey}` },
       });
       if (!r.ok) return json({ error: "Splitwise get_friends failed", detail: await r.text() }, 502);
       const d = await r.json();
@@ -336,7 +389,7 @@ Deno.serve(async (req) => {
   if (action === "groups") {
     try {
       const r = await fetch(`${SW_BASE}/get_groups`, {
-        headers: { Authorization: `Bearer ${SPLITWISE_API_KEY}` },
+        headers: { Authorization: `Bearer ${swKey}` },
       });
       if (!r.ok) return json({ error: "Splitwise get_groups failed", detail: await r.text() }, 502);
       const d = await r.json();
@@ -358,7 +411,40 @@ Deno.serve(async (req) => {
   }
 
   if (action === "create_expense") {
-    return await handleCreateExpense(body, currentUserId, supabase, owner, householdId);
+    return await handleCreateExpense(body, currentUserId, supabase, ownerKey, householdId, swKey);
+  }
+
+  // Pre-register a shared Splitwise expense as already-imported for THIS owner,
+  // computing the correct content_hash from their perspective so a later sync
+  // recognizes it as unchanged and never re-imports it (FEA-29D cross-channel
+  // dedup: used when a household-mirrored reimbursement is approved).
+  if (action === "register_imported") {
+    const expId = Number(body?.expense_id);
+    const txnId = body?.txn_id ?? null;
+    if (!expId) return json({ error: "Missing expense_id" }, 400);
+    try {
+      const r = await fetch(`${SW_BASE}/get_expense/${expId}`, { headers: { Authorization: `Bearer ${swKey}` } });
+      if (!r.ok) return json({ error: "Splitwise get_expense failed", detail: await r.text() }, 502);
+      const exp = (await r.json())?.expense as SWExpense | undefined;
+      if (!exp?.id) return json({ error: "Expense not found" }, 404);
+      const { error } = await supabase.from("splitwise_expenses").upsert({
+        expense_id: exp.id,
+        owner: ownerKey,
+        ...(householdId != null ? { household_id: householdId } : {}),
+        sw_updated_at: exp.updated_at || new Date().toISOString(),
+        sw_deleted_at: exp.deleted_at || null,
+        content_hash: contentHash(exp, currentUserId),
+        sync_status: "imported",
+        raw: rawSnapshot(exp, currentUserId),
+        expense_txn_id: txnId,
+        first_imported_at: new Date().toISOString(),
+        last_synced_at: new Date().toISOString(),
+      }, { onConflict: "owner,expense_id" });
+      if (error) return json({ error: "Register failed", detail: error.message }, 500);
+      return json({ status: "ok", registered: true });
+    } catch (e) {
+      return json({ error: "Splitwise request failed", detail: String(e) }, 502);
+    }
   }
 
   // 4. Determine the fetch window. Use the latest prior sync to fetch only
@@ -368,6 +454,7 @@ Deno.serve(async (req) => {
     const { data: last } = await supabase
       .from("splitwise_expenses")
       .select("last_synced_at")
+      .eq("owner", ownerKey)
       .order("last_synced_at", { ascending: false })
       .limit(1);
     if (last?.length) {
@@ -392,7 +479,7 @@ Deno.serve(async (req) => {
   let expenses: SWExpense[] = [];
   try {
     const r = await fetch(`${SW_BASE}/get_expenses?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${SPLITWISE_API_KEY}` },
+      headers: { Authorization: `Bearer ${swKey}` },
     });
     if (!r.ok) return json({ error: "Splitwise get_expenses failed", detail: await r.text() }, 502);
     const d = await r.json();
@@ -409,6 +496,7 @@ Deno.serve(async (req) => {
       const { data: rows } = await supabase
         .from("splitwise_expenses")
         .select("expense_id, sync_status, content_hash, sw_deleted_at")
+        .eq("owner", ownerKey)
         .in("expense_id", ids);
       for (const row of rows || []) existingById.set(row.expense_id as number, row);
     } catch (e) {
@@ -433,7 +521,7 @@ Deno.serve(async (req) => {
       if (snapshot.candidates.length === 0) { counts.skipped++; continue; }
       const { error } = await supabase.from("splitwise_expenses").insert({
         expense_id: expense.id,
-        owner,
+        owner: ownerKey,
         ...(householdId != null ? { household_id: householdId } : {}),
         sw_updated_at: swUpdated,
         sw_deleted_at: swDeleted,
@@ -463,12 +551,14 @@ Deno.serve(async (req) => {
             raw: snapshot,
             last_synced_at: nowIso,
           })
-          .eq("expense_id", expense.id);
+          .eq("owner", ownerKey)
+        .eq("expense_id", expense.id);
         counts.changed++;
       } else {
         await supabase.from("splitwise_expenses")
           .update({ last_synced_at: nowIso })
-          .eq("expense_id", expense.id);
+          .eq("owner", ownerKey)
+        .eq("expense_id", expense.id);
         counts.skipped++;
       }
       continue;
@@ -484,6 +574,7 @@ Deno.serve(async (req) => {
           raw: snapshot,
           last_synced_at: nowIso,
         })
+        .eq("owner", ownerKey)
         .eq("expense_id", expense.id);
       counts.refreshed++;
       continue;
@@ -493,6 +584,7 @@ Deno.serve(async (req) => {
       // Already flagged — keep the imported snapshot in raw, refresh pending_raw.
       await supabase.from("splitwise_expenses")
         .update({ pending_raw: snapshot, sw_deleted_at: swDeleted, last_synced_at: nowIso })
+        .eq("owner", ownerKey)
         .eq("expense_id", expense.id);
       counts.refreshed++;
       continue;
@@ -508,11 +600,13 @@ Deno.serve(async (req) => {
           sw_deleted_at: swDeleted,
           last_synced_at: nowIso,
         })
+        .eq("owner", ownerKey)
         .eq("expense_id", expense.id);
       if (becameDeleted) counts.deleted++; else counts.changed++;
     } else {
       await supabase.from("splitwise_expenses")
         .update({ last_synced_at: nowIso })
+        .eq("owner", ownerKey)
         .eq("expense_id", expense.id);
       counts.unchanged++;
     }

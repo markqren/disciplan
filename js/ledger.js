@@ -150,13 +150,17 @@ function openLedgerEditModal(txn,onSaved){
     if(delTimer)clearTimeout(delTimer);
     mDel.textContent="Deleting...";mDel.disabled=true;
     const txnCopy={...txn};delete txnCopy.id;
+    const delGroupId=txn.transaction_group_id;
     try{
       await sb(`transactions?id=eq.${txn.id}`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
       state.txnCount--;
       document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      // Deleting a group member can leave a lone survivor — unlink it.
+      const orphansCleared=delGroupId?await pruneOrphanGroups([delGroupId]):[];
       bg.remove();
       showUndo("\u2713 Deleted: "+txn.description,async()=>{
         await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id:txn.id,...txnCopy})});
+        for(const o of orphansCleared)await sb(`transactions?id=eq.${o.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:o.groupId})});
         state.txnCount++;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
         onSaved();
       });
@@ -320,7 +324,7 @@ function openLedgerEditModal(txn,onSaved){
 
     // Payment method
     const rPt=h("select",{class:"inp",onChange:()=>{rCreditRow.style.display=rPt.value==="Transfer"?"grid":"none";updateRPreview()}});
-    PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Venmo")o.selected=true;rPt.append(o)});
+    PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Splitwise")o.selected=true;rPt.append(o)});
     modal.append(mRow(mField("Payment Method",rPt)));
 
     // Credit sub-account (only for Transfer payment type)
@@ -391,8 +395,13 @@ function openLedgerEditModal(txn,onSaved){
         onSaved();
         // Splitwise push is non-fatal: the local reimbursement is already saved.
         if(swPayload){
-          swCreateExpense(swPayload).then(()=>{
+          swCreateExpense(swPayload).then(async res=>{
             if(msg){msg.textContent="Reimbursement created \u00B7 pushed to Splitwise";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),3000)}
+            // Stamp the household-mirror proposal with the new Splitwise expense id
+            // so the recipient's later Splitwise sync dedupes it (FEA-29D).
+            if(res&&res.expense_id&&swPayload.expense_txn_id){
+              try{await sb(`pending_shared_txns?source_txn_id=eq.${swPayload.expense_txn_id}&sw_expense_id=is.null`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sw_expense_id:res.expense_id})});}catch(e){}
+            }
           }).catch(e=>alert("Reimbursement saved, but Splitwise push failed: "+e.message));
         }
       }catch(e){alert("Failed: "+e.message);rCreate.textContent="Create Reimbursement";rCreate.disabled=false}
@@ -966,12 +975,16 @@ async function renderLedger(el){
     try{
       const ids=[...selected];
       const delTxns=currentTxns.filter(t=>ids.includes(t.id)).map(t=>({...t}));
+      const delGroupIds=[...new Set(delTxns.map(t=>t.transaction_group_id).filter(Boolean))];
       await sb(`transactions?id=in.(${ids.join(",")})`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
       state.txnCount-=ids.length;
       document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
       selected.clear();updateBatchBar();
+      // Deleting group members can leave lone survivors — unlink them.
+      const orphansCleared=delGroupIds.length?await pruneOrphanGroups(delGroupIds):[];
       showUndo(`\u2713 Deleted ${ids.length} items`,async()=>{
         await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(delTxns)});
+        for(const o of orphansCleared)await sb(`transactions?id=eq.${o.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:o.groupId})});
         state.txnCount+=delTxns.length;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
         loadPage();
       });
@@ -1147,8 +1160,10 @@ async function renderLedger(el){
     let prevGroupId=null;
     const renderedGroups=new Set();
     function renderNormalRow(t,indent){
-      const isLinked=!!t.transaction_group_id;
-      const gSize=isLinked?groupCounts[t.transaction_group_id]:0;
+      // A group of one is not a real link (its partners were deleted) — render
+      // it as a plain unlinked row, no 🔗 badge or group border.
+      const gSize=t.transaction_group_id?(groupCounts[t.transaction_group_id]||0):0;
+      const isLinked=gSize>=2;
       const tr=h("tr",{style:{cursor:"pointer",
         ...(indent?{borderLeft:"3px solid rgba(74,111,165,0.3)",background:"rgba(74,111,165,0.02)"}:isLinked?{borderLeft:"3px solid var(--b)"}:{}),
         ...(isLinked&&!indent&&prevGroupId&&prevGroupId!==t.transaction_group_id?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})}

@@ -244,6 +244,24 @@ async function linkToGroup(txnA,txnB){
   return targetGroup;
 }
 
+// After deleting transaction(s), any group left with a single member is no
+// longer a real link — clear that lone member's group so it reads as unlinked.
+// Returns [{id, groupId}] of the members cleared, so a delete-undo can relink.
+async function pruneOrphanGroups(groupIds){
+  const cleared=[];const seen=new Set();
+  for(const gid of groupIds){
+    if(gid==null||seen.has(gid))continue;seen.add(gid);
+    try{
+      const remaining=await sb(`transactions?transaction_group_id=eq.${gid}&select=id`);
+      if(remaining.length===1){
+        await sb(`transactions?id=eq.${remaining[0].id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:null})});
+        cleared.push({id:remaining[0].id,groupId:gid});
+      }
+    }catch(e){console.warn("pruneOrphanGroups failed for group",gid,e)}
+  }
+  return cleared;
+}
+
 async function unlinkFromGroup(txnId,groupId){
   await sb(`transactions?id=eq.${txnId}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:null})});
   const remaining=await sb(`transactions?transaction_group_id=eq.${groupId}&select=id`);
@@ -316,6 +334,11 @@ async function swCallEdge(payload){
 async function swFetchFriends(){const d=await swCallEdge({action:"friends"});return d.friends||[]}
 async function swFetchGroups(){const d=await swCallEdge({action:"groups"});return d.groups||[]}
 async function swCreateExpense(payload){return await swCallEdge({...(payload||{}),action:"create_expense"})}
+// Per-account connection (FEA-29D): each logged-in user connects their own key.
+async function swAccountStatus(){return await swCallEdge({action:"account_status"})}
+async function swSetKey(apiKey){return await swCallEdge({action:"set_key",api_key:apiKey})}
+async function swDisconnect(){return await swCallEdge({action:"disconnect"})}
+async function swRegisterImported(expenseId,txnId){return await swCallEdge({action:"register_imported",expense_id:expenseId,txn_id:txnId})}
 
 // Persisted label -> Splitwise friend mapping, scoped to the logged-in user.
 function normPersonLabel(s){return String(s||"").trim().toLowerCase()}
@@ -430,8 +453,12 @@ function showSharedTxnApprovalModal(rows){
       const approve=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)",padding:"8px 16px",width:"auto"},onClick:async()=>{
         approve.disabled=true;approve.textContent="Adding...";
         try{
-          await sb("transactions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify(p)});
+          const ins=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(p)});
+          const newId=ins&&ins[0]&&ins[0].id;
           await sb(`pending_shared_txns?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({status:"approved",resolved_at:new Date().toISOString()})});
+          // If this reimbursement was also pushed to Splitwise, pre-register the
+          // shared expense as imported so my own Splitwise sync won't re-import it.
+          if(r.sw_expense_id){try{await swRegisterImported(r.sw_expense_id,newId||null)}catch(e){console.warn("Splitwise dedup register failed:",e)}}
           r.status="approved";dcInvalidateTxns();state.txnCount++;
           document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
           renderRows();

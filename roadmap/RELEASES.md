@@ -11,6 +11,19 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.8
+<sub>Per-account Splitwise keys + cross-channel dedup; orphan-link cleanup; balance-transfer entry</sub>
+
+##### Features
+- **Balance transfer / withdrawal entry** — The New Transaction form now handles money moving between two accounts (cash withdrawals, card balance transfers, any account-to-account move). When **Financial** is the category, a "Balance transfer / withdrawal" checkbox appears; checking it relabels Payment Account → **From Account** and reveals a **To Account** dropdown (any two payment types can pair). Submitting writes two linked transactions that net to $0 — `+amount` on the From account and `−amount` on the To account, both single-day `financial` rows sharing a `transaction_group_id` (so the ledger renders the $0.00 group header) — with each leg's description auto-suffixed `(from …)` / `(to …)`. A live preview shows direction + net, FX/currency is respected, and undo removes both legs. (~3,000 tokens)
+- **Per-person Splitwise accounts (FEA-29D)** — Each household member can now connect their **own** Splitwise account instead of everyone sharing one key. A new service-role-only `splitwise_accounts` table stores each owner's API key (granted to `service_role` only, REVOKEd from `authenticated`/`anon`, so the public anon key can never read it); keys are set via a new `set_key` edge action that validates against `get_current_user` and never returns the key to the browser. The edge function resolves the key per logged-in owner (personal account row, else the original shared `SPLITWISE_API_KEY` env secret as the default/Mark account). The Splitwise Sync card gained a "Connect Splitwise" flow + connection status, and the sync controls are gated until connected so no one syncs against someone else's account. New `account_status` / `disconnect` actions. (~5,000 tokens)
+- **Splitwise dedup keyed on (owner, expense_id)** — A Splitwise expense shared by two members has the *same* `expense_id` on both accounts, which collided with the old global primary key. `splitwise_expenses` is re-keyed on **(owner, expense_id)** (owner backfilled, NOT NULL), and every reconcile read/write + the write-back upsert is now owner-scoped, so both members can sync the same shared expense without clobbering each other. The review queue and all status mutations are scoped to the logged-in user (`importerQS()`). (~3,500 tokens)
+- **Deterministic mirror↔Splitwise dedup** — When a reimbursement is both mirrored to a household member and pushed to Splitwise, the mirror proposal records the new `sw_expense_id`. On approval the recipient's ledger pre-registers that expense as `imported` (via a new `register_imported` edge action that computes the correct content hash from *their* perspective), so when they later sync their own Splitwise the shared expense is recognized as unchanged and never re-imported — no double-count, no fuzzy guessing. (~2,500 tokens)
+
+##### Fixes
+- **Deleting a linked transaction's partners unlinks the survivor** — When a delete (single or batch) leaves a transaction group with only one member, that lone member is now cleared back to unlinked (no more stray 🔗 badge); undo restores the link. A render guard also treats any single-member group as unlinked, cleaning up pre-existing orphans on load. (~1,500 tokens)
+- **Reimburse defaults to Splitwise payment type** — The reimburse form's Payment Method now defaults to Splitwise. (~250 tokens)
+
 #### v2.7.7
 <sub>Splitwise write-back: friend + group dropdowns</sub>
 
