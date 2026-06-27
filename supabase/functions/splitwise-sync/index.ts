@@ -190,13 +190,15 @@ async function handleCreateExpense(
   const description = (body?.description || "Expense").toString().trim().slice(0, 250) || "Expense";
   const currency = (body?.currency_code || "USD").toString();
   const details = body?.details ? String(body.details).slice(0, 500) : "";
+  // group_id 0 (or absent) = a non-group "direct" friend expense.
+  const groupId = Number(body?.group_id) > 0 ? Math.trunc(Number(body.group_id)) : 0;
 
   const form = new URLSearchParams();
   form.set("cost", cost.toFixed(2));
   form.set("description", description);
   form.set("date", date);
   form.set("currency_code", currency);
-  form.set("group_id", "0"); // non-group friend expense (v1)
+  form.set("group_id", String(groupId));
   if (details) form.set("details", details);
   // users[0] = current user: paid the whole bill, owes their remaining share.
   form.set("users__0__user_id", String(currentUserId));
@@ -326,6 +328,30 @@ Deno.serve(async (req) => {
         name: [f.first_name, f.last_name].filter(Boolean).join(" ") || f.email || `Friend ${f.id}`,
       }));
       return json({ status: "ok", friends });
+    } catch (e) {
+      return json({ error: "Splitwise request failed", detail: String(e) }, 502);
+    }
+  }
+
+  if (action === "groups") {
+    try {
+      const r = await fetch(`${SW_BASE}/get_groups`, {
+        headers: { Authorization: `Bearer ${SPLITWISE_API_KEY}` },
+      });
+      if (!r.ok) return json({ error: "Splitwise get_groups failed", detail: await r.text() }, 502);
+      const d = await r.json();
+      // Drop the synthetic id-0 "Non-group expenses" bucket — the UI models that
+      // as "No group". Expose member ids so the client can validate friend ∈ group.
+      // deno-lint-ignore no-explicit-any
+      const groups = (Array.isArray(d?.groups) ? d.groups : [])
+        .filter((g: any) => Number(g?.id) > 0)
+        .map((g: any) => ({
+          id: g.id,
+          name: g.name || `Group ${g.id}`,
+          // deno-lint-ignore no-explicit-any
+          member_ids: (Array.isArray(g.members) ? g.members : []).map((m: any) => m.id),
+        }));
+      return json({ status: "ok", groups });
     } catch (e) {
       return json({ error: "Splitwise request failed", detail: String(e) }, 502);
     }

@@ -209,35 +209,55 @@ function openLedgerEditModal(txn,onSaved){
       }
     }).catch(()=>{personSelect.classList.add("hidden")});
 
-    // Splitwise push section (FEA-29C). Shows once a person is chosen: if the
-    // label is mapped to a Splitwise friend, a pre-checked "Also create in
-    // Splitwise" box appears; otherwise a button lets you pick + remember one.
-    let swMappedFriend=null,swLastLookup=null,swLookupTimer=null;
+    // Splitwise push section (FEA-29C). Once a person is chosen we load the
+    // Splitwise friends + groups and show dropdowns: pick who's reimbursing you
+    // and (optionally) the group the expense belongs to. The choice is
+    // remembered per person label so it pre-selects next time. An opt-in
+    // checkbox controls whether the matching Splitwise expense is created.
+    let swFriends=[],swGroups=[],swLoaded=false,swLastLookup=null,swLookupTimer=null;
     const swWrap=h("div",{style:{marginBottom:"14px",padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:"8px",display:"none"}});
-    const swMsg=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)"}});
-    const swCheckRow=h("label",{style:{display:"none",alignItems:"center",gap:"8px",fontSize:"12px",color:"#fff",cursor:"pointer"}});
+    const swMsg=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginBottom:"6px"}});
+    const swFriendSel=h("select",{class:"inp",onChange:()=>onSwFriendChange()});
+    const swGroupSel=h("select",{class:"inp",style:{marginTop:"6px",display:"none"},onChange:()=>persistSwMap()});
+    const swCheckRow=h("label",{style:{display:"none",alignItems:"center",gap:"8px",fontSize:"12px",color:"#fff",cursor:"pointer",marginTop:"8px"}});
     const swCheck=h("input",{type:"checkbox",style:{width:"auto",margin:"0"}});
-    const swCheckLbl=h("span",{});
-    swCheckRow.append(swCheck,swCheckLbl);
-    const swLinkBtn=h("button",{class:"pg-btn",style:{marginTop:"8px",padding:"6px 12px",fontSize:"11px",border:"1px solid rgba(255,255,255,0.1)"},onClick:()=>openFriendPicker()},"Link Splitwise friend");
-    swWrap.append(swMsg,swCheckRow,swLinkBtn);
+    swCheckRow.append(swCheck,h("span",{},"Also create this expense in Splitwise"));
+    swWrap.append(swMsg,swFriendSel,swGroupSel,swCheckRow);
     modal.append(swWrap);
 
-    function applySwMapping(friend){
-      swMappedFriend=friend;
-      const old=swWrap.querySelector(".sw-picker");if(old)old.remove();
-      if(friend){
-        swMsg.textContent="";
-        swCheckLbl.textContent=`Also create in Splitwise (with ${friend.name})`;
-        swCheck.checked=true;
-        swCheckRow.style.display="flex";
-        swLinkBtn.textContent="Change friend";
-      }else{
-        swCheck.checked=false;
-        swCheckRow.style.display="none";
-        swMsg.textContent="Link this person to a Splitwise friend to push the split there.";
-        swLinkBtn.textContent="Link Splitwise friend";
-      }
+    function selectedSwFriend(){const id=Number(swFriendSel.value);return id?swFriends.find(f=>f.id===id):null}
+    function selectedSwGroup(){const id=Number(swGroupSel.value);return id?swGroups.find(g=>g.id===id):null}
+    function fillSwFriends(selId){
+      swFriendSel.innerHTML="";
+      swFriendSel.append(h("option",{value:""},"\u2014 Not on Splitwise \u2014"));
+      swFriends.forEach(f=>{const o=h("option",{value:String(f.id)},f.name);if(selId&&f.id===selId)o.selected=true;swFriendSel.append(o)});
+    }
+    function fillSwGroups(selId){
+      swGroupSel.innerHTML="";
+      swGroupSel.append(h("option",{value:"0"},"No group (direct split)"));
+      swGroups.forEach(g=>{const o=h("option",{value:String(g.id)},g.name);if(selId&&g.id===selId)o.selected=true;swGroupSel.append(o)});
+    }
+    function syncSwControls(){
+      const f=selectedSwFriend();
+      swGroupSel.style.display=f?"block":"none";
+      swCheckRow.style.display=f?"flex":"none";
+      if(!f)swCheck.checked=false;
+    }
+    function onSwFriendChange(){const f=selectedSwFriend();if(f)swCheck.checked=true;syncSwControls();persistSwMap()}
+    function persistSwMap(){
+      const f=selectedSwFriend(),label=selectedPerson.trim();
+      if(!label||!f)return;
+      saveSwFriendMap(label,f,selectedSwGroup()).catch(()=>{});
+    }
+    async function ensureSwLoaded(){
+      if(swLoaded)return;
+      swMsg.textContent="Loading Splitwise friends\u2026";
+      try{
+        const [fr,gr]=await Promise.all([swFetchFriends(),swFetchGroups()]);
+        swFriends=fr||[];swGroups=gr||[];swLoaded=true;
+        swMsg.textContent=swFriends.length?"":"No Splitwise friends found (is the sync deployed?).";
+      }catch(e){swFriends=[];swGroups=[];swMsg.textContent="Couldn't reach Splitwise: "+e.message}
+      fillSwFriends();fillSwGroups();
     }
     function refreshSwSection(){
       const label=selectedPerson.trim();
@@ -246,36 +266,16 @@ function openLedgerEditModal(txn,onSaved){
       const key=label.toLowerCase();
       if(key===swLastLookup)return;
       swLastLookup=key;
-      swCheckRow.style.display="none";swMappedFriend=null;
-      const old=swWrap.querySelector(".sw-picker");if(old)old.remove();
-      swMsg.textContent="Checking Splitwise link\u2026";
-      getSwFriendMap(label).then(m=>{
+      ensureSwLoaded().then(()=>getSwFriendMap(label)).then(m=>{
         if(selectedPerson.trim().toLowerCase()!==key)return;
-        applySwMapping(m?{id:m.sw_user_id,name:m.sw_name||label}:null);
-      }).catch(()=>{if(selectedPerson.trim().toLowerCase()===key)applySwMapping(null)});
+        fillSwFriends(m?m.sw_user_id:null);
+        fillSwGroups(m?m.sw_group_id:null);
+        if(m)swCheck.checked=true;
+        syncSwControls();
+        if(swFriends.length&&!m)swMsg.textContent=`Pick ${label}'s Splitwise friend to push this split.`;
+      }).catch(()=>{});
     }
     function scheduleSwRefresh(){clearTimeout(swLookupTimer);swLookupTimer=setTimeout(refreshSwSection,300)}
-    function openFriendPicker(){
-      swLinkBtn.disabled=true;swLinkBtn.textContent="Loading\u2026";
-      swFetchFriends().then(friends=>{
-        swLinkBtn.disabled=false;swLinkBtn.textContent=swMappedFriend?"Change friend":"Link Splitwise friend";
-        const old=swWrap.querySelector(".sw-picker");if(old)old.remove();
-        if(!friends.length){swMsg.textContent="No Splitwise friends found.";return}
-        const picker=h("div",{class:"sw-picker",style:{marginTop:"8px"}});
-        const sel=h("select",{class:"inp"});
-        sel.append(h("option",{value:""},"Select a Splitwise friend\u2026"));
-        friends.forEach(f=>sel.append(h("option",{value:String(f.id)},f.name)));
-        const saveB=h("button",{class:"pg-btn",style:{marginTop:"8px",padding:"6px 12px",fontSize:"11px",border:"1px solid rgba(255,255,255,0.1)"},onClick:()=>{
-          const fid=Number(sel.value);if(!fid){swMsg.textContent="Pick a friend first.";return}
-          const f=friends.find(x=>x.id===fid);const label=selectedPerson.trim();
-          saveB.disabled=true;saveB.textContent="Saving\u2026";
-          saveSwFriendMap(label,f).then(()=>applySwMapping({id:f.id,name:f.name}))
-            .catch(e=>{saveB.disabled=false;saveB.textContent="Save link";swMsg.textContent="Save failed: "+e.message});
-        }},"Save link");
-        picker.append(sel,saveB);
-        swWrap.append(picker);
-      }).catch(e=>{swLinkBtn.disabled=false;swLinkBtn.textContent="Retry";swMsg.textContent="Couldn't load friends: "+e.message});
-    }
 
     // Split presets
     const splitWrap=h("div",{style:{marginBottom:"14px"}});
@@ -369,9 +369,11 @@ function openLedgerEditModal(txn,onSaved){
       try{
         const r=await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"");
         // Capture Splitwise intent before the modal (and its closures) go away.
-        const wantSw=swCheck.checked&&swMappedFriend;
+        const swFriend=selectedSwFriend();
+        const wantSw=swCheck.checked&&swFriend;
         const swPayload=wantSw?{
-          friend_user_id:swMappedFriend.id,
+          friend_user_id:swFriend.id,
+          group_id:Number(swGroupSel.value)||0,
           cost:Math.round(txn.amount_usd*100)/100,
           friend_owed:reimbAmt,
           date:txn.date,

@@ -314,6 +314,7 @@ async function swCallEdge(payload){
   return data;
 }
 async function swFetchFriends(){const d=await swCallEdge({action:"friends"});return d.friends||[]}
+async function swFetchGroups(){const d=await swCallEdge({action:"groups"});return d.groups||[]}
 async function swCreateExpense(payload){return await swCallEdge({...(payload||{}),action:"create_expense"})}
 
 // Persisted label -> Splitwise friend mapping, scoped to the logged-in user.
@@ -325,11 +326,13 @@ async function getSwFriendMap(label){
     return (rows&&rows[0])||null;
   }catch(e){console.warn("getSwFriendMap failed:",e);return null}
 }
-async function saveSwFriendMap(label,friend){
+async function saveSwFriendMap(label,friend,group){
   const key=normPersonLabel(label);if(!key||!friend||!friend.id)return;
   // Replace any prior mapping for this label (scoped to the importing user).
   try{await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}${importerQS()}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});}catch(e){}
-  await sb("splitwise_friend_map",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({person_label:key,sw_user_id:friend.id,sw_name:friend.name||""})});
+  const row={person_label:key,sw_user_id:friend.id,sw_name:friend.name||""};
+  if(group&&group.id){row.sw_group_id=group.id;row.sw_group_name=group.name||""}
+  await sb("splitwise_friend_map",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify(row)});
 }
 
 // Resolve a free-text person name to another household member's owner key.

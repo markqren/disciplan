@@ -11,6 +11,12 @@
 
 ### v2.7 — Jun 25, 2026
 
+#### v2.7.7
+<sub>Splitwise write-back: friend + group dropdowns</sub>
+
+##### Features
+- **Friend & group dropdowns in the reimburse push (FEA-29C)** — The reimburse form's Splitwise section now loads your Splitwise friends and groups up front and shows two dropdowns: pick who's reimbursing you and (optionally) which Splitwise group the expense belongs to, instead of relying on an exact name match. Both are remembered per person label (new `sw_group_id`/`sw_group_name` on `splitwise_friend_map`) so they pre-select next time. The group id flows into `create_expense` (`group_id`, defaulting to `0` for a direct friend split). New `groups` action on `splitwise-sync` (`get_groups`, with the synthetic id-0 bucket filtered out and member ids exposed). (~3,000 tokens)
+
 #### v2.7.6
 <sub>Migration history reconciliation</sub>
 
