@@ -11,6 +11,15 @@
 
 ### v2.8 — Jun 27, 2026
 
+#### v2.8.1
+<sub>Per-owner duplicate accounts + Combined-view owner break-out</sub>
+
+##### Fixes
+- **Two members can hold the same account** — Adding an account whose label matched one another household member already owned (e.g. both have "Charles Schwab") failed: `accounts.id` is a household-wide text-slug primary key, but both the duplicate-name guard and the slug derivation only looked at the *current owner's* rows, so Shilpa's add derived the existing `charles_schwab` id and collided on the PK (and the Combined header view also falsely blocked the name). Onboarding's "My Accounts" is now scoped to the signed-in user (`importerQS`) so the name check is per-person, and the slug is de-duplicated against **every** household account id with a readable per-owner suffix (`charles_schwab` → `charles_schwab_shilpa`, numeric fallback if needed). The `id` is internal only — transactions reference accounts by `payment_type` label — so existing data is untouched. (~2,000 tokens)
+
+##### Features
+- **Combined Balance Sheet owner break-out** — When 2+ household members hold the same account, the Combined view still shows the household total but now renders a small per-owner chip row underneath it (e.g. `Mark $12,300 · Shilpa $4,800`), reusing the Tags view's owner-color chips. Powered by one cached `get_ledger_balances_scoped` call per member (no DB migration); single-person and legacy single-user views are unchanged. (~1,500 tokens)
+
 #### v2.8.0
 <sub>Pronto/Rippling payslip import for Shilpa</sub>
 

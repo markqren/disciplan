@@ -1,6 +1,12 @@
 async function renderBS(el){
   el.innerHTML=`<div style="margin-bottom:16px"><h2>Balance Sheet</h2><p class="sub">Loading...</p></div><div id="bsBody"></div>`;
   try{
+    // Combined (household) view shows each account's total; when 2+ members share
+    // an account label (e.g. both have "Charles Schwab") we also break the balance
+    // out per owner. ownerMeta colors mirror the Tags view for visual consistency.
+    const isCombined=scopeOwner()==null&&currentHousehold!=null;
+    const multi=(householdMembers||[]).length>1;
+    const ownerMeta={};(householdMembers||[]).forEach((m,i)=>{ownerMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
     // Fetch live ledger balances, accounts metadata, and snapshots in parallel
     let bsCache=dcGet('bs_'+state.view);
     if(!bsCache){
@@ -10,10 +16,18 @@ async function renderBS(el){
         sb("balance_snapshots?select=*,accounts!inner(label,account_type)&order=snapshot_date.desc"+ownerQS()),
         scopedRPC("get_credit_balances")
       ]);
-      bsCache={ledgerBals:res[0],accts:res[1],snaps:res[2],creditBals:res[3]};
+      // Per-owner balances for the Combined view owner break-out: one scoped call
+      // per member (households are tiny; the result is cached alongside bsCache).
+      let ownersByPt={};
+      if(isCombined&&multi){
+        const members=householdMembers.map(m=>m.owner);
+        const perOwner=await Promise.all(members.map(ow=>sbRPC("get_ledger_balances_scoped",{p_owner:ow,p_household_id:currentHousehold})));
+        members.forEach((ow,i)=>{(perOwner[i]||[]).forEach(lb=>{const b=parseFloat(lb.net_balance)||0;if(Math.abs(b)<0.01)return;(ownersByPt[lb.payment_type]||(ownersByPt[lb.payment_type]={}))[ow]=b})});
+      }
+      bsCache={ledgerBals:res[0],accts:res[1],snaps:res[2],creditBals:res[3],ownersByPt};
       dcSet('bs_'+state.view,bsCache);
     }
-    const {ledgerBals,accts,snaps,creditBals}=bsCache;
+    const {ledgerBals,accts,snaps,creditBals,ownersByPt={}}=bsCache;
     const body=document.getElementById("bsBody");body.innerHTML="";
 
     // Build account type lookup from accounts table
@@ -29,7 +43,7 @@ async function renderBS(el){
       const bal=parseFloat(lb.net_balance)||0;
       // Skip zero-balance retired/inactive accounts
       if(Math.abs(bal)<0.01)continue;
-      (byType[t]||byType.other).push({name:pt,bal});
+      (byType[t]||byType.other).push({name:pt,bal,owners:ownersByPt[pt]});
     }
     Object.values(byType).forEach(a=>a.sort((x,y)=>y.bal-x.bal));
 
@@ -100,7 +114,9 @@ async function renderBS(el){
       if(!accts.length)return"";
       const total=accts.reduce((s,a)=>s+a.bal,0);
       let html=`<div class="acct-grp"><div class="acct-hdr"><span style="font-size:12px;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.05em">${title}</span><span style="font-size:13px;font-weight:700;color:${color};font-family:var(--mono)">${fmtF(total)}</span></div>`;
-      accts.forEach(a=>{const isTD=a.name.startsWith("TD");const cadRate=DFX.CAD||0.73;const cadVal=isTD?`<span style="color:rgba(255,255,255,0.28);font-size:11px;margin-right:6px;font-family:var(--mono)">CA$${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(a.bal/cadRate))}</span>`:"";html+=`<div class="acct-row" data-acct="${a.name}" data-asset="${isAsset?1:0}" data-bal="${a.bal}" title="Right-click for actions"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${isTD?` title="CA$${(a.bal/cadRate).toFixed(2)}"`:""} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${cadVal}${fmtF(a.bal)}</span></div>`});
+      accts.forEach(a=>{const isTD=a.name.startsWith("TD");const cadRate=DFX.CAD||0.73;const cadVal=isTD?`<span style="color:rgba(255,255,255,0.28);font-size:11px;margin-right:6px;font-family:var(--mono)">CA$${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(a.bal/cadRate))}</span>`:"";html+=`<div class="acct-row" data-acct="${a.name}" data-asset="${isAsset?1:0}" data-bal="${a.bal}" title="Right-click for actions"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${isTD?` title="CA$${(a.bal/cadRate).toFixed(2)}"`:""} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${cadVal}${fmtF(a.bal)}</span></div>`;
+        // Owner break-out: only when 2+ household members actually hold this account.
+        if(isCombined&&multi&&a.owners){const obs=Object.entries(a.owners).filter(([,b])=>Math.abs(b)>0.5);if(obs.length>1){obs.sort((x,y)=>Math.abs(y[1])-Math.abs(x[1]));html+=`<div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 0 7px 12px">`;obs.forEach(([ow,b])=>{const meta=ownerMeta[ow]||{name:ow,color:"#888"};html+=`<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:${meta.color}1a;border:1px solid ${meta.color}33;padding:2px 7px;border-radius:5px"><span style="color:${meta.color};font-weight:600">${meta.name}</span><span style="font-family:var(--mono);color:rgba(255,255,255,0.55)">${fmtF(b)}</span></span>`});html+=`</div>`;}}});
       return html+"</div>";
     }
     const assetsCard=h("div",{class:"cd"});
@@ -201,6 +217,7 @@ function showAcctContextMenu(x,y,name,isAsset,bal){
     return it;
   }
   menu.append(menuItem("Balance Adjustment",()=>showBalanceAdjustment(name,isAsset,bal)));
+  menu.append(menuItem("Rename Account",()=>showAcctRename(name)));
   document.body.append(menu);
   const r=menu.getBoundingClientRect();
   if(x+r.width>window.innerWidth)x=Math.max(8,window.innerWidth-r.width-8);
@@ -283,5 +300,45 @@ function showBalanceAdjustment(name,_isAsset,fallbackBal){
       });
       renderContent();
     }catch(e){alert("Error creating adjustment: "+e.message);saveBtn.disabled=false;saveBtn.textContent="Create Adjustment"}
+  });
+}
+
+// Modal: rename a payment type / account. The payment_type string lives on every
+// transaction (and the accounts.label that drives the Balance Sheet grouping), so
+// a rename PATCHes both — scoped to the current household/owner view to match what
+// the sheet shows.
+function showAcctRename(oldName){
+  const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"440px"}});
+  modal.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><h2 style="font-size:20px;margin:0">Rename Account</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${oldName}</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">\u2715</button></div>`;
+
+  const nameLbl=h("label",{class:"lbl"},"New name");
+  const nameInp=h("input",{class:"inp",type:"text",value:oldName,style:{maxWidth:"280px"}});
+  const nameField=h("div",{style:{marginBottom:"14px"}});nameField.append(nameLbl,nameInp);
+  const hint=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",marginBottom:"14px"}},"Renames the payment type on every transaction and updates the account label.");
+  const saveBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"}},"Rename");
+
+  modal.append(nameField,hint,saveBtn);
+  bg.append(modal);document.body.append(bg);
+  setTimeout(()=>{nameInp.focus();nameInp.select()},0);
+
+  saveBtn.addEventListener("click",async()=>{
+    const newName=nameInp.value.trim();
+    if(!newName)return alert("Enter a new name.");
+    if(newName===oldName){bg.remove();return}
+    saveBtn.disabled=true;saveBtn.textContent="Renaming\u2026";
+    try{
+      await sb(`transactions?payment_type=eq.${encodeURIComponent(oldName)}`+ownerQS(),{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({payment_type:newName})});
+      await sb(`accounts?label=eq.${encodeURIComponent(oldName)}`+ownerQS(),{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({label:newName})});
+      dcClearAll();
+      bg.remove();
+      if(typeof showUndo==="function")showUndo(`\u2713 Renamed ${oldName} to ${newName}`,async()=>{
+        await sb(`transactions?payment_type=eq.${encodeURIComponent(newName)}`+ownerQS(),{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({payment_type:oldName})});
+        await sb(`accounts?label=eq.${encodeURIComponent(newName)}`+ownerQS(),{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({label:oldName})});
+        dcClearAll();renderContent();
+      });
+      renderContent();
+    }catch(e){alert("Error renaming: "+e.message);saveBtn.disabled=false;saveBtn.textContent="Rename"}
   });
 }

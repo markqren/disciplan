@@ -24,7 +24,10 @@ async function renderOnboarding(el){
   }
 
   let accts=[];
-  try{accts=await sb("accounts?order=display_order"+ownerQS())}catch(e){accts=[]}
+  // "My Accounts" is always the signed-in user's own set (importerQS), not the
+  // header person-view — so the duplicate-name check below is per-person and a
+  // Combined header view never falsely blocks adding an account another member owns.
+  try{accts=await sb("accounts?order=display_order"+importerQS())}catch(e){accts=[]}
 
   // ── Card 1: My Accounts ─────────────────────────────────────────────────
   const acctCard=h("div",{class:"cd"});
@@ -58,17 +61,46 @@ async function renderOnboarding(el){
     try{
       const maxOrder=accts.reduce((m,a)=>Math.max(m,a.display_order||0),0);
       // accounts.id is a text slug PK (e.g. "venmo"), not auto-generated — derive one.
-      const existingIds=new Set(accts.map(a=>a.id).filter(Boolean));
+      // The PK is shared across the WHOLE household, so two members adding the same
+      // institution (both "Charles Schwab") would collide. De-dup against every
+      // household account id and suffix the owner so each gets a readable, unique slug.
+      let existingIds;
+      try{existingIds=new Set((await sb("accounts?select=id"+householdQS())).map(a=>a.id).filter(Boolean))}
+      catch(e){existingIds=new Set(accts.map(a=>a.id).filter(Boolean))}
       const base=label.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||"account";
-      let id=base,n=2;while(existingIds.has(id))id=`${base}_${n++}`;
-      const created=await sb("accounts",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id,label,account_type:typeSel.value,display_order:maxOrder+1,is_active:true})});
+      let id=base;
+      if(existingIds.has(id)&&currentOwner)id=`${base}_${currentOwner}`;
+      let n=2;while(existingIds.has(id))id=`${base}_${n++}`;
+      const acctType=typeSel.value;
+      const created=await sb("accounts",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id,label,account_type:acctType,display_order:maxOrder+1,is_active:true})});
       const row=Array.isArray(created)?created[0]:created;
-      accts.push(row||{id,label,account_type:typeSel.value,display_order:maxOrder+1,is_active:true});
+      accts.push(row||{id,label,account_type:acctType,display_order:maxOrder+1,is_active:true});
       const balVal=parseFloat(balInp.value);
-      if(!isNaN(balVal))obStatedBalance[label]=balVal;
+      let openMsg="";
+      if(!isNaN(balVal)){
+        obStatedBalance[label]=balVal;
+        // Show the account on the Balance Sheet immediately at its stated amount.
+        // net_balance = -SUM(amount_usd), so amount_usd = -target (target signed
+        // by account type). category "adjustment" keeps it out of the income stmt.
+        const isAsset=obIsAsset(acctType);
+        const target=isAsset?balVal:-Math.abs(balVal);
+        if(Math.abs(target)>=0.01){
+          const d=today();
+          await sb("transactions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+            date:d,service_start:d,service_end:d,service_days:1,
+            description:`Opening Balance - ${label}`,category_id:"adjustment",
+            amount_usd:-target,original_amount:-target,currency:"USD",fx_rate:1,
+            daily_cost:-target,payment_type:label,tag:"",credit:""
+          })});
+          state.txnCount++;
+          const ds=document.getElementById("dbStatus");if(ds)ds.textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+          dcClearAll();
+          openMsg=` with opening balance ${fmtF(target)}`;
+        }
+      }
       labelInp.value="";balInp.value="";
       renderAcctList();refreshAccountPickers(label);
-      addStatus.classList.remove("hidden");addStatus.style.color="var(--g)";addStatus.textContent=`\u2713 Added ${label}`;
+      addStatus.classList.remove("hidden");addStatus.style.color="var(--g)";addStatus.textContent=`\u2713 Added ${label}${openMsg}`;
     }catch(e){addStatus.classList.remove("hidden");addStatus.style.color="var(--r)";addStatus.textContent="Error: "+e.message}
     addBtn.disabled=false;addBtn.textContent="Add Account";
   }},"Add Account");
