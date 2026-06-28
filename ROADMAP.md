@@ -11,13 +11,15 @@
 ### v2.8 — Jun 27, 2026
 
 #### v2.8.1
-<sub>Per-owner duplicate accounts + Combined-view owner break-out</sub>
+<sub>Per-owner duplicate accounts + Combined-view owner break-out · Balance Sheet onboarded opening balances + account rename</sub>
 
 ##### Fixes
 - **Two members can hold the same account** — Adding an account whose label matched one another household member already owned (e.g. both have "Charles Schwab") failed: `accounts.id` is a household-wide text-slug primary key, but both the duplicate-name guard and the slug derivation only looked at the *current owner's* rows, so Shilpa's add derived the existing `charles_schwab` id and collided on the PK (and the Combined header view also falsely blocked the name). Onboarding's "My Accounts" is now scoped to the signed-in user (`importerQS`) so the name check is per-person, and the slug is de-duplicated against **every** household account id with a readable per-owner suffix (`charles_schwab` → `charles_schwab_shilpa`, numeric fallback if needed). The `id` is internal only — transactions reference accounts by `payment_type` label — so existing data is untouched. (~2,000 tokens)
 
 ##### Features
 - **Combined Balance Sheet owner break-out** — When 2+ household members hold the same account, the Combined view still shows the household total but now renders a small per-owner chip row underneath it (e.g. `Mark $12,300 · Shilpa $4,800`), reusing the Tags view's owner-color chips. Powered by one cached `get_ledger_balances_scoped` call per member (no DB migration); single-person and legacy single-user views are unchanged. (~1,500 tokens)
+- **Onboarded accounts appear on the Balance Sheet immediately (FEA-104)** — Adding an account in Onboarding with a "Current Balance" now writes a single `adjustment`-category opening-balance transaction so the account shows on the Balance Sheet right away at its stated amount, instead of being invisible until transactions are imported. Sign follows the ledger convention (`net_balance = -SUM(amount_usd)`, so `amount_usd = -target`): assets land positive, credit/liabilities negative. The `adjustment` category keeps it out of the income statement, and the existing import → reconcile flow still trues up idempotently. (~1,500 tokens)
+- **Rename an account / payment type from the Balance Sheet (FEA-105)** — The account-row right-click menu gained a second action, "Rename Account". It opens a small modal that PATCHes `transactions.payment_type` on every matching row plus the `accounts.label`, scoped via `ownerQS()` to match the active household/owner view, with a one-click Undo toast that reverses the rename. (~1,500 tokens)
 
 #### v2.8.0
 <sub>Pronto/Rippling payslip import for Shilpa</sub>
@@ -658,12 +660,14 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (154 items)</summary>
+<summary><strong>✅ Completed</strong> (156 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-105 | **Rename account from Balance Sheet** — The account-row right-click menu gained a "Rename Account" action that PATCHes `transactions.payment_type` on every matching row plus the `accounts.label`, scoped via `ownerQS()` to match the active household/owner view. One-click Undo toast reverses the rename. | Feature → Done | Jun 27 |
+| FEA-104 | **Onboarded accounts show on the Balance Sheet** — Adding an account in Onboarding with a "Current Balance" now writes a single `adjustment`-category opening-balance transaction (`amount_usd = -target`, target signed by account type) so the account appears on the Balance Sheet immediately at its stated amount. Excluded from the income statement; import → reconcile still trues up idempotently. | Feature → Done | Jun 27 |
 | FEA-103 | **Pronto/Rippling payslip import** — Shilpa's Rippling paystubs (`PRONTO.AI` + PEO `TAV EMPLOYER, LP`, one "Pronto" source) import via the existing Payslip flow. New `detectPayslipProfile` dispatcher + `parseRipplingPayslipPage()` reads the SUMMARY block, rolls employee DEDUCTIONS into one `Medical Insurance Benefits` (`health`) row, and posts `Pronto Income`/`Income Taxes and Social Security` with the same net-pay checksum as Mark's. `payment_type` strings match her account labels (`Wells Fargo Checking`, `Fidelity`) for correct Balance Sheet bucketing. Detects `401K (Pre-tax)`/Roth deductions + employer match (CO. CONTRIBUTION column) → Fidelity double-entry + `401K Match` income. Verified on all 5 sample stubs with real pdf.js; Pinterest path untouched. | Feature → Done | Jun 27 |
 | FEA-102 | **Onboarding import module** — New per-user Onboarding tab: add accounts (`accounts` rows, owner-stamped), import a CSV through the existing calibrated pipeline (Chase United Club auto-detected by the `chase` profile, `payment_type` = account label), and reconcile to a current balance via a single `adjustment` transaction dated before the earliest import (sign from account type; excluded from the income statement). AI personalization is now owner-scoped: `get_merchant_patterns_scoped` RPC + `importerQS()` scope `fetchMerchantPatterns`/`fetchSampleDescriptions`/`fetchAIRules` to the signed-in user, and `ai_rules` gained `owner`/`household_id`. | Feature → Done | Jun 20 |
 | INF-06 | **Cache Version Key** — Persisted `localStorage` offline caches (FEA-32) are now namespaced by `CACHE_VERSION` (`dc_v2_` prefix in `js/config.js`). On load, a one-time purge removes any legacy `dc_`-prefixed keys that don't match the current version, so a stale RPC/response shape from a prior deploy can no longer mis-render — bumping `CACHE_VERSION` invalidates all persisted caches cleanly. In-memory `_dc` cache (FEA-89) unaffected. | Infra → Done | Jun 11 |

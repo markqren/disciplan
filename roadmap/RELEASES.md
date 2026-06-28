@@ -12,13 +12,15 @@
 ### v2.8 — Jun 27, 2026
 
 #### v2.8.1
-<sub>Per-owner duplicate accounts + Combined-view owner break-out</sub>
+<sub>Per-owner duplicate accounts + Combined-view owner break-out · Balance Sheet onboarded opening balances + account rename</sub>
 
 ##### Fixes
 - **Two members can hold the same account** — Adding an account whose label matched one another household member already owned (e.g. both have "Charles Schwab") failed: `accounts.id` is a household-wide text-slug primary key, but both the duplicate-name guard and the slug derivation only looked at the *current owner's* rows, so Shilpa's add derived the existing `charles_schwab` id and collided on the PK (and the Combined header view also falsely blocked the name). Onboarding's "My Accounts" is now scoped to the signed-in user (`importerQS`) so the name check is per-person, and the slug is de-duplicated against **every** household account id with a readable per-owner suffix (`charles_schwab` → `charles_schwab_shilpa`, numeric fallback if needed). The `id` is internal only — transactions reference accounts by `payment_type` label — so existing data is untouched. (~2,000 tokens)
 
 ##### Features
 - **Combined Balance Sheet owner break-out** — When 2+ household members hold the same account, the Combined view still shows the household total but now renders a small per-owner chip row underneath it (e.g. `Mark $12,300 · Shilpa $4,800`), reusing the Tags view's owner-color chips. Powered by one cached `get_ledger_balances_scoped` call per member (no DB migration); single-person and legacy single-user views are unchanged. (~1,500 tokens)
+- **Onboarded accounts appear on the Balance Sheet immediately (FEA-104)** — Adding an account in Onboarding with a "Current Balance" now writes a single `adjustment`-category opening-balance transaction so the account shows on the Balance Sheet right away at its stated amount, instead of being invisible until transactions are imported. Sign follows the ledger convention (`net_balance = -SUM(amount_usd)`, so `amount_usd = -target`): assets land positive, credit/liabilities negative. The `adjustment` category keeps it out of the income statement, and the existing import → reconcile flow still trues up idempotently. (~1,500 tokens)
+- **Rename an account / payment type from the Balance Sheet (FEA-105)** — The account-row right-click menu gained a second action, "Rename Account". It opens a small modal that PATCHes `transactions.payment_type` on every matching row plus the `accounts.label`, scoped via `ownerQS()` to match the active household/owner view, with a one-click Undo toast that reverses the rename. (~1,500 tokens)
 
 #### v2.8.0
 <sub>Pronto/Rippling payslip import for Shilpa</sub>
