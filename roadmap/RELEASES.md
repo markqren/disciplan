@@ -11,6 +11,12 @@
 
 ### v2.8 — Jun 27, 2026
 
+#### v2.8.2
+<sub>Wells Fargo Checking/Savings CSV import with transfer pairing</sub>
+
+##### Features
+- **Wells Fargo import (FEA-106)** — Shilpa's Wells Fargo Checking & Savings statements (shared `DATE,DESCRIPTION,AMOUNT,CHECK #,STATUS` header) now import through the existing CSV pipeline via a new `wells_fargo` bank profile; the account auto-defaults from the filename (`Wells Fargo Savings`/`Wells Fargo Checking`, the latter added to `PTS`). A profile-level `classifyRow` (plumbed into `transformCSVRow`, guarded so Mark's `chase_checking` path is untouched) routes every row: **skips** payroll already captured by the payslip flow (`TAV EMPLOYER`/`PRONTO …PAYROLL`) and CC payments owned by the card import (`CHASE CREDIT CRD EPAY`, `BILT CARD PMT`, `AMEX EPAYMENT`); books Google payroll / interest / IRS refunds as **income**; parks Zelle (either direction) in **other**; and treats account-to-account moves (`ONLINE TRANSFER`, `ATM WITHDRAWAL`, `SCHWAB BROKERAGE`, `VENMO`, `Splitwise`, wires, Morgan Stanley) as **transfers**. Inflows post negative `amount_usd` / outflows positive so `balance = −SUM(amount_usd)` stays correct. Transfers get a counter-account dropdown in the review table and commit as a linked net-$0 financial swap (can't approve until the account is chosen); `findTransferPairs()` flags transfers whose opposite leg is already in the ledger (±2 days, matching amount) so re-imports and the second statement dedup cleanly. Verified the real `parseCSV`+`transformCSVRow` over both statements (347 + 16 rows): classification correct, all transfer pairs net to $0. (~6,000 tokens)
+
 #### v2.8.1
 <sub>Per-owner duplicate accounts + Combined-view owner break-out · Balance Sheet onboarded opening balances + account rename</sub>
 

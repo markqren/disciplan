@@ -10,6 +10,12 @@
 
 ### v2.8 — Jun 27, 2026
 
+#### v2.8.2
+<sub>Wells Fargo Checking/Savings CSV import with transfer pairing</sub>
+
+##### Features
+- **Wells Fargo import (FEA-106)** — Shilpa's Wells Fargo Checking & Savings statements (shared `DATE,DESCRIPTION,AMOUNT,CHECK #,STATUS` header) now import through the existing CSV pipeline via a new `wells_fargo` bank profile; the account auto-defaults from the filename (`Wells Fargo Savings`/`Wells Fargo Checking`, the latter added to `PTS`). A profile-level `classifyRow` (plumbed into `transformCSVRow`, guarded so Mark's `chase_checking` path is untouched) routes every row: **skips** payroll already captured by the payslip flow (`TAV EMPLOYER`/`PRONTO …PAYROLL`) and CC payments owned by the card import (`CHASE CREDIT CRD EPAY`, `BILT CARD PMT`, `AMEX EPAYMENT`); books Google payroll / interest / IRS refunds as **income**; parks Zelle (either direction) in **other**; and treats account-to-account moves (`ONLINE TRANSFER`, `ATM WITHDRAWAL`, `SCHWAB BROKERAGE`, `VENMO`, `Splitwise`, wires, Morgan Stanley) as **transfers**. Inflows post negative `amount_usd` / outflows positive so `balance = −SUM(amount_usd)` stays correct. Transfers get a counter-account dropdown in the review table and commit as a linked net-$0 financial swap (can't approve until the account is chosen); `findTransferPairs()` flags transfers whose opposite leg is already in the ledger (±2 days, matching amount) so re-imports and the second statement dedup cleanly. Verified the real `parseCSV`+`transformCSVRow` over both statements (347 + 16 rows): classification correct, all transfer pairs net to $0. (~6,000 tokens)
+
 #### v2.8.1
 <sub>Per-owner duplicate accounts + Combined-view owner break-out · Balance Sheet onboarded opening balances + account rename</sub>
 
@@ -660,12 +666,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (156 items)</summary>
+<summary><strong>✅ Completed</strong> (157 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-106 | **Wells Fargo Checking/Savings CSV import** — New `wells_fargo` bank profile imports Shilpa's WF statements through the existing CSV pipeline; account auto-defaults from filename (`Wells Fargo Savings`/`Wells Fargo Checking`). A profile `classifyRow` (plumbed into `transformCSVRow`, guarded so Mark's path is untouched) skips payslip-owned payroll and card-import-owned CC payments, books Google payroll/interest/IRS refunds as income, parks Zelle in `other`, and treats account-to-account moves (online transfer, ATM, Schwab, Venmo, Splitwise, wires) as transfers. Inflows post negative `amount_usd` to keep `balance = -SUM`. Transfers get a counter-account dropdown + commit as a linked net-$0 swap; `findTransferPairs()` dedups legs already in the ledger (±2 days). Verified over both statements (347+16 rows). | Feature → Done | Jun 27 |
 | FEA-105 | **Rename account from Balance Sheet** — The account-row right-click menu gained a "Rename Account" action that PATCHes `transactions.payment_type` on every matching row plus the `accounts.label`, scoped via `ownerQS()` to match the active household/owner view. One-click Undo toast reverses the rename. | Feature → Done | Jun 27 |
 | FEA-104 | **Onboarded accounts show on the Balance Sheet** — Adding an account in Onboarding with a "Current Balance" now writes a single `adjustment`-category opening-balance transaction (`amount_usd = -target`, target signed by account type) so the account appears on the Balance Sheet immediately at its stated amount. Excluded from the income statement; import → reconcile still trues up idempotently. | Feature → Done | Jun 27 |
 | FEA-103 | **Pronto/Rippling payslip import** — Shilpa's Rippling paystubs (`PRONTO.AI` + PEO `TAV EMPLOYER, LP`, one "Pronto" source) import via the existing Payslip flow. New `detectPayslipProfile` dispatcher + `parseRipplingPayslipPage()` reads the SUMMARY block, rolls employee DEDUCTIONS into one `Medical Insurance Benefits` (`health`) row, and posts `Pronto Income`/`Income Taxes and Social Security` with the same net-pay checksum as Mark's. `payment_type` strings match her account labels (`Wells Fargo Checking`, `Fidelity`) for correct Balance Sheet bucketing. Detects `401K (Pre-tax)`/Roth deductions + employer match (CO. CONTRIBUTION column) → Fidelity double-entry + `401K Match` income. Verified on all 5 sample stubs with real pdf.js; Pinterest path untouched. | Feature → Done | Jun 27 |

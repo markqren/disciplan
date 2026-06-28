@@ -13,10 +13,24 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
   if(isReturn)amt=-Math.abs(amt);
   const baseFields={date,description:row[cols.description]||"",amount_usd:amt,currency:profile.currency||"USD",fx_rate:1,original_amount:amt,service_start:date,service_end:date,payment_type:paymentType,tag:bulkTag||"",credit:"",_rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",_rowIndex:index};
   if(profile.isCheckingAccount&&!badDate){
-    const billName=profile.detectBillPay&&profile.detectBillPay(row);
-    if(billName)return{...baseFields,amount_usd:amt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:"Bill Payment: "+billName,_isBillPay:true};
-    if(profile.detectPayroll&&profile.detectPayroll(row))return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:"Payroll (payslip imported)",_isPayroll:true,_payrollAmount:amt};
-    if(rawAmt>0)return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"medium",service_days:1,daily_cost:amt,_status:"pending",_isDuplicate:false,_skipReason:null,_isCredit:true};
+    if(profile.classifyRow){
+      // Profile-driven classification (Wells Fargo). Inflows use NEGATIVE amount_usd
+      // (income/credit) and outflows POSITIVE (debit), matching balance = -sum(amount_usd).
+      const cl=profile.classifyRow(row,rawAmt);
+      if(cl){
+        if(cl._skip)return{...baseFields,amount_usd:amt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:cl._skip,_isBillPay:true};
+        if(cl._payrollSkip){const inc=Math.round(-Math.abs(rawAmt)*100)/100;return{...baseFields,amount_usd:inc,category_id:"income",ai_confidence:"high",service_days:1,daily_cost:inc,_status:"skipped",_isDuplicate:false,_skipReason:"Payroll (payslip imported)",_isPayroll:true,_payrollAmount:Math.abs(rawAmt)};}
+        if(cl._transfer){const impAmt=Math.round(-rawAmt*100)/100;return{...baseFields,amount_usd:impAmt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:impAmt,_status:"pending",_isDuplicate:false,_skipReason:null,_isTransfer:true,_transferTo:cl._transferTo||"",_transferRaw:rawAmt};}
+        if(cl._income){const inc=Math.round(-Math.abs(rawAmt)*100)/100;return{...baseFields,amount_usd:inc,category_id:"income",ai_confidence:"medium",service_days:1,daily_cost:inc,_status:"pending",_isDuplicate:false,_skipReason:null,_isCredit:true};}
+        if(cl._zelle){const za=Math.round(-rawAmt*100)/100;return{...baseFields,amount_usd:za,category_id:"other",ai_confidence:"low",service_days:1,daily_cost:za,_status:"pending",_isDuplicate:false,_skipReason:null};}
+      }
+      // null → fall through to the default AI-categorized expense path below
+    }else{
+      const billName=profile.detectBillPay&&profile.detectBillPay(row);
+      if(billName)return{...baseFields,amount_usd:amt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:"Bill Payment: "+billName,_isBillPay:true};
+      if(profile.detectPayroll&&profile.detectPayroll(row))return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:"Payroll (payslip imported)",_isPayroll:true,_payrollAmount:amt};
+      if(rawAmt>0)return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"medium",service_days:1,daily_cost:amt,_status:"pending",_isDuplicate:false,_skipReason:null,_isCredit:true};
+    }
   }
   if(isCCPay){
     const names=CC_PAY_NAMES[paymentType]||["Bill Paid: "+paymentType,paymentType+" Bill Payment"];
@@ -52,6 +66,30 @@ async function findDuplicates(candidates,paymentType){
       &&(!c.service_start||!e.service_start||c.service_start===e.service_start)
       &&(!c.service_end||!e.service_end||c.service_end===e.service_end));
     if(c._isDuplicate){c._status="skipped";c._skipReason="Duplicate"}
+  }
+}
+
+// Flags transfer rows whose paired leg is already in the ledger (e.g. the other
+// side of an internal Wells Fargo Checking<->Savings move imported earlier, or a
+// withdrawal already logged on the counter-account). The counter-leg posts
+// +_transferRaw on _transferTo; match on |amount| within +/-2 days.
+async function findTransferPairs(candidates){
+  const xfers=candidates.filter(c=>c._isTransfer&&c._status==="pending"&&c._transferTo);
+  if(!xfers.length)return;
+  const toD=s=>new Date(s+"T00:00:00");
+  const shift=(s,n)=>{const d=toD(s);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
+  const dayDiff=(a,b)=>Math.abs((toD(a)-toD(b))/864e5);
+  const byAcct={};
+  for(const c of xfers){(byAcct[c._transferTo]||(byAcct[c._transferTo]=[])).push(c)}
+  for(const[acct,group] of Object.entries(byAcct)){
+    const dates=group.map(c=>c.date).sort();
+    const minD=shift(dates[0],-3),maxD=shift(dates[dates.length-1],3);
+    let existing=[];
+    try{existing=await sb(`transactions?payment_type=eq.${encodeURIComponent(acct)}&date=gte.${minD}&date=lte.${maxD}&select=date,amount_usd${ownerQS()}`)}catch(e){continue}
+    for(const c of group){
+      const hit=existing.find(e=>Math.abs(Math.abs(e.amount_usd)-Math.abs(c._transferRaw))<0.02&&dayDiff(e.date,c.date)<=2);
+      if(hit){c._isDuplicate=true;c._status="skipped";c._skipReason="Transfer already paired ("+acct+")"}
+    }
   }
 }
 

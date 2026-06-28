@@ -228,7 +228,7 @@ function renderEntry(el){
       if(!csv.rows.length)throw new Error("No data rows found in CSV.");
 
       const profile=detectBankProfile(csv.headers);
-      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt");
+      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo");
       if(profile.reparse)csv=profile.reparse(text);
 
       // Auto-detect payment type from filename (only if user hasn't manually changed it)
@@ -237,6 +237,7 @@ function renderEntry(el){
         else if(profile.name==="chase")impPtSel.value="Chase Sapphire";
         else if(profile.name==="amex")impPtSel.value="AMEX Rose Gold";
         else if(profile.name==="bilt"||profile.name==="bilt_legacy")impPtSel.value="Bilt";
+        else if(profile.name==="wells_fargo")impPtSel.value=/sav/i.test(file.name)?"Wells Fargo Savings":"Wells Fargo Checking";
       }
       const pt=impPtSel.value;
       const tag=impTagInp.value.trim();
@@ -254,6 +255,7 @@ function renderEntry(el){
       // Duplicate detection
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
+      await findTransferPairs(candidates);
 
       const pending=candidates.filter(c=>c._status==="pending").length;
       if(!pending)impStatus.textContent="All transactions are duplicates or skipped.";

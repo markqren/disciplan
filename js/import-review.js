@@ -25,11 +25,11 @@ function renderReviewTable(container,candidates){
 
   const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
   bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
-    candidates.forEach(c=>{if(c.ai_confidence==="high"&&c._status==="pending")c._status="approved"});
+    candidates.forEach(c=>{if(c.ai_confidence==="high"&&c._status==="pending"&&!(c._isTransfer&&!c._transferTo))c._status="approved"});
     renderReviewTable(container,candidates);
   }},"\u2713 Approve All High-Confidence"));
   bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3)",onClick:()=>{
-    candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
+    candidates.forEach(c=>{if(c._status==="pending"&&!(c._isTransfer&&!c._transferTo))c._status="approved"});
     renderReviewTable(container,candidates);
   }},"\u2713 Approve All"));
   let saving=false;
@@ -78,7 +78,7 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{style:{cursor:c._status==="committed"?"default":"pointer",textAlign:"center",fontSize:"14px",color:statusColor,userSelect:"none"},onClick:()=>{
       if(c._status==="committed")return;
       if(c._isDuplicate&&c._status==="skipped")c._status="pending";
-      else if(c._status==="pending")c._status="approved";
+      else if(c._status==="pending"){if(c._isTransfer&&!c._transferTo){alert("Pick the account this transfer pairs to first.");return}c._status="approved"}
       else if(c._status==="approved")c._status="skipped";
       else c._status="pending";
       renderReviewTable(container,candidates);
@@ -87,10 +87,11 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}},fmtD(c.date)));
 
     const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}});
-    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
+    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c._isTransfer?"\u2194 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descMain.textContent=descText;
     if(c._isCCPayment){const pairHint=h("span",{style:{color:"rgba(255,255,255,0.3)",fontSize:"11px"}}," \u2192 Chase Chequing");descMain.append(pairHint)}
+    if(c._isTransfer){const pairHint=h("span",{style:{color:c._transferTo?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account");descMain.append(pairHint)}
     const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
     descTd.append(descMain,descSub);
@@ -99,8 +100,18 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
 
     const catTd=h("td");
+    const selStyle={background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"};
+    if(c._isTransfer){
+      // Transfer rows pick a counter-account (not a category — they stay financial).
+      const xferSel=h("select",{style:{...selStyle,border:c._transferTo?selStyle.border:"1px solid var(--y)"},onChange:e=>{c._transferTo=e.target.value;renderReviewTable(container,candidates)}});
+      if(!c._transferTo)xferSel.append(h("option",{value:"",selected:true},"\u2014 pick account \u2014"));
+      PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c._transferTo)o.selected=true;xferSel.append(o)});
+      catTd.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)",marginRight:"4px"}},"\u2194"));
+      catTd.append(xferSel);
+      tr.append(catTd);
+    }else{
     catTd.append(h("span",{style:{display:"inline-block",width:"6px",height:"6px",borderRadius:"50%",marginRight:"4px",background:c.ai_confidence==="high"?"var(--g)":c.ai_confidence==="medium"?"var(--y)":"var(--r)"}}));
-    const catSel2=h("select",{style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"},onChange:e=>{
+    const catSel2=h("select",{style:selStyle,onChange:e=>{
       c.category_id=e.target.value;
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
       c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
@@ -113,6 +124,7 @@ function renderReviewTable(container,candidates){
     CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;catSel2.append(o)});
     catTd.append(catSel2);
     tr.append(catTd);
+    }
 
     tr.append(h("td",{class:"m hide-m",style:{color:"rgba(255,255,255,0.4)",whiteSpace:"nowrap",fontSize:"11px"}},
       c.service_start===c.service_end?fmtD(c.date):`${fmtD(c.service_start)}\u2013${fmtD(c.service_end)}`));
@@ -359,6 +371,25 @@ async function commitImport(candidates){
       }
     }
   }
+  // Generate paired counter-legs for transfers (financial swap, nets to $0) and track for linking.
+  // Imported leg posts -_transferRaw on the source account; the counter leg posts +_transferRaw.
+  const xferPairs=valid.filter(c=>c._isTransfer&&c._transferTo);
+  const xferLinkPairs=[];// [{sideAIdx, sideBIdx}]
+  for(const c of xferPairs){
+    const counterAmt=Math.round(c._transferRaw*100)/100;
+    const sideAIdx=valid.indexOf(c);
+    const sideBIdx=rows.length;
+    xferLinkPairs.push({sideAIdx,sideBIdx});
+    rows.push({
+      date:c.date,service_start:c.date,service_end:c.date,
+      description:c.description||c._rawDescription,category_id:"financial",
+      original_amount:counterAmt,currency:c.currency,fx_rate:c.fx_rate,
+      amount_usd:counterAmt,
+      payment_type:c._transferTo,tag:(c.tag||"").toLowerCase().trim(),
+      daily_cost:counterAmt,service_days:1,credit:"",
+      import_batch:batchId,bank_description:null,bank_category:null,ai_original:null
+    });
+  }
   const uniqueTags=[...new Set(rows.map(r=>r.tag).filter(Boolean))];
   for(const t of uniqueTags)await ensureTagExists(t);
   const inserted=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(rows)});
@@ -366,6 +397,12 @@ async function commitImport(candidates){
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   // Link CC payment Side A ↔ Side B pairs
   for(const pair of ccLinkPairs){
+    const sideA=inserted[pair.sideAIdx];
+    const sideB=inserted[pair.sideBIdx];
+    if(sideA?.id&&sideB?.id)await linkToGroup(sideA,sideB);
+  }
+  // Link transfer Side A (source) ↔ Side B (counter-account) pairs
+  for(const pair of xferLinkPairs){
     const sideA=inserted[pair.sideAIdx];
     const sideB=inserted[pair.sideBIdx];
     if(sideA?.id&&sideB?.id)await linkToGroup(sideA,sideB);
