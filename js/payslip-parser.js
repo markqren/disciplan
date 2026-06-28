@@ -126,6 +126,64 @@ function parsePayslipPage(lines,fullText){
     preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false};
 }
 
+// Identify which employer/payroll layout a page belongs to. Defaults to the
+// Pinterest/Workday parser so existing behavior is unchanged for any unknown PDF.
+function detectPayslipProfile(fullText){
+  for(const[key,prof] of Object.entries(PAYSLIP_PROFILES)){
+    if(key==="pinterest")continue; // checked last as the default fallback
+    if(prof.detect&&prof.detect(fullText))return key;
+  }
+  return "pinterest";
+}
+
+// Rippling layout (Shilpa / Pronto). Structure differs entirely from Workday:
+// SUMMARY block (Gross Pay / Deductions / Taxes / Net Pay), a DEDUCTIONS section
+// with employee+company columns, and PAY PERIOD / PAY DATE labels. Multi-line
+// label wrapping means amounts often land on their own row, so 401K and similar
+// items are matched against fullText (PDF reading order) with line fallbacks.
+function parseRipplingPayslipPage(lines,fullText){
+  // Pay period (the only "MM/DD/YYYY - MM/DD/YYYY" range on the stub) + pay date.
+  const pm=fullText.match(/(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/);
+  if(!pm)return null;
+  const ppb=convertMMDDYYYY(pm[1]),ppe=convertMMDDYYYY(pm[2]);
+  const dm=fullText.match(/PAY DATE:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const cd=dm?convertMMDDYYYY(dm[1]):ppe;
+
+  // SUMMARY totals — single-line rows: "<Label> $current $ytd". Take current (first).
+  let grossPay=0,taxes=0,deductions=0,netPay=0;
+  for(const ln of lines){
+    let m;
+    if((m=ln.match(/^Gross Pay\s+\$?([\d,]+\.\d{2})/)))grossPay=pn(m[1]);
+    else if((m=ln.match(/^Net Pay\s+\$?([\d,]+\.\d{2})/)))netPay=pn(m[1]);
+    else if((m=ln.match(/^Taxes\s+\$?([\d,]+\.\d{2})/)))taxes=pn(m[1]);
+    else if((m=ln.match(/^Deductions\s+\$?([\d,]+\.\d{2})/)))deductions=pn(m[1]);
+  }
+  // fullText fallbacks (handles SUMMARY rows that wrapped across PDF lines).
+  if(!grossPay){const m=fullText.match(/Gross Pay\s+\$?([\d,]+\.\d{2})/);if(m)grossPay=pn(m[1]);}
+  if(!netPay){const m=fullText.match(/Net Pay\s+\$?([\d,]+\.\d{2})/);if(m)netPay=pn(m[1]);}
+  if(!taxes){const m=fullText.match(/(?:^|\s)Taxes\s+\$?([\d,]+\.\d{2})/);if(m)taxes=pn(m[1]);}
+  // Deductions stays 0 when there is no deductions section (e.g. the Pronto.ai stub).
+
+  if(grossPay===0)return null;
+
+  // 401K lines. DEDUCTIONS columns are: CURRENT EMP. DEDUCTION | CURRENT CO.
+  // CONTRIBUTION | YTD EMP. | YTD CO. So group 1 = employee deferral, group 2 =
+  // employer match (income into her 401K). Captured for both pre-tax and Roth.
+  let preTax401k=0,deferral401k=0,match401k=0;
+  const preM=fullText.match(/401\s*\(?k\)?\s*\(Pre-?tax\)\s*Deduction\s+\$?([\d,]+\.\d{2})(?:\s+\$?([\d,]+\.\d{2}))?/i);
+  if(preM){preTax401k=pn(preM[1]);if(preM[2])match401k+=pn(preM[2]);}
+  const rothM=fullText.match(/401\s*\(?k\)?\s*\((?:Roth|After-?tax)\)\s*Deduction\s+\$?([\d,]+\.\d{2})(?:\s+\$?([\d,]+\.\d{2}))?/i);
+  if(rothM){deferral401k=pn(rothM[1]);if(rothM[2])match401k+=pn(rothM[2]);}
+
+  // preTaxTotal carries the full SUMMARY deductions so the review net-pay checksum
+  // (earningsTotal - gtl - taxes - preTaxTotal - postTaxTotal) reconciles to Net Pay.
+  // The Pronto branch of generatePayslipTransactions splits 401K back out of it.
+  return{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay,netPay,
+    earningsTotal:grossPay,employeeTaxTotal:taxes,preTaxTotal:deductions,postTaxTotal:0,
+    gtl:0,preTax401k,deferral401k,fsa:0,match401k,rsuOffset:0,connectivityReimb:0,
+    isRSU:false,isSkip:false,company:"Pronto"};
+}
+
 async function parsePayslipPDF(file){
   const buf=await file.arrayBuffer();
   const pdf=await pdfjsLib.getDocument({data:buf}).promise;
@@ -135,7 +193,10 @@ async function parsePayslipPDF(file){
     const tc=await pg.getTextContent();
     const lines=extractLinesFromPage(tc);
     const fullText=tc.items.map(it=>it.str).join(" ");
-    const parsed=parsePayslipPage(lines,fullText);
+    const profile=detectPayslipProfile(fullText);
+    const parsed=profile==="pronto"
+      ?parseRipplingPayslipPage(lines,fullText)
+      :parsePayslipPage(lines,fullText);
     if(parsed)pages.push(parsed);
   }
   return pages;
@@ -222,7 +283,52 @@ function generatePayslipTransactions(pages,enteredDate){
   for(const p of pages){
     if(p.isSkip)continue;
     const ss=p.payPeriodBegin,se=p.payPeriodEnd;
-    if(p.isRSU){
+    if(p.company==="Pronto"){
+      const cfg=PAYSLIP_PROFILES.pronto;
+      const grp=`${fmtD(ss)} \u2013 ${fmtD(se)} (Pronto)`;
+      // Medical = total employee deductions minus the 401K lines (split out below).
+      const medical=Math.round((p.preTaxTotal-p.preTax401k-p.deferral401k)*100)/100;
+      txns.push({date:enteredDate,service_start:ss,service_end:se,
+        description:"Pronto Income",category_id:"income",
+        amount_usd:-p.earningsTotal,payment_type:cfg.bank,
+        _group:grp,_source:"salary",_pageData:p});
+      txns.push({date:enteredDate,service_start:ss,service_end:se,
+        description:"Income Taxes and Social Security",category_id:"income",
+        amount_usd:p.employeeTaxTotal,payment_type:cfg.bank,
+        _group:grp,_source:"tax",_pageData:p});
+      if(medical>0.005){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Medical Insurance Benefits",category_id:"health",
+          amount_usd:medical,payment_type:cfg.bank,
+          _group:grp,_source:"benefits",_pageData:p});
+      }
+      if(p.preTax401k>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Pre-tax 401K",category_id:"financial",
+          amount_usd:p.preTax401k,payment_type:cfg.bank,
+          _group:grp,_source:"pretax_401k_out",_pageData:p});
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Fidelity Deposited Pre-tax 401K",category_id:"financial",
+          amount_usd:-p.preTax401k,payment_type:cfg.k401Account,
+          _group:grp,_source:"pretax_401k_in",_pageData:p});
+      }
+      if(p.deferral401k>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"401K (Roth)",category_id:"financial",
+          amount_usd:p.deferral401k,payment_type:cfg.bank,
+          _group:grp,_source:"401k_out",_pageData:p});
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"Fidelity Deposited 401K (Roth)",category_id:"financial",
+          amount_usd:-p.deferral401k,payment_type:cfg.k401Account,
+          _group:grp,_source:"401k_in",_pageData:p});
+      }
+      if(p.match401k>0){
+        txns.push({date:enteredDate,service_start:ss,service_end:se,
+          description:"401K Match",category_id:"income",
+          amount_usd:-p.match401k,payment_type:cfg.k401Account,
+          _group:grp,_source:"401k_match",_pageData:p});
+      }
+    }else if(p.isRSU){
       const vp=getQuarterlyVestingPeriod(ss);
       const q=Math.ceil((new Date(ss+"T00:00:00").getMonth()+1)/3);
       const y=new Date(ss+"T00:00:00").getFullYear();

@@ -8,6 +8,14 @@
 
 ## 🚀 Releases
 
+### v2.8 — Jun 27, 2026
+
+#### v2.8.0
+<sub>Pronto/Rippling payslip import for Shilpa</sub>
+
+##### Features
+- **Pronto payslip import (FEA-103)** — Shilpa's paychecks (Rippling-generated PDFs from `PRONTO.AI, INC.` and its PEO `TAV EMPLOYER, LP`, treated as one "Pronto" source) now import through the existing Payslip Import flow. Rather than bending Mark's Pinterest/Workday parser, a profile dispatcher (`detectPayslipProfile`) routes Rippling stubs to a new `parseRipplingPayslipPage()` that reads the SUMMARY block (Gross Pay / Deductions / Taxes / Net Pay), rolls the employee `DEDUCTIONS` lines (Medical/Dental/Vision/Life/LTD) into one `Medical Insurance Benefits` (`health`) row, and posts `Pronto Income` (−gross) + `Income Taxes and Social Security` (+taxes) — mirroring Mark's recording style with the same net-pay checksum. `payment_type` values match her real account labels exactly (`Wells Fargo Checking`, `Fidelity`) so the Balance Sheet buckets them correctly. **401K intelligence (future-proofed and already live on her Jun stub):** detects `401K (Pre-tax) Deduction` (and Roth/after-tax) in the deductions section, splits it out of the medical roll-up, and generates the Vanguard-style double entry to **Fidelity** (`account_type: investment`), plus a `401K Match` income row from the employer `CURRENT CO. CONTRIBUTION` column. Verified against all 5 sample stubs with the real pdf.js — every period reconciles to Net Pay. Mark's Pinterest path is byte-for-byte unchanged. (~4,000 tokens)
+
 ### v2.7 — Jun 25, 2026
 
 #### v2.7.8
@@ -641,12 +649,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (153 items)</summary>
+<summary><strong>✅ Completed</strong> (154 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-103 | **Pronto/Rippling payslip import** — Shilpa's Rippling paystubs (`PRONTO.AI` + PEO `TAV EMPLOYER, LP`, one "Pronto" source) import via the existing Payslip flow. New `detectPayslipProfile` dispatcher + `parseRipplingPayslipPage()` reads the SUMMARY block, rolls employee DEDUCTIONS into one `Medical Insurance Benefits` (`health`) row, and posts `Pronto Income`/`Income Taxes and Social Security` with the same net-pay checksum as Mark's. `payment_type` strings match her account labels (`Wells Fargo Checking`, `Fidelity`) for correct Balance Sheet bucketing. Detects `401K (Pre-tax)`/Roth deductions + employer match (CO. CONTRIBUTION column) → Fidelity double-entry + `401K Match` income. Verified on all 5 sample stubs with real pdf.js; Pinterest path untouched. | Feature → Done | Jun 27 |
 | FEA-102 | **Onboarding import module** — New per-user Onboarding tab: add accounts (`accounts` rows, owner-stamped), import a CSV through the existing calibrated pipeline (Chase United Club auto-detected by the `chase` profile, `payment_type` = account label), and reconcile to a current balance via a single `adjustment` transaction dated before the earliest import (sign from account type; excluded from the income statement). AI personalization is now owner-scoped: `get_merchant_patterns_scoped` RPC + `importerQS()` scope `fetchMerchantPatterns`/`fetchSampleDescriptions`/`fetchAIRules` to the signed-in user, and `ai_rules` gained `owner`/`household_id`. | Feature → Done | Jun 20 |
 | INF-06 | **Cache Version Key** — Persisted `localStorage` offline caches (FEA-32) are now namespaced by `CACHE_VERSION` (`dc_v2_` prefix in `js/config.js`). On load, a one-time purge removes any legacy `dc_`-prefixed keys that don't match the current version, so a stale RPC/response shape from a prior deploy can no longer mis-render — bumping `CACHE_VERSION` invalidates all persisted caches cleanly. In-memory `_dc` cache (FEA-89) unaffected. | Infra → Done | Jun 11 |
 | UI-01 | **IS Unrealized G/L Card** — Income Statement shows investment as a standalone "Unrealized G/L" 5th KPI card on a `.g5` grid (separate from expenses/savings rate), with a dedicated detail-table row supporting per-month drilldown and a cross-year G/L column. The old "Show Inv" toggle (FEA-07) was removed entirely. Ledger-filter emoji-compaction sub-item dropped as not worthwhile (selects/date inputs can't be emoji-only; Clear/Subscriptions already iconified). | UI → Done | Jun 11 |

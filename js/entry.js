@@ -382,7 +382,7 @@ function renderEntry(el){
         if(!window.pdfjsLib)throw new Error("PDF parser not available. Reload the page.");
         pages=await parsePayslipPDF(file);
       }
-      if(!pages.length)throw new Error("No payslip data found. Is this a Pinterest payslip?");
+      if(!pages.length)throw new Error("No payslip data found. Is this a supported payslip (Pinterest or Pronto/Rippling)?");
 
       const active=pages.filter(p=>!p.isSkip);
       psSkippedPages=pages.filter(p=>p.isSkip);

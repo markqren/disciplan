@@ -9,6 +9,14 @@
 
 ## 🚀 Releases
 
+### v2.8 — Jun 27, 2026
+
+#### v2.8.0
+<sub>Pronto/Rippling payslip import for Shilpa</sub>
+
+##### Features
+- **Pronto payslip import (FEA-103)** — Shilpa's paychecks (Rippling-generated PDFs from `PRONTO.AI, INC.` and its PEO `TAV EMPLOYER, LP`, treated as one "Pronto" source) now import through the existing Payslip Import flow. Rather than bending Mark's Pinterest/Workday parser, a profile dispatcher (`detectPayslipProfile`) routes Rippling stubs to a new `parseRipplingPayslipPage()` that reads the SUMMARY block (Gross Pay / Deductions / Taxes / Net Pay), rolls the employee `DEDUCTIONS` lines (Medical/Dental/Vision/Life/LTD) into one `Medical Insurance Benefits` (`health`) row, and posts `Pronto Income` (−gross) + `Income Taxes and Social Security` (+taxes) — mirroring Mark's recording style with the same net-pay checksum. `payment_type` values match her real account labels exactly (`Wells Fargo Checking`, `Fidelity`) so the Balance Sheet buckets them correctly. **401K intelligence (future-proofed and already live on her Jun stub):** detects `401K (Pre-tax) Deduction` (and Roth/after-tax) in the deductions section, splits it out of the medical roll-up, and generates the Vanguard-style double entry to **Fidelity** (`account_type: investment`), plus a `401K Match` income row from the employer `CURRENT CO. CONTRIBUTION` column. Verified against all 5 sample stubs with the real pdf.js — every period reconciles to Net Pay. Mark's Pinterest path is byte-for-byte unchanged. (~4,000 tokens)
+
 ### v2.7 — Jun 25, 2026
 
 #### v2.7.8
