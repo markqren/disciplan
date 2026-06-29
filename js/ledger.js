@@ -942,6 +942,10 @@ async function renderLedger(el){
   // Cache subscription merchants for badge + filter
   let subMerchants=new Set();
   const subFetch=fetchSubscriptions().then(subs=>{subMerchants=new Set(subs.map(s=>s.merchant))});
+  // Cache the viewer's accounts so the payment-type filter only lists payment
+  // types they actually hold (scoped to the active owner/household view).
+  let acctLabels=[];
+  const acctFetch=sb("accounts?select=label&order=display_order"+ownerQS()).then(rows=>{acctLabels=(rows||[]).map(r=>r.label).filter(Boolean)}).catch(()=>{});
   fetchCreditNames();
 
   // Batch selection state
@@ -1021,9 +1025,18 @@ async function renderLedger(el){
   cs.addEventListener("change",()=>{f.cat=cs.value;state.page=0;loadPage()});
   fb.append(cs);
 
-  // Payment type filter
+  // Payment type filter — only the payment types the viewer holds an account for
+  // (scoped to the active owner/household by acctFetch). Falls back to the full
+  // PTS list before accounts load / when none exist, and always keeps the
+  // currently-selected payment type even if it has no account row.
   const ps=h("select",{style:fS+";cursor:pointer"});
-  ps.innerHTML=`<option value="">All Payments</option>`+PTS.map(p=>`<option value="${p}"${p===f.pt?" selected":""}>${p}</option>`).join("");
+  function fillPaymentOptions(){
+    let labels=acctLabels.length?acctLabels.slice():PTS.slice();
+    if(f.pt&&!labels.includes(f.pt))labels=[f.pt,...labels];
+    ps.innerHTML=`<option value="">All Payments</option>`+labels.map(p=>`<option value="${p}"${p===f.pt?" selected":""}>${p}</option>`).join("");
+  }
+  fillPaymentOptions();
+  acctFetch.then(fillPaymentOptions);
   ps.addEventListener("change",()=>{f.pt=ps.value;state.page=0;loadPage()});
   fb.append(ps);
 

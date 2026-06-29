@@ -9,6 +9,16 @@
 
 ## 🚀 Releases
 
+### v2.9 — Jun 28, 2026
+
+#### v2.9.0
+<sub>Change audit ledger with revert/undo · on-behalf-of onboarding · account-scoped Ledger payment filter</sub>
+
+##### Features
+- **Change audit ledger + revert/undo (FEA-109)** — New `disciplan.audit_log` records every INSERT/UPDATE/DELETE across all **18 owner-stamped tables** (transactions, accounts, balance_snapshots, tags, investment_*, cashback_*, splitwise_*, profiles, preferences, …) via one generic `SECURITY DEFINER` trigger (`fn_audit`). Each entry captures the full `old_data`/`new_data` JSONB, the columns that actually changed, the row's owner/household, **who** made the change (`actor` resolved from the JWT via `profiles`), and `txid_current()` so every row touched by a single REST request (a 300-row import, or an edit + its counter-leg) shares one undo group. No-op / `updated_at`-only writes are skipped so the log stays meaningful. Three `can_write`-gated RPCs reverse changes — `revert_audit_entry(id)`, `revert_operation(txid)` (undo a whole import/edit), and `undo_last()` — and because a revert issues normal DML it is itself audited, so undo is re-doable. RLS-scoped to the household; clients can read history but never write/tamper with it. Forward-looking (records from this deploy onward). Verified end-to-end on the live DB: insert → logged → `revert_operation` deleted the row, marked the original reverted, and captured the inverse DELETE attributed to the acting user. (~5,000 tokens)
+- **On-behalf-of onboarding (FEA-107)** — A new `writeOwner()` helper (`js/config.js`) stamps newly-created rows to the active person-view when an admin is viewing another household member (e.g. Mark setting up Shilpa's books from his login), falling back to the signed-in user for Combined / own-view — mirroring the DB RLS `can_write()`. The Onboarding tab now computes an `acting` owner and scopes its account list, slug de-duplication, reconcile-balance RPC, and earliest-transaction lookup to that person (generalizing `importerQS` → `actQS`), and shows a read-only banner when you're viewing a member you can't write. Fixes accounts/imports/reconcile silently landing under the wrong owner when set up on someone else's behalf. (~2,500 tokens)
+- **Ledger payment filter scoped to your accounts (FEA-108)** — The Ledger payment-type dropdown now lists only the payment types the viewer actually holds an account for (`accounts` scoped via `ownerQS()`) instead of the full 39-entry `PTS` list. Falls back to `PTS` before accounts load / when none exist, and always keeps the currently-selected payment type even if it has no account row. (~1,000 tokens)
+
 ### v2.8 — Jun 27, 2026
 
 #### v2.8.2

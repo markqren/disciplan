@@ -11,10 +11,19 @@ const obStatedBalance={};
 
 async function renderOnboarding(el){
   el.innerHTML="";
-  const who=currentDisplayName||"you";
+
+  // On-behalf-of setup: writes follow the active person-view. The "acting" owner is
+  // the viewed member when you may write them (admin), else the signed-in user. So
+  // Mark viewing Shilpa sets up Shilpa's books; Combined/own-view acts as yourself.
+  const viewOwner=scopeOwner();                               // null = Combined/legacy
+  const acting=(viewOwner!=null&&canWriteOwner(viewOwner))?viewOwner:currentOwner;
+  const actingName=(householdMembers.find(m=>m.owner===acting)||{}).display_name||currentDisplayName||"you";
+  const readOnly=viewOwner!=null&&!canWriteOwner(viewOwner); // viewing a member you cannot write
+  // PostgREST scope for the acting owner (generalizes importerQS to the viewed person).
+  const actQS=currentHousehold!=null?`&household_id=eq.${currentHousehold}`+(acting!=null?`&owner=eq.${encodeURIComponent(acting)}`:""):"";
 
   const intro=h("div",{class:"cd"});
-  intro.innerHTML=`<h2 style="margin:0 0 6px">Onboarding</h2><p class="sub" style="margin:0">Set up accounts, import their transactions, then reconcile each account to its current balance${currentOwner?` — for ${who}`:""}.</p>`;
+  intro.innerHTML=`<h2 style="margin:0 0 6px">Onboarding</h2><p class="sub" style="margin:0">Set up accounts, import their transactions, then reconcile each account to its current balance${currentOwner?` — for ${actingName}`:""}.</p>`;
   el.append(intro);
 
   if(currentOwner==null){
@@ -23,11 +32,19 @@ async function renderOnboarding(el){
     el.append(warn);
   }
 
+  if(readOnly){
+    const note=h("div",{class:"cd",style:{borderColor:"rgba(242,204,143,0.3)",color:"var(--y)",fontSize:"12px"}},
+      `You're viewing ${actingName}'s setup. Only ${actingName} (or a household admin) can add or import accounts here — switch to your own view or Combined to set up your own.`);
+    el.append(note);
+    return;
+  }
+
   let accts=[];
-  // "My Accounts" is always the signed-in user's own set (importerQS), not the
-  // header person-view — so the duplicate-name check below is per-person and a
-  // Combined header view never falsely blocks adding an account another member owns.
-  try{accts=await sb("accounts?order=display_order"+importerQS())}catch(e){accts=[]}
+  // "My Accounts" is the acting owner's set — the signed-in user normally, or the
+  // viewed member when an admin is setting them up. Scoping the list to one person
+  // keeps the duplicate-name check per-person and never falsely blocks adding an
+  // account another household member already owns.
+  try{accts=await sb("accounts?order=display_order"+actQS)}catch(e){accts=[]}
 
   // ── Card 1: My Accounts ─────────────────────────────────────────────────
   const acctCard=h("div",{class:"cd"});
@@ -69,7 +86,7 @@ async function renderOnboarding(el){
       catch(e){existingIds=new Set(accts.map(a=>a.id).filter(Boolean))}
       const base=label.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_+|_+$/g,"")||"account";
       let id=base;
-      if(existingIds.has(id)&&currentOwner)id=`${base}_${currentOwner}`;
+      if(existingIds.has(id)&&acting)id=`${base}_${acting}`;
       let n=2;while(existingIds.has(id))id=`${base}_${n++}`;
       const acctType=typeSel.value;
       const created=await sb("accounts",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id,label,account_type:acctType,display_order:maxOrder+1,is_active:true})});
@@ -209,7 +226,7 @@ async function renderOnboarding(el){
       const acct=accts.find(a=>a.label===label);
       const isAsset=obIsAsset(acct?.account_type);
       const target=isAsset?stated:-Math.abs(stated);
-      const bals=await sbRPC("get_ledger_balances_scoped",{p_owner:currentOwner,p_household_id:currentHousehold});
+      const bals=await sbRPC("get_ledger_balances_scoped",{p_owner:acting,p_household_id:currentHousehold});
       const found=(bals||[]).find(b=>b.payment_type===label);
       const net=found?parseFloat(found.net_balance)||0:0;
       recDelta=Math.round((net-target)*100)/100;
@@ -228,7 +245,7 @@ async function renderOnboarding(el){
     if(!recLabel||Math.abs(recDelta)<0.01)return;
     recApplyBtn.disabled=true;recApplyBtn.textContent="Creating...";
     try{
-      const earliest=await sb(`transactions?payment_type=eq.${encodeURIComponent(recLabel)}&select=date&order=date.asc&limit=1`+importerQS());
+      const earliest=await sb(`transactions?payment_type=eq.${encodeURIComponent(recLabel)}&select=date&order=date.asc&limit=1`+actQS);
       let d=earliest&&earliest.length?earliest[0].date:today();
       const dt=new Date(d+"T00:00:00");dt.setDate(dt.getDate()-1);
       const adjDate=dt.toISOString().slice(0,10);

@@ -69,6 +69,16 @@ function importerQS(){
   return qs;
 }
 
+// Owner that NEW rows are stamped to. Normally the signed-in user, but when an
+// admin is viewing another household member (the on-behalf-of case, e.g. setting
+// up Shilpa's accounts from Mark's login) writes follow the active person-view so
+// the data lands in that member's books. Combined/legacy views and any view the
+// user may not write fall back to the signed-in user. Mirrors RLS can_write().
+function writeOwner(){
+  const o = scopeOwner();
+  return (o != null && canWriteOwner(o)) ? o : currentOwner;
+}
+
 // RPC dispatcher: Combined → original RPC (untouched, guaranteed-correct);
 // single-person → the *_scoped variant with owner/household params.
 async function scopedRPC(baseFn, params = {}){
@@ -132,7 +142,8 @@ async function sb(path,opts={}){
     if(OWNED_TABLES.has(table)){
       try{
         let b=JSON.parse(rest.body);
-        const stamp=o=>{if(o&&typeof o==="object"){if(o.owner===undefined)o.owner=currentOwner;if(o.household_id===undefined)o.household_id=currentHousehold}return o};
+        const wo=writeOwner();
+        const stamp=o=>{if(o&&typeof o==="object"){if(o.owner===undefined)o.owner=wo;if(o.household_id===undefined)o.household_id=currentHousehold}return o};
         b=Array.isArray(b)?b.map(stamp):stamp(b);
         rest.body=JSON.stringify(b);
       }catch(e){/* non-JSON body: leave as-is */}

@@ -1,12 +1,22 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jun 27, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jun 28, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 
 
 ## 🚀 Releases
+
+### v2.9 — Jun 28, 2026
+
+#### v2.9.0
+<sub>Change audit ledger with revert/undo · on-behalf-of onboarding · account-scoped Ledger payment filter</sub>
+
+##### Features
+- **Change audit ledger + revert/undo (FEA-109)** — New `disciplan.audit_log` records every INSERT/UPDATE/DELETE across all **18 owner-stamped tables** (transactions, accounts, balance_snapshots, tags, investment_*, cashback_*, splitwise_*, profiles, preferences, …) via one generic `SECURITY DEFINER` trigger (`fn_audit`). Each entry captures the full `old_data`/`new_data` JSONB, the columns that actually changed, the row's owner/household, **who** made the change (`actor` resolved from the JWT via `profiles`), and `txid_current()` so every row touched by a single REST request (a 300-row import, or an edit + its counter-leg) shares one undo group. No-op / `updated_at`-only writes are skipped so the log stays meaningful. Three `can_write`-gated RPCs reverse changes — `revert_audit_entry(id)`, `revert_operation(txid)` (undo a whole import/edit), and `undo_last()` — and because a revert issues normal DML it is itself audited, so undo is re-doable. RLS-scoped to the household; clients can read history but never write/tamper with it. Forward-looking (records from this deploy onward). Verified end-to-end on the live DB: insert → logged → `revert_operation` deleted the row, marked the original reverted, and captured the inverse DELETE attributed to the acting user. (~5,000 tokens)
+- **On-behalf-of onboarding (FEA-107)** — A new `writeOwner()` helper (`js/config.js`) stamps newly-created rows to the active person-view when an admin is viewing another household member (e.g. Mark setting up Shilpa's books from his login), falling back to the signed-in user for Combined / own-view — mirroring the DB RLS `can_write()`. The Onboarding tab now computes an `acting` owner and scopes its account list, slug de-duplication, reconcile-balance RPC, and earliest-transaction lookup to that person (generalizing `importerQS` → `actQS`), and shows a read-only banner when you're viewing a member you can't write. Fixes accounts/imports/reconcile silently landing under the wrong owner when set up on someone else's behalf. (~2,500 tokens)
+- **Ledger payment filter scoped to your accounts (FEA-108)** — The Ledger payment-type dropdown now lists only the payment types the viewer actually holds an account for (`accounts` scoped via `ownerQS()`) instead of the full 39-entry `PTS` list. Falls back to `PTS` before accounts load / when none exist, and always keeps the currently-selected payment type even if it has no account row. (~1,000 tokens)
 
 ### v2.8 — Jun 27, 2026
 
@@ -666,12 +676,15 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (157 items)</summary>
+<summary><strong>✅ Completed</strong> (160 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-109 | **Change audit ledger + revert/undo** — `disciplan.audit_log` records every INSERT/UPDATE/DELETE on all 18 owner-stamped tables via one generic `SECURITY DEFINER` trigger (`fn_audit`): full `old_data`/`new_data` JSONB, changed columns, row owner/household, `actor` (resolved from JWT via `profiles`), and `txid_current()` to group an operation. Skips no-op/`updated_at`-only writes. `can_write`-gated RPCs `revert_audit_entry(id)`, `revert_operation(txid)`, `undo_last()` reverse changes (and are themselves audited → redoable). RLS-scoped reads, tamper-proof writes, forward-looking. Verified insert→revert round trip on the live DB. | Feature → Done | Jun 28 |
+| FEA-108 | **Ledger payment filter scoped to accounts** — The Ledger payment-type dropdown lists only payment types the viewer holds an account for (`accounts` via `ownerQS()`) rather than the full `PTS` list; falls back to `PTS` before load/when empty and keeps the active selection. | Feature → Done | Jun 28 |
+| FEA-107 | **On-behalf-of onboarding** — `writeOwner()` (`js/config.js`) stamps new rows to the active person-view when an admin views another member (else the signed-in user), mirroring RLS `can_write()`. Onboarding scopes its account list, slug dedup, reconcile RPC, and earliest-date lookup to the `acting` owner (`actQS`), with a read-only banner when viewing a member you can't write. Fixes accounts/imports landing under the wrong owner. | Feature → Done | Jun 28 |
 | FEA-106 | **Wells Fargo Checking/Savings CSV import** — New `wells_fargo` bank profile imports Shilpa's WF statements through the existing CSV pipeline; account auto-defaults from filename (`Wells Fargo Savings`/`Wells Fargo Checking`). A profile `classifyRow` (plumbed into `transformCSVRow`, guarded so Mark's path is untouched) skips payslip-owned payroll and card-import-owned CC payments, books Google payroll/interest/IRS refunds as income, parks Zelle in `other`, and treats account-to-account moves (online transfer, ATM, Schwab, Venmo, Splitwise, wires) as transfers. Inflows post negative `amount_usd` to keep `balance = -SUM`. Transfers get a counter-account dropdown + commit as a linked net-$0 swap; `findTransferPairs()` dedups legs already in the ledger (±2 days). Verified over both statements (347+16 rows). | Feature → Done | Jun 27 |
 | FEA-105 | **Rename account from Balance Sheet** — The account-row right-click menu gained a "Rename Account" action that PATCHes `transactions.payment_type` on every matching row plus the `accounts.label`, scoped via `ownerQS()` to match the active household/owner view. One-click Undo toast reverses the rename. | Feature → Done | Jun 27 |
 | FEA-104 | **Onboarded accounts show on the Balance Sheet** — Adding an account in Onboarding with a "Current Balance" now writes a single `adjustment`-category opening-balance transaction (`amount_usd = -target`, target signed by account type) so the account appears on the Balance Sheet immediately at its stated amount. Excluded from the income statement; import → reconcile still trues up idempotently. | Feature → Done | Jun 27 |
