@@ -56,12 +56,13 @@ async function renderAIPortal(el){
 // ── SECTION 0: Newsletter ────────────────────────────────────────────────────
 
 async function renderNewsletter(el){
-  const[allLogs,ctxRows,strategies,pending,selections]=await Promise.all([
+  const[allLogs,ctxRows,strategies,pending,selections,followups]=await Promise.all([
     sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cost_usd,feedback_rating,feedback_comment,feedback_received_at,parse_fallback,dry_run"),
     sb("insight_context?select=id,content,updated_at"),
     sb("insight_strategy?order=priority_weight.desc&select=*"),
     sb("principles_pending?status=eq.pending&order=created_at.desc&select=*"),
-    sb("insight_selection_log?order=insight_log_id.desc&limit=10&select=*")
+    sb("insight_selection_log?order=insight_log_id.desc&limit=10&select=*"),
+    sb("insight_followups?order=created_at.desc&limit=15&select=id,created_at,source_log_id,source_insight_type,question,status,answer,answered_in_log_id,answered_at")
   ]);
   const ctx=ctxRows[0]||null;
   // Real sends drive KPIs; dry-runs are shown separately and never affect averages.
@@ -124,6 +125,37 @@ async function renderNewsletter(el){
       card.append(btnRow);
       el.append(card);
     }
+  }
+
+  // Follow-up questions (FEA-111) — pending get answered in the next newsletter.
+  if(followups.length){
+    const pendingF=followups.filter(f=>f.status==="pending");
+    const fH=h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px",marginTop:"20px"}});
+    fH.append(
+      h("div",{style:{fontWeight:"600",fontSize:"13px"}},"Follow-up Questions"+(pendingF.length?" — "+pendingF.length+" pending":"")),
+      pendingF.length?h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"2px 8px",opacity:"0.6"},title:"Mark all pending follow-ups answered without responding (clears the queue).",onClick:async()=>{
+        if(!confirm("Dismiss all "+pendingF.length+" pending follow-up question(s)? They will not be answered in the next newsletter."))return;
+        await Promise.all(pendingF.map(f=>sb(`insight_followups?id=eq.${f.id}`,{method:"PATCH",body:JSON.stringify({status:"answered",answered_at:new Date().toISOString()})})));
+        await renderNewsletter(el);
+      }},"Dismiss all"):h("span",{})
+    );
+    el.append(fH);
+    const fCard=h("div",{class:"cd",style:{padding:"0",overflow:"hidden",marginBottom:"20px"}});
+    for(const f of followups){
+      const isPending=f.status==="pending";
+      const row=h("div",{style:{padding:"10px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)",background:isPending?"rgba(242,204,143,0.05)":""}});
+      const top=h("div",{style:{display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap",fontSize:"12px"}});
+      top.append(
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",width:"85px",flexShrink:"0"}},(f.created_at||"").slice(0,10)),
+        h("span",{style:{fontSize:"10px",padding:"1px 6px",borderRadius:"3px",flexShrink:"0",fontFamily:"var(--mono)",background:isPending?"rgba(242,204,143,0.15)":"rgba(129,178,154,0.12)",color:isPending?"var(--y)":"var(--g)"}},isPending?"PENDING":"ANSWERED"),
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"re: "+(f.source_insight_type||"?").replace(/_/g," "))
+      );
+      row.append(top);
+      row.append(h("div",{style:{marginTop:"5px",fontSize:"12px",color:"rgba(255,255,255,0.8)",lineHeight:"1.5"}},f.question||""));
+      if(f.answer)row.append(h("div",{style:{marginTop:"5px",paddingLeft:"10px",borderLeft:"2px solid rgba(129,178,154,0.3)",fontSize:"11px",color:"rgba(255,255,255,0.5)",lineHeight:"1.5"}},f.answer));
+      fCard.append(row);
+    }
+    el.append(fCard);
   }
 
   // Strategy operator table

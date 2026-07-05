@@ -317,4 +317,18 @@ export interface InsightResponse {
   write_up: string;
   chart_config?: object;
   chart_configs?: object[];
+  // FEA-111: when Mark replied to a recent newsletter with a question, the writer
+  // answers it here. Rendered as a "Following up on your question" block above the
+  // CTA. Empty/omitted when there were no pending questions worth answering.
+  followup_response?: string;
+}
+
+// FEA-111: one queued follow-up question (disciplan.insight_followups). Read by
+// the next newsletter, answered inline, then marked answered.
+export interface FollowupRow {
+  id: number;
+  source_log_id: number | null;
+  source_insight_type: string | null;
+  question: string;
+  created_at: string;
 }

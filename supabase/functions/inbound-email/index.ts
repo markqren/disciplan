@@ -1175,6 +1175,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
           }
         }
 
+        // Capture follow-up QUESTIONS so the next newsletter can answer them.
+        // Feedback and questions overlap; we only queue a follow-up when the reply
+        // actually asks something (a "?" or an interrogative/imperative phrase),
+        // so pure praise/criticism ("too dramatic") doesn't create a dangling Q.
+        if (comment && comment.length > 5) {
+          const looksLikeQuestion = /\?/.test(comment) ||
+            /\b(why|what|whats|what's|how|which|when|where|can you|could you|would it|do you|is this|are these|explain|show me|tell me|give me|break ?down|breakdown|include|clarify)\b/i.test(comment);
+          if (looksLikeQuestion) {
+            try {
+              await supabase.from("insight_followups").insert({
+                source_log_id: logId,
+                source_insight_type: insightType,
+                question: comment.slice(0, 2000),
+                status: "pending",
+              });
+              console.log(`Follow-up question queued for next newsletter (log_id=${logId}).`);
+            } catch (e) {
+              console.error("Follow-up capture error:", e);
+            }
+          }
+        }
+
         // Distill substantive feedback into a *pending* principles update.
         // Guardrails: the inbound reply is untrusted; never let a single email rewrite the
         // whole principles document. Rather than regenerate the entire document (which

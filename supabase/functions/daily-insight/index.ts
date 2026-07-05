@@ -37,6 +37,7 @@ import type {
   Features,
   FlashbackContributor,
   FlashbackDayBreakdown,
+  FollowupRow,
   HealthCheckResult,
   ISRow,
   InsightContextRow,
@@ -1040,12 +1041,15 @@ async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, St
 }
 
 // ── LLM prompt: the LLM only writes the narrative + chart for the chosen archetype.
-function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, strategy?: Strategy): string {
+function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, strategy?: Strategy, followups: FollowupRow[] = []): string {
   const recentTypes = history.slice(0, 7).map(h => `${h.created_at.slice(0, 10)}: ${h.insight_type}${h.feedback_rating != null ? ` (rated ${h.feedback_rating}/10)` : ""}`).join("\n");
   const recentFeedback = history
     .filter(h => h.feedback_rating != null && h.feedback_comment)
     .slice(0, 6)
     .map(h => `${h.created_at.slice(0, 10)} [${h.insight_type} ${h.feedback_rating}/10]: "${h.feedback_comment}"`)
+    .join("\n");
+  const followupBlock = followups
+    .map((f, i) => `${i + 1}. [asked ${f.created_at.slice(0, 10)} re: "${f.source_insight_type ?? "an insight"}"] ${f.question}`)
     .join("\n");
 
   return `You are writing a daily personal-finance newsletter for Mark, who tracks 12,000+ transactions on an accrual basis since 2017 (now in 2026).
@@ -1079,6 +1083,10 @@ You may call run_finance_query up to a few times to fetch numbers the facts abov
   cashback_redemptions(id, date, item, payment_type, cashback_type, dollar_value, redemption_rate)
 Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. Prefer the facts when they already answer the question; only query for what's missing.
 
+` : ""}${followups.length ? `## MARK'S FOLLOW-UP QUESTIONS (answer these — highest priority):
+Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${INSIGHT_TOOLS_ENABLED ? "Use run_finance_query to pull the exact numbers each question needs — don't guess or defer." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
+${followupBlock}
+
 ` : ""}## WRITING INSTRUCTIONS:
 1. Write a tight 2-3 sentence narrative. Lead with a specific dollar number.
 2. Don't be dramatic about absolute deltas under $200. Don't editorialise small swings.
@@ -1099,7 +1107,8 @@ Return ONLY a single valid JSON object — no markdown, no prose around it:
   "subject": "Disciplan Insight — <short title> · ${today}",
   "key_stat": "<one compelling number, e.g. '$2,847' or '−12%'>",
   "key_stat_context": "<short phrase, e.g. 'spent in April (83% of budget)'>",
-  "write_up": "<2-3 sentences>",
+  "write_up": "<2-3 sentences>",${followups.length ? `
+  "followup_response": "<direct answer(s) to Mark's follow-up question(s) above; concise, number-led>",` : ""}
   "chart_config": {<valid Chart.js 4.x config>}        // OR "chart_configs": [{...}, {...}]
 }`;
 }
@@ -1144,7 +1153,15 @@ function buildEmail(r: InsightResponse, chartUrls: string[], costLine: string): 
     <td style="padding:18px 28px;font-size:14px;color:#333333;line-height:1.65">
       ${r.write_up}
     </td>
-  </tr>
+  </tr>${r.followup_response && r.followup_response.trim() ? `
+  <tr>
+    <td style="padding:0 28px 8px">
+      <div style="background:#fbf7ef;border-left:3px solid #F2CC8F;border-radius:0 6px 6px 0;padding:12px 16px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:#b08a3c;font-family:'JetBrains Mono',monospace;margin-bottom:6px">Following up on your question</div>
+        <div style="font-size:14px;color:#333333;line-height:1.6">${r.followup_response}</div>
+      </div>
+    </td>
+  </tr>` : ""}
   <tr>
     <td style="padding:4px 28px 24px;text-align:center">
       <a href="${APP_URL}" style="display:inline-block;background:#81B29A;color:#ffffff;padding:11px 28px;border-radius:8px;font-size:13px;font-weight:600;text-decoration:none;letter-spacing:0.01em">Open Disciplan →</a>
@@ -1405,6 +1422,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.warn("insight_strategy is empty — returning fallback email.");
   }
 
+  // ── 1b. Pending follow-up questions (FEA-111) ─────────────────────────────
+  // Questions Mark asked in reply to a recent newsletter. The writer answers
+  // them in a dedicated section; they're marked answered only after a real,
+  // non-fallback send so a bad day doesn't silently swallow them.
+  const { data: followupsRaw } = await supabase
+    .from("insight_followups")
+    .select("id, source_log_id, source_insight_type, question, created_at")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(5);
+  const pendingFollowups = (followupsRaw || []) as FollowupRow[];
+  if (pendingFollowups.length) {
+    console.log(`${pendingFollowups.length} pending follow-up question(s) to answer.`);
+  }
+
   // For fixture replays: derive each strategy's last_used_at from the (already
   // fixture-cutoff-filtered) history rather than the column value. This avoids
   // false cooldown blocks when replaying historical dates whose "future" insights
@@ -1451,7 +1483,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // The DB-driven per-archetype guidance and (optionally) the read-only query
     // tool are handed to the writer here.
     const chosenStrategy = strategies.get(chosen.insight_type);
-    const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy);
+    const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy, pendingFollowups);
     const gen = await generateInsightText(supabase, prompt);
     inputTokens  += gen.inputTokens;
     outputTokens += gen.outputTokens;
@@ -1567,7 +1599,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         ReplyTo: REPLY_TO,
         Subject: insight.subject,
         HtmlBody: html,
-        TextBody: `${insight.key_stat} — ${insight.key_stat_context}\n\n${insight.write_up}\n\nOpen Disciplan: ${APP_URL}\n\n---\nReply with a rating (e.g. 8/10) and comments.\n${costLine}`,
+        TextBody: `${insight.key_stat} — ${insight.key_stat_context}\n\n${insight.write_up}${insight.followup_response && insight.followup_response.trim() ? `\n\nFollowing up on your question:\n${insight.followup_response}` : ""}\n\nOpen Disciplan: ${APP_URL}\n\n---\nReply with a rating (e.g. 8/10) and comments.\n${costLine}`,
         MessageStream: "outbound",
       }),
     });
@@ -1603,6 +1635,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     .select("id")
     .single();
   const logId = logRow?.id;
+
+  // ── 7b. Resolve follow-ups (FEA-111) ──────────────────────────────────────
+  // Mark answered only on real, non-fallback sends. On dry-runs or fallback days
+  // the questions stay pending so they get a real answer next time.
+  if (!dryRun && !parseFallback && logId && pendingFollowups.length) {
+    const answer = insight.followup_response?.trim() || null;
+    await supabase
+      .from("insight_followups")
+      .update({
+        status:             "answered",
+        answered_in_log_id: logId,
+        answer,
+        answered_at:        new Date().toISOString(),
+      })
+      .in("id", pendingFollowups.map(f => f.id));
+    console.log(`Marked ${pendingFollowups.length} follow-up(s) answered in log ${logId}.`);
+  }
 
   if (logId && selection && chosen) {
     await supabase.from("insight_selection_log").insert({
@@ -1654,6 +1703,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     cost_usd: costUsd,
     parse_fallback: parseFallback,
     tool_calls: toolCalls,
+    followups_answered: (!dryRun && !parseFallback && logId) ? pendingFollowups.length : 0,
+    followup_response: insight.followup_response ?? null,
     exploration_taken: selection?.exploration_taken ?? false,
     eligible_count: selection?.scored.filter(s => s.passes_policy_gate).length ?? 0,
     insight_log_id: logId ?? null,
