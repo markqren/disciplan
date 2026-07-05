@@ -88,7 +88,15 @@ async function renderNewsletter(el){
 
   // Pending principles approval queue (Phase 0 guardrail)
   if(pending.length){
-    const pendH=h("div",{style:{fontWeight:"600",fontSize:"13px",marginBottom:"8px",color:"var(--y)"}},"Pending Principles Updates ("+pending.length+")");
+    const pendH=h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}});
+    pendH.append(
+      h("div",{style:{fontWeight:"600",fontSize:"13px",color:"var(--y)"}},"Pending Principles Updates ("+pending.length+")"),
+      h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"2px 8px",opacity:"0.6"},title:"Mark every pending suggestion as rejected (clears a stalled queue).",onClick:async()=>{
+        if(!confirm("Dismiss all "+pending.length+" pending principle suggestions?"))return;
+        await Promise.all(pending.map(p=>sb(`principles_pending?id=eq.${p.id}`,{method:"PATCH",body:JSON.stringify({status:"rejected",reviewed_at:new Date().toISOString(),reviewed_by:"mark"})})));
+        await renderNewsletter(el);
+      }},"Dismiss all")
+    );
     el.append(pendH);
     for(const p of pending){
       const card=h("div",{class:"cd",style:{padding:"14px",marginBottom:"10px",borderColor:"rgba(242,204,143,0.3)"}});
@@ -238,6 +246,7 @@ function renderStrategyTable(strategies,parentEl){
     {label:"Mthly Cap",width:"80px"},
     {label:"Weight",width:"60px"},
     {label:"Last Used",width:"95px"},
+    {label:"Guide",width:"56px"},
     {label:"Skip",flex:true}
   ];
   const thead=h("tr");
@@ -294,15 +303,51 @@ function renderStrategyTable(strategies,parentEl){
 
     const weightTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.7)"},title:"Set by feedback policy. Bounded to [0.10, 2.00]."},(s.priority_weight??1).toFixed(2));
     const lastUsedTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.4)",fontSize:"11px"}},s.last_used_at?s.last_used_at.slice(0,10):"never");
+    const guideTd=h("td",{style:{padding:"4px 10px"}});
+    const hasGuidance=!!(s.prompt_guidance&&s.prompt_guidance.trim());
+    const guideBtn=h("button",{class:"pg-btn",style:{fontSize:"10px",padding:"2px 8px",color:hasGuidance?"var(--g)":"rgba(255,255,255,0.5)"},title:s.prompt_guidance||"No guidance set",onClick:()=>openGuidanceEditor(s,parentEl)},"edit");
+    guideTd.append(guideBtn);
+
     const skipTd=h("td",{style:{padding:"6px 10px",color:"rgba(255,255,255,0.35)",fontSize:"11px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"260px"},title:s.last_skip_reason||""},(s.last_skip_reason||"").slice(0,40));
 
-    tr.append(enabledTd,typeTd,themeTd,avgTd,sentTd,ratedTd,cooldownTd,monthlyTd,weightTd,lastUsedTd,skipTd);
+    tr.append(enabledTd,typeTd,themeTd,avgTd,sentTd,ratedTd,cooldownTd,monthlyTd,weightTd,lastUsedTd,guideTd,skipTd);
     tbody.append(tr);
   }
 
   tbl.append(tbody);
   wrap.append(tbl);
   return wrap;
+}
+
+// Per-archetype guidance editor — writes insight_strategy.prompt_guidance +
+// accrual_basis. These are injected into the newsletter prompt for the chosen
+// insight, so editing here steers that archetype's output with no code deploy.
+async function openGuidanceEditor(s,parentEl){
+  const bg=h("div",{style:{position:"fixed",inset:"0",background:"rgba(0,0,0,0.7)",zIndex:"1000",display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}});
+  const modal=h("div",{class:"cd",style:{width:"100%",maxWidth:"640px",maxHeight:"80vh",display:"flex",flexDirection:"column",padding:"20px",gap:"12px"}});
+  modal.innerHTML=`<div style="font-weight:600;font-size:14px">Guidance \u2014 ${s.insight_type.replace(/_/g," ")}</div>
+    <div style="font-size:11px;color:rgba(255,255,255,0.4)">Injected into the newsletter prompt when this insight is chosen. Describe tone, structure, what to emphasise, chart requirements, etc.</div>`;
+  const ta=h("textarea",{style:{flex:"1",minHeight:"260px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:"6px",color:"#fff",padding:"12px",fontSize:"12px",fontFamily:"var(--mono)",resize:"vertical",lineHeight:"1.7"}});
+  ta.value=s.prompt_guidance||"";
+  const basisRow=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",fontSize:"12px",color:"rgba(255,255,255,0.6)"}});
+  const basisSel=h("select",{style:{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:"6px",color:"#fff",padding:"6px 10px",fontSize:"12px"}});
+  ["accrual","cash"].forEach(v=>{const o=h("option",{value:v},v);if((s.accrual_basis||"accrual")===v)o.selected=true;basisSel.append(o)});
+  basisRow.append(h("span",{},"Data basis:"),basisSel,h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"accrual = daily_cost over service period; cash = logged-date event"));
+  const btnRow=h("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end"}});
+  const cancelBtn=h("button",{class:"pg-btn",style:{opacity:"0.5"},onClick:()=>bg.remove()},"Cancel");
+  const saveBtn=h("button",{class:"pg-btn",onClick:async()=>{
+    saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    const body={prompt_guidance:ta.value.trim()||null,accrual_basis:basisSel.value,updated_at:new Date().toISOString()};
+    await sb(`insight_strategy?insight_type=eq.${encodeURIComponent(s.insight_type)}`,{method:"PATCH",body:JSON.stringify(body)});
+    s.prompt_guidance=body.prompt_guidance;s.accrual_basis=body.accrual_basis;
+    bg.remove();
+    await renderNewsletter(parentEl);
+  }},"Save");
+  btnRow.append(cancelBtn,saveBtn);
+  modal.append(ta,basisRow,btnRow);
+  bg.append(modal);
+  document.body.append(bg);
+  bg.addEventListener("click",e=>{if(e.target===bg)bg.remove()});
 }
 
 async function openPrinciplesEditor(el,ctx){

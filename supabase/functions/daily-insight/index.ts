@@ -75,6 +75,31 @@ const DRY_RUN_GLOBAL  = (Deno.env.get("INSIGHT_DRY_RUN") || "").trim() === "1";
 // must NOT silently fall back to "public" — that table no longer exists there.
 const DB_SCHEMA       = Deno.env.get("DB_SCHEMA") || "disciplan";
 
+// ── Recipient scoping (multi-user households) ───────────────────────────────
+// After multi-user households shipped, `transactions` holds every household
+// member's rows. This newsletter is for ONE person (Mark). Every query below is
+// filtered to INSIGHT_OWNER so we never blend another member's data into his
+// newsletter — the top cause of recent low ratings ("this is pulling Shilpa's
+// transaction data"). Override via the INSIGHT_OWNER secret; set it empty to
+// restore the legacy whole-household behaviour.
+const INSIGHT_OWNER        = ((Deno.env.get("INSIGHT_OWNER") ?? "mark").trim()) || null;
+const INSIGHT_HOUSEHOLD_ID = Deno.env.get("INSIGHT_HOUSEHOLD_ID")
+  ? Number(Deno.env.get("INSIGHT_HOUSEHOLD_ID"))
+  : null;
+// Ad-hoc query tool (Anthropic tool use). On by default; set INSIGHT_TOOLS=0 to disable.
+const INSIGHT_TOOLS_ENABLED = ((Deno.env.get("INSIGHT_TOOLS") ?? "1").trim()) !== "0";
+
+// Apply the recipient owner/household filter to any PostgREST query builder.
+// Kept generic so it can wrap a query at any point in the chain (eq returns the
+// same builder). No-op in legacy whole-household mode (INSIGHT_OWNER unset).
+// deno-lint-ignore no-explicit-any
+function scopeToOwner<T extends { eq: (col: string, val: any) => T }>(q: T): T {
+  let out = q;
+  if (INSIGHT_OWNER != null) out = out.eq("owner", INSIGHT_OWNER);
+  if (INSIGHT_HOUSEHOLD_ID != null) out = out.eq("household_id", INSIGHT_HOUSEHOLD_ID);
+  return out;
+}
+
 const FIXTURE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 const TO_EMAIL    = "mark@disciplan.dev";
@@ -202,7 +227,11 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
   const currentYear = parseInt(today.slice(0, 4), 10);
   const isResults = await Promise.all(
     [currentYear, currentYear - 1, currentYear - 2].map(y =>
-      supabase.rpc("get_income_statement", { p_year: y })
+      supabase.rpc("get_income_statement_scoped", {
+        p_year: y,
+        p_owner: INSIGHT_OWNER,
+        p_household_id: INSIGHT_HOUSEHOLD_ID,
+      })
     )
   );
   const allISRows: ISRow[] = isResults.flatMap(r => (r.data || []) as ISRow[]);
@@ -218,9 +247,9 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
   // Large transactions in last 7 days
   const sevenDaysAgo = new Date(today);
   sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
-  const { data: largeTxns } = await supabase
+  const { data: largeTxns } = await scopeToOwner(supabase
     .from("transactions")
-    .select("date,description,amount_usd,category_id,transaction_group_id,service_start,service_end")
+    .select("date,description,amount_usd,category_id,transaction_group_id,service_start,service_end"))
     .gte("date", sevenDaysAgo.toISOString().slice(0, 10))
     .not("category_id", "in", "(income,investment,adjustment)")
     .order("amount_usd", { ascending: false });
@@ -228,9 +257,9 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
   // Service periods expiring in next 30 days
   const thirtyDaysOut = new Date(today);
   thirtyDaysOut.setUTCDate(thirtyDaysOut.getUTCDate() + 30);
-  const { data: expiring } = await supabase
+  const { data: expiring } = await scopeToOwner(supabase
     .from("transactions")
-    .select("description,amount_usd,service_start,service_end,service_days,category_id,daily_cost")
+    .select("description,amount_usd,service_start,service_end,service_days,category_id,daily_cost"))
     .gte("service_end", today)
     .lte("service_end", thirtyDaysOut.toISOString().slice(0, 10))
     .not("category_id", "in", "(income,investment,adjustment)")
@@ -239,18 +268,26 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     .limit(20);
 
   // Tags currently active (overlap with today)
-  const { data: activeTags } = await supabase
+  const { data: activeTags } = await scopeToOwner(supabase
     .from("tags")
-    .select("name,start_date,end_date,tag_type")
+    .select("name,start_date,end_date,tag_type"))
     .lte("start_date", today)
     .or(`end_date.is.null,end_date.gte.${today}`)
     .order("start_date", { ascending: true });
 
-  // Tag summaries (RPC) for active and recent tags
-  const { data: tagSummaries } = await supabase.rpc("get_tag_summaries");
+  // Tag summaries (RPC) for active and recent tags — owner-scoped so accruals
+  // reflect only the recipient's transactions.
+  const { data: tagSummaries } = await supabase.rpc("get_tag_summaries_scoped", {
+    p_owner: INSIGHT_OWNER,
+    p_household_id: INSIGHT_HOUSEHOLD_ID,
+  });
 
-  // Data health check (RPC) — used by accrual_quality_alert in Phase 3
-  const { data: healthRaw } = await supabase.rpc("run_data_health_check");
+  // Data health check (RPC) — used by accrual_quality_alert in Phase 3. Scoped
+  // so it never surfaces another household member's data-quality issues.
+  const { data: healthRaw } = await supabase.rpc("run_data_health_check_scoped", {
+    p_owner: INSIGHT_OWNER,
+    p_household_id: INSIGHT_HOUSEHOLD_ID,
+  });
   const healthCheck = (healthRaw && typeof healthRaw === "object")
     ? (healthRaw as HealthCheckResult)
     : null;
@@ -259,9 +296,9 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
   // We only need expense-side fields. Using `today` (which may be a fixture date)
   // ensures dry-runs against historical dates see the right month-to-date slice.
   const monthStart = `${monthKey}-01`;
-  const { data: currentMonthTxnsRaw } = await supabase
+  const { data: currentMonthTxnsRaw } = await scopeToOwner(supabase
     .from("transactions")
-    .select("id,date,description,category_id,amount_usd,payment_type,tag")
+    .select("id,date,description,category_id,amount_usd,payment_type,tag"))
     .gte("date", monthStart)
     .lte("date", today)
     .not("category_id", "in", "(income,investment,adjustment)")
@@ -338,10 +375,10 @@ async function fetchYtdIncome(supabase: SupabaseClient, today: string): Promise<
   const queries = [currentYear, currentYear - 1, currentYear - 2].map(async (y) => {
     const yearStart = `${y}-01-01`;
     const yearTodayEquiv = `${y}-${mm}-${dd}`;
-    const { data, error } = await supabase
+    const { data, error } = await scopeToOwner(supabase
       .from("transactions")
       .select("amount_usd")
-      .eq("category_id", "income")
+      .eq("category_id", "income"))
       .gte("date", yearStart)
       .lte("date", yearTodayEquiv);
     if (error) {
@@ -367,15 +404,18 @@ async function fetchPastTagCandidates(supabase: SupabaseClient, today: string): 
   const minTotalSpend  = 200;
   const minTxnCount    = 5;
 
-  const { data: tagsRaw, error: tagsErr } = await supabase
+  const { data: tagsRaw, error: tagsErr } = await scopeToOwner(supabase
     .from("tags")
-    .select("name,start_date,end_date,tag_type")
+    .select("name,start_date,end_date,tag_type"))
     .not("end_date", "is", null);
   if (tagsErr) {
     console.error("fetchPastTagCandidates tags error:", tagsErr);
     return [];
   }
-  const { data: summariesRaw } = await supabase.rpc("get_tag_summaries");
+  const { data: summariesRaw } = await supabase.rpc("get_tag_summaries_scoped", {
+    p_owner: INSIGHT_OWNER,
+    p_household_id: INSIGHT_HOUSEHOLD_ID,
+  });
   const summaries = new Map<string, { total: number; txn_count: number; categories: Record<string, number> | null }>();
   for (const s of (summariesRaw || []) as Array<{ tag_name: string; total_accrual: number; txn_count: number; category_totals: Record<string, number> | null }>) {
     summaries.set(s.tag_name, { total: Number(s.total_accrual) || 0, txn_count: Number(s.txn_count) || 0, categories: s.category_totals });
@@ -437,18 +477,18 @@ async function fetchPastTagCandidates(supabase: SupabaseClient, today: string): 
   // Top txns + spend days, in parallel per tag.
   const enriched = await Promise.all(trimmed.map(async (e) => {
     const [{ data: topRaw }, { data: dayRaw }] = await Promise.all([
-      supabase
+      scopeToOwner(supabase
         .from("transactions")
         .select("date,description,amount_usd,category_id")
         .eq("tag", e.name)
-        .gt("amount_usd", 0)
+        .gt("amount_usd", 0))
         .order("amount_usd", { ascending: false })
         .limit(5),
-      supabase
+      scopeToOwner(supabase
         .from("transactions")
         .select("date,amount_usd")
         .eq("tag", e.name)
-        .gt("amount_usd", 0),
+        .gt("amount_usd", 0)),
     ]);
     const top_txns = ((topRaw || []) as Array<{ date: string; description: string; amount_usd: number; category_id: string }>)
       .map(r => ({ date: r.date, description: r.description || "", amount_usd: Number(r.amount_usd) || 0, category_id: r.category_id }));
@@ -522,9 +562,9 @@ async function computeDailyAccrualForDate(
   dateIso: string,
 ): Promise<FlashbackDayBreakdown | null> {
   // service_start <= date AND service_end >= date.
-  const { data, error } = await supabase
+  const { data, error } = await scopeToOwner(supabase
     .from("transactions")
-    .select("description,category_id,daily_cost,amount_usd,service_start,service_end,tag")
+    .select("description,category_id,daily_cost,amount_usd,service_start,service_end,tag"))
     .lte("service_start", dateIso)
     .gte("service_end", dateIso)
     .not("category_id", "in", "(income,investment,adjustment)")
@@ -615,14 +655,14 @@ async function fetchStreakStats(
     // parents. We coerce service_days <= 7 OR null to exclude always-on subs that
     // would mark every day as a "spend day" and drown the streak signal.
     const rows = await fetchAllPages<{ date: string }>(() =>
-      supabase
+      scopeToOwner(supabase
         .from("transactions")
         .select("date")
         .gte("date", trailingStart)
         .lte("date", today)
         .in("category_id", childIds)
         .or("service_days.is.null,service_days.lte.7")
-        .gt("amount_usd", 0)
+        .gt("amount_usd", 0))
         .order("date", { ascending: false })
     );
 
@@ -677,11 +717,11 @@ async function fetchStreakStats(
 async function fetchNetWorthSeries(supabase: SupabaseClient, today: string): Promise<NetWorthPoint[]> {
   const startIso = new Date(Date.parse(today) - 24 * 31 * 86_400_000).toISOString().slice(0, 10);
   const rows = await fetchAllPages<{ snapshot_date: string; balance_usd: number; accounts: { account_type: string } | null }>(() =>
-    supabase
+    scopeToOwner(supabase
       .from("balance_snapshots")
       .select("snapshot_date,balance_usd,accounts!inner(account_type)")
       .gte("snapshot_date", startIso)
-      .lte("snapshot_date", today)
+      .lte("snapshot_date", today))
       .order("snapshot_date", { ascending: true })
   );
   if (rows.length === 0) return [];
@@ -744,13 +784,13 @@ async function fetchMonthlyBurnInputs(
 
   // All txns whose service period overlaps the current month and aren't income/transfer.
   const rows = await fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string; amount_usd: number; date: string; service_days: number | null }>(() =>
-    supabase
+    scopeToOwner(supabase
       .from("transactions")
       .select("daily_cost,service_start,service_end,category_id,amount_usd,date,service_days")
       .lte("service_start", monthEnd)
       .gte("service_end", monthStart)
       .not("category_id", "in", "(income,investment,adjustment)")
-      .gt("daily_cost", 0)
+      .gt("daily_cost", 0))
   );
 
   let already_accrued_mtd = 0;
@@ -769,14 +809,14 @@ async function fetchMonthlyBurnInputs(
   // don't double-count what's already in locked_in_remainder.
   const trailingStart = new Date(Date.parse(today) - 30 * 86_400_000).toISOString().slice(0, 10);
   const variableRows = await fetchAllPages<{ amount_usd: number }>(() =>
-    supabase
+    scopeToOwner(supabase
       .from("transactions")
       .select("amount_usd")
       .gte("date", trailingStart)
       .lte("date", today)
       .not("category_id", "in", "(income,investment,adjustment)")
       .or("service_days.is.null,service_days.lte.7")
-      .gt("amount_usd", 0)
+      .gt("amount_usd", 0))
   );
   const trailing_30d_variable_total = variableRows.reduce((s, r) => s + (Number(r.amount_usd) || 0), 0);
   const trailing_30d_variable_daily_rate = trailing_30d_variable_total / 30;
@@ -842,11 +882,11 @@ async function fetchCashbackYtd(supabase: SupabaseClient, today: string): Promis
 
   // Cashback redemptions YTD.
   const cbRows = await fetchAllPages<{ payment_type: string | null; dollar_value: number }>(() =>
-    supabase
+    scopeToOwner(supabase
       .from("cashback_redemptions")
       .select("payment_type,dollar_value")
       .gte("date", yearStart)
-      .lte("date", today)
+      .lte("date", today))
   );
   if (cbRows.length === 0) return null;
 
@@ -866,14 +906,14 @@ async function fetchCashbackYtd(supabase: SupabaseClient, today: string): Promis
   if (cards.length === 0) return null;
 
   const spendRows = await fetchAllPages<{ payment_type: string | null; amount_usd: number }>(() =>
-    supabase
+    scopeToOwner(supabase
       .from("transactions")
       .select("payment_type,amount_usd")
       .gte("date", yearStart)
       .lte("date", today)
       .in("payment_type", cards)
       .not("category_id", "in", "(income,investment,adjustment)")
-      .gt("amount_usd", 0)
+      .gt("amount_usd", 0))
   );
   const spendByCard = new Map<string, number>();
   for (const r of spendRows) {
@@ -913,9 +953,9 @@ async function fetchTripsByYear(
   today: string,
   tagSummaries: TagSummary[] | null,
 ): Promise<Record<string, TripYearEntry[]>> {
-  const { data: tagsRaw } = await supabase
+  const { data: tagsRaw } = await scopeToOwner(supabase
     .from("tags")
-    .select("name,start_date,end_date,tag_type")
+    .select("name,start_date,end_date,tag_type"))
     .not("end_date", "is", null)
     .lte("end_date", today);
   const tags = (tagsRaw || []) as TagRow[];
@@ -991,6 +1031,8 @@ async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, St
       rating_sumsq:      row.rating_sumsq ?? 0,
       requires:          (row.requires as Record<string, unknown> | null) ?? {},
       theme:             row.theme ?? null,
+      prompt_guidance:   row.prompt_guidance ?? null,
+      accrual_basis:     row.accrual_basis ?? "accrual",
     };
     map.set(row.insight_type, r);
   }
@@ -998,7 +1040,7 @@ async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, St
 }
 
 // ── LLM prompt: the LLM only writes the narrative + chart for the chosen archetype.
-function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate): string {
+function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, strategy?: Strategy): string {
   const recentTypes = history.slice(0, 7).map(h => `${h.created_at.slice(0, 10)}: ${h.insight_type}${h.feedback_rating != null ? ` (rated ${h.feedback_rating}/10)` : ""}`).join("\n");
   const recentFeedback = history
     .filter(h => h.feedback_rating != null && h.feedback_comment)
@@ -1020,23 +1062,32 @@ ${recentTypes || "none"}
 ## RECENT FEEDBACK COMMENTS:
 ${recentFeedback || "none"}
 
-## STRUCTURED FACTS (your only source of numbers — do not invent):
+## STRUCTURED FACTS (pre-computed baseline — do not invent numbers; if you need a figure that isn't here, fetch it with run_finance_query):
 ${JSON.stringify(selected.facts, null, 2)}
 
-## WRITING INSTRUCTIONS:
-1. Write a tight 2-3 sentence narrative. Lead with a specific dollar number from the facts above.
-2. Don't be dramatic about absolute deltas under $200. Don't editorialise small swings.
-3. Use parent categories (food, home, personal, etc.) for summaries; only drill into children when relevant.
-4. Produce a Chart.js 4.x config (max 24 data points per dataset). Colors: #81B29A (positive/green), #E07A5F (over-budget/red), #4A6FA5 (neutral/blue), #F2CC8F (income/yellow). Background transparent.
+## DATA BASIS FOR THIS INSIGHT: ${(strategy?.accrual_basis ?? "accrual") === "cash"
+    ? "CASH / EVENT basis — these figures are single-day events keyed to the transaction (logged) date. Describe them as events on their date."
+    : "ACCRUAL basis — figures spread each transaction's cost as daily_cost across its [service_start, service_end] period. Describe spend as accrued over its service period, NOT as a one-day event on the logged date."}
 
-## ARCHETYPE-SPECIFIC GUIDANCE:
-- tag_recap → This is a *historical trip recap*, written in past tense ("you spent...", "the trip ran..."). Use the days_since_end to anchor when the trip happened. Lead with total spend or daily burn. Surface 1-2 specific top transactions for color (use facts.top_txns). Tone: nostalgic and observational, not analytical. NO recommendations.
-- category_anomaly → If facts.anomalies[0].drill_down is present, lead with the drill-down's rationale (e.g. "single merchant Whole Foods drove 60% of the spike"). The drill_down.method tells you whether to credit a merchant, tag, or set of descriptions. If drill_down is absent, fall back to the child_breakdown.
-- category_trend → When facts.chart_hint.multi_chart is true, you MUST emit "chart_configs" (array of TWO charts, NOT a single chart_config) — this is the deep-dive that justifies firing this insight type. Required structure:
-    [0] LINE chart of the parent's 12-month series (facts.parent_series with facts.months as labels). Title: "<Parent> · 12mo Trend".
-    [1] STACKED BAR chart of facts.top_children — one dataset per child, stacked, using facts.months as x-axis. Title: "<Parent> by Subcategory". This shows WHICH sub-categories are driving the parent trend.
-  The narrative MUST call out which top_child(ren) are driving the trend (look at top_children[*].slope_per_month vs total_12mo to identify the driver). State the R² (facts.r_squared) only if it's notably high (≥0.7) — otherwise describe the trend qualitatively.
-- income_breakdown → Lead with "$X YTD vs $Y same-time-last-year (Z%)". Mention 3Y CAGR (facts.cagr_3y_pct) if non-null. Do NOT speculate on causes — just present the comparison cleanly. Chart should be a bar chart of the 3 YTD values.
+${INSIGHT_TOOLS_ENABLED ? `## DATA TOOL AVAILABLE:
+You may call run_finance_query up to a few times to fetch numbers the facts above don't contain — e.g. split spend by trip tag, verify a net-accrual figure, compute a YTD run-rate, or break a parent into its children. It runs a single read-only SELECT over the recipient's OWN data. Query the views UNQUALIFIED (no schema prefix):
+  transactions(id, date, description, category_id, amount_usd, daily_cost, service_start, service_end, service_days, payment_type, credit, tag, transaction_group_id, is_subscription)
+  tags(name, start_date, end_date, tag_type, notes)
+  categories(id, label, parent_id, is_expense, default_accrual_days)
+  accounts(id, label, account_type, institution, currency, is_active)
+  balance_snapshots(id, account_id, snapshot_date, balance_usd, notes)
+  cashback_redemptions(id, date, item, payment_type, cashback_type, dollar_value, redemption_rate)
+Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. Prefer the facts when they already answer the question; only query for what's missing.
+
+` : ""}## WRITING INSTRUCTIONS:
+1. Write a tight 2-3 sentence narrative. Lead with a specific dollar number.
+2. Don't be dramatic about absolute deltas under $200. Don't editorialise small swings.
+3. Use parent categories (food, home, personal, etc.) for summaries; when you name a parent, include ALL its children (never present a bare "(other)" bucket as the parent). Drill into children when it explains the "why".
+4. Explain WHY a number moved using the facts (or a run_finance_query) — cite the specific driver (a merchant, a trip tag, a subcategory). Do not hand-wave or guess.
+5. Produce a Chart.js 4.x config (max 24 data points per dataset). Colors: #81B29A (positive/green), #E07A5F (over-budget/red), #4A6FA5 (neutral/blue), #F2CC8F (income/yellow). Background transparent.
+
+## ARCHETYPE-SPECIFIC GUIDANCE (operator-tuned; edit in the AI portal to change this):
+${strategy?.prompt_guidance?.trim() || "(no specific guidance set — follow the general principles above)"}
 
 ## CHART CONTRACT (single vs multi):
 - If you emit "chart_config" (object): one chart will be rendered.
@@ -1192,6 +1243,100 @@ function summarizeCandidatesForLog(scored: ScoredCandidate[], selected: ScoredCa
   }));
 }
 
+// ── Ad-hoc query tool (Anthropic tool use) ─────────────────────────────────
+// The writer can call this to fetch numbers the archetype facts didn't compute.
+// Backed by disciplan.insight_run_query — read-only, owner-scoped, guarded SQL.
+const RUN_QUERY_TOOL = {
+  name: "run_finance_query",
+  description:
+    "Run ONE read-only SQL SELECT over the recipient's own finance data to fetch a number the provided facts don't already contain (e.g. split spend by tag, verify a net-accrual figure, compute a YTD run-rate, break a parent into children). " +
+    "Query these views UNQUALIFIED (no schema prefix): transactions(id,date,description,category_id,amount_usd,daily_cost,service_start,service_end,service_days,payment_type,credit,tag,transaction_group_id,is_subscription), tags(name,start_date,end_date,tag_type,notes), categories(id,label,parent_id,is_expense,default_accrual_days), accounts(id,label,account_type,institution,currency,is_active), balance_snapshots(id,account_id,snapshot_date,balance_usd,notes), cashback_redemptions(id,date,item,payment_type,cashback_type,dollar_value,redemption_rate). " +
+    "Only a single SELECT/WITH is allowed; no schema-qualified names, no comments, no writes. Results are capped at 500 rows. Accrual figures use daily_cost across [service_start, service_end].",
+  input_schema: {
+    type: "object",
+    properties: {
+      sql: { type: "string", description: "A single read-only SELECT/WITH statement." },
+      purpose: { type: "string", description: "One short line on why you need this." },
+    },
+    required: ["sql"],
+  },
+};
+
+// Runs the narrative-generation call, servicing any run_finance_query tool calls
+// in a bounded loop. Returns the final text plus token + tool-call accounting.
+// Tools are only offered when enabled AND an owner is pinned (the query function
+// requires an owner); otherwise this is a single plain call.
+async function generateInsightText(
+  supabase: SupabaseClient,
+  prompt: string,
+): Promise<{ text: string; inputTokens: number; outputTokens: number; toolCalls: number }> {
+  const useTools = INSIGHT_TOOLS_ENABLED && INSIGHT_OWNER != null;
+  const MAX_TURNS = 6;
+  const MAX_TOOL_CALLS = 4;
+  // deno-lint-ignore no-explicit-any
+  const messages: any[] = [{ role: "user", content: prompt }];
+  let inputTokens = 0, outputTokens = 0, toolCalls = 0, lastText = "";
+
+  for (let turn = 0; turn < MAX_TURNS; turn++) {
+    // deno-lint-ignore no-explicit-any
+    const body: any = { model: MODEL, max_tokens: 2000, messages };
+    if (useTools) body.tools = [RUN_QUERY_TOOL];
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.error("Claude HTTP error:", res.status, await res.text());
+      break;
+    }
+    const data = await res.json();
+    inputTokens  += data.usage?.input_tokens  || 0;
+    outputTokens += data.usage?.output_tokens || 0;
+    // deno-lint-ignore no-explicit-any
+    const content: any[] = data.content || [];
+    const textPart = content.filter(c => c.type === "text").map(c => c.text).join("");
+    if (textPart) lastText = textPart;
+
+    if (data.stop_reason !== "tool_use") break;
+
+    // Service tool calls, then let the model continue.
+    messages.push({ role: "assistant", content });
+    // deno-lint-ignore no-explicit-any
+    const toolResults: any[] = [];
+    for (const block of content) {
+      if (block.type !== "tool_use") continue;
+      if (block.name !== "run_finance_query") {
+        toolResults.push({ type: "tool_result", tool_use_id: block.id, content: "unknown tool", is_error: true });
+        continue;
+      }
+      toolCalls++;
+      let resultText: string;
+      if (toolCalls > MAX_TOOL_CALLS) {
+        resultText = "Query budget exhausted — write the final insight JSON now using the data you already have.";
+      } else {
+        const sql = String(block.input?.sql ?? "");
+        try {
+          const { data: qData, error } = await supabase.rpc("insight_run_query", { p_sql: sql, p_owner: INSIGHT_OWNER });
+          if (error) {
+            resultText = `query error: ${error.message}`;
+          } else {
+            let s = JSON.stringify(qData ?? []);
+            if (s.length > 6000) s = s.slice(0, 6000) + " …(truncated; add LIMIT or aggregate)";
+            resultText = s;
+          }
+        } catch (e) {
+          resultText = `query error: ${(e as Error).message}`;
+        }
+      }
+      toolResults.push({ type: "tool_result", tool_use_id: block.id, content: resultText });
+    }
+    messages.push({ role: "user", content: toolResults });
+  }
+
+  return { text: lastText, inputTokens, outputTokens, toolCalls };
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -1298,62 +1443,49 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let parseFallback = false;
   let inputTokens = 0;
   let outputTokens = 0;
+  let toolCalls = 0;
   let insight: InsightResponse | null = null;
 
   if (chosen) {
     // ── 4. Ask Claude to write the narrative + chart for the chosen archetype.
-    const prompt = buildArchetypePrompt(today, principles, history, chosen);
-    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": ANTHROPIC_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 2000,
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    // The DB-driven per-archetype guidance and (optionally) the read-only query
+    // tool are handed to the writer here.
+    const chosenStrategy = strategies.get(chosen.insight_type);
+    const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy);
+    const gen = await generateInsightText(supabase, prompt);
+    inputTokens  += gen.inputTokens;
+    outputTokens += gen.outputTokens;
+    toolCalls     = gen.toolCalls;
+    insight = tryParseInsight(gen.text);
 
-    if (claudeRes.ok) {
-      const claudeData = await claudeRes.json();
-      const rawText: string = claudeData.content?.[0]?.text || "";
-      inputTokens  += claudeData.usage?.input_tokens  || 0;
-      outputTokens += claudeData.usage?.output_tokens || 0;
-      insight = tryParseInsight(rawText);
-
-      if (!insight) {
-        console.warn("First parse failed; retrying with stricter JSON-only reminder.");
-        const retryRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "x-api-key": ANTHROPIC_KEY,
-            "anthropic-version": "2023-06-01",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: MODEL,
-            max_tokens: 1200,
-            messages: [
-              { role: "user", content: prompt },
-              { role: "assistant", content: rawText || "{}" },
-              { role: "user", content: "Your previous reply could not be parsed as JSON. Resend the same insight as a SINGLE valid JSON object only. No prose, no markdown fences. Begin with { and end with }." },
-            ],
-          }),
-        });
-        if (retryRes.ok) {
-          const retryData = await retryRes.json();
-          inputTokens  += retryData.usage?.input_tokens  || 0;
-          outputTokens += retryData.usage?.output_tokens || 0;
-          insight = tryParseInsight(retryData.content?.[0]?.text || "");
-        } else {
-          console.error("Retry HTTP error:", retryRes.status, await retryRes.text());
-        }
+    if (!insight) {
+      // One strict JSON-only retry (no tools) — mirrors the prior fallback path.
+      console.warn("First parse failed; retrying with stricter JSON-only reminder.");
+      const retryRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 1200,
+          messages: [
+            { role: "user", content: prompt },
+            { role: "assistant", content: gen.text || "{}" },
+            { role: "user", content: "Your previous reply could not be parsed as JSON. Resend the same insight as a SINGLE valid JSON object only. No prose, no markdown fences. Begin with { and end with }." },
+          ],
+        }),
+      });
+      if (retryRes.ok) {
+        const retryData = await retryRes.json();
+        inputTokens  += retryData.usage?.input_tokens  || 0;
+        outputTokens += retryData.usage?.output_tokens || 0;
+        insight = tryParseInsight(retryData.content?.[0]?.text || "");
+      } else {
+        console.error("Retry HTTP error:", retryRes.status, await retryRes.text());
       }
-    } else {
-      console.error("Claude HTTP error:", claudeRes.status, await claudeRes.text());
     }
 
     // Force the insight_type to match what the selector chose — Claude is not allowed to override.
@@ -1507,7 +1639,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
   }
 
-  console.log(`${dryRun ? "Dry-run" : "Sent"} insight: ${insight.insight_type} | ${insight.subject} | cost: $${costUsd.toFixed(4)}${parseFallback ? " | parse_fallback=true" : ""}${selection?.exploration_taken ? " | exploration=true" : ""}`);
+  console.log(`${dryRun ? "Dry-run" : "Sent"} insight: ${insight.insight_type} | ${insight.subject} | cost: $${costUsd.toFixed(4)}${parseFallback ? " | parse_fallback=true" : ""}${selection?.exploration_taken ? " | exploration=true" : ""}${toolCalls ? ` | tool_calls=${toolCalls}` : ""}`);
 
   return new Response(JSON.stringify({
     status: dryRun ? "dry_run" : "sent",
@@ -1521,6 +1653,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     write_up: insight.write_up,
     cost_usd: costUsd,
     parse_fallback: parseFallback,
+    tool_calls: toolCalls,
     exploration_taken: selection?.exploration_taken ?? false,
     eligible_count: selection?.scored.filter(s => s.passes_policy_gate).length ?? 0,
     insight_log_id: logId ?? null,

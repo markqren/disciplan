@@ -1177,10 +1177,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
         // Distill substantive feedback into a *pending* principles update.
         // Guardrails: the inbound reply is untrusted; never let a single email rewrite the
-        // whole principles document. We:
-        //   1. Run Haiku to draft an updated principles document.
-        //   2. Auto-reject if length-delta vs current > 30% (prompt-injection / rewrite attempt).
-        //   3. Auto-reject if the proposed text begins with banned override phrases.
+        // whole principles document. Rather than regenerate the entire document (which
+        // silently TRUNCATED it once the doc outgrew the token budget — dropping the whole
+        // GENERAL section), we ask Haiku for ONE concise lesson and APPEND it under a
+        // "FEEDBACK-DERIVED LESSONS" section. This is bounded, never truncates, and keeps
+        // a clean diff for operator review. We then:
+        //   1. Skip if the model says nothing new ("NONE").
+        //   2. Reject if the lesson itself starts with a banned override phrase.
+        //   3. Reject if the resulting document trips the size guardrails.
         //   4. Otherwise queue into principles_pending for operator review (AI portal).
         if (ANTHROPIC_KEY && comment && comment.length > 20) {
           try {
@@ -1200,29 +1204,39 @@ Deno.serve(async (req: Request): Promise<Response> => {
               },
               body: JSON.stringify({
                 model: "claude-haiku-4-5-20251001",
-                max_tokens: 800,
+                max_tokens: 300,
                 messages: [{
                   role: "user",
-                  content: `You maintain a principles document for an AI newsletter system.
-A user just rated a "${insightType}" insight ${rating ?? "?"}/10 and left this comment:
+                  content: `You maintain the principles document for an AI finance-newsletter system.
+A user rated a "${insightType}" insight ${rating ?? "?"}/10 and commented:
 "${comment}"
 
-Current principles document:
+Existing principles (for context — do NOT restate what's already covered):
 ---
 ${currentPrinciples}
 ---
 
-If the feedback teaches something NEW or REFINES an existing principle, return an updated principles document.
-If the feedback is trivial or already covered, return the document unchanged.
-Return ONLY the updated document text, no explanation.`,
+If this comment teaches a NEW, generalisable lesson, reply with ONE short imperative lesson (max ~30 words, no leading dash, no preamble). Reference the insight type when relevant.
+If it's trivial, a one-off, or already covered, reply with exactly: NONE
+Reply with the lesson OR "NONE" — nothing else.`,
                 }],
               }),
             });
 
             if (distillRes.ok) {
               const distillData = await distillRes.json();
-              const proposed = (distillData.content?.[0]?.text || "").trim();
-              if (proposed && proposed !== currentPrinciples) {
+              const lesson = (distillData.content?.[0]?.text || "").trim().replace(/^[-*]\s*/, "");
+              const isNone = !lesson || /^none\b/i.test(lesson);
+              const lessonBanned = PRINCIPLES_BANNED_PREFIXES.some((re) => re.test(lesson));
+
+              if (!isNone && !lessonBanned) {
+                // Append the lesson under a dedicated section (create it if absent).
+                const marker = "FEEDBACK-DERIVED LESSONS:";
+                const dated = `- [${insightType}] ${lesson}`;
+                const proposed = currentPrinciples.includes(marker)
+                  ? `${currentPrinciples.trimEnd()}\n${dated}`
+                  : `${currentPrinciples.trimEnd()}\n\n${marker}\n${dated}`;
+
                 const guardrails = checkPrinciplesGuardrails(currentPrinciples, proposed);
                 if (guardrails.ok) {
                   await supabase.from("principles_pending").insert({
@@ -1231,7 +1245,7 @@ Return ONLY the updated document text, no explanation.`,
                     proposed_principles: proposed,
                     status: "pending",
                   });
-                  console.log(`Principles update queued for review (log_id=${logId}, len delta=${proposed.length - currentPrinciples.length}).`);
+                  console.log(`Principles lesson queued for review (log_id=${logId}, +${proposed.length - currentPrinciples.length} chars).`);
                 } else {
                   await supabase.from("principles_pending").insert({
                     triggering_log_id: logId,
@@ -1240,8 +1254,10 @@ Return ONLY the updated document text, no explanation.`,
                     rejection_reason: guardrails.reason,
                     status: "auto_rejected",
                   });
-                  console.warn(`Principles update auto-rejected (log_id=${logId}): ${guardrails.reason}`);
+                  console.warn(`Principles lesson auto-rejected (log_id=${logId}): ${guardrails.reason}`);
                 }
+              } else if (lessonBanned) {
+                console.warn(`Principles lesson rejected: banned prefix (log_id=${logId}).`);
               }
             }
           } catch (e) {

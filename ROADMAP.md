@@ -1,12 +1,25 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jun 28, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jul 5, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 
 
 ## 🚀 Releases
+
+### v2.10 — Jul 5, 2026 _(committed; pending DB push + function deploy)_
+
+#### v2.10.0
+<sub>Newsletter overhaul (FEA-110): per-recipient data isolation · self-tuning loop repair · DB-driven per-archetype guidance · agentic read-only query tool</sub>
+
+##### Fixes
+- **Newsletter data isolation (FEA-110)** — The `daily-insight` edge function ran as service-role and read the whole household's ledger (`get_income_statement`, `get_tag_summaries`, `run_data_health_check`, and every raw `transactions`/`tags`/`balance_snapshots`/`cashback_redemptions` query had **no owner filter**), so Shilpa's ~1,900 transactions were blended into Mark's newsletter — the top driver of recent 2-3/10 ratings ("this is pulling Shilpa's transaction data"). Every fetch is now scoped to a configurable `INSIGHT_OWNER` (default `mark`) via a `scopeToOwner()` helper + the existing `*_scoped` RPCs, plus a new owner-scoped `run_data_health_check_scoped`. Legacy whole-household mode preserved by unsetting the secret. (~4,000 tokens)
+- **Self-tuning principles loop repaired (FEA-110)** — The inbound-email feedback distiller regenerated the *entire* principles document at `max_tokens: 800`; once the doc outgrew that budget it silently **truncated** — the live doc was cut off mid-sentence at `large_transactions`, dropping the whole GENERAL section. It now asks Haiku for ONE concise lesson (or `NONE`) and **appends** it under a `FEEDBACK-DERIVED LESSONS` section (bounded, never truncates), with a banned-prefix check on the lesson itself. The principles doc was reset to a clean GENERAL-only baseline (per-archetype specifics moved to `prompt_guidance`), and the AI portal gained a "Dismiss all" to clear a stalled pending queue. (~2,500 tokens)
+
+##### Features
+- **DB-driven per-archetype guidance (FEA-110)** — The per-insight writing/formatting guidance that was hardcoded in `buildArchetypePrompt` now lives in two operator-editable `insight_strategy` columns: `prompt_guidance` (free-text instructions injected into the prompt for the chosen insight) and `accrual_basis` (`accrual`/`cash`, so figures are described on the right basis — addressing repeated "this uses logged date not service date" feedback). Seeded for all 17 active archetypes and editable inline from the AI portal's strategy table, so tone/structure/emphasis can change with **no code deploy**. (~3,500 tokens)
+- **Agentic read-only query tool (FEA-110)** — The newsletter writer can now fetch numbers the fixed archetype facts never computed (split spend by trip tag, verify a net-accrual figure, derive a YTD run-rate) via an Anthropic tool-use loop backed by a guarded `disciplan.insight_run_query()`. Safety: single read-only `SELECT`/`WITH` only, runs with `search_path = insight_ro` over owner-scoped views (base tables unreachable), schema-qualified/catalog references and comments rejected, statement timeout + 500-row cap, `EXECUTE` granted to `service_role` only. Owner is pinned via a GUC the views read (fail-closed) — the model can never see another member's data. Guardrails validated against the live DB (writes, schema-escape, catalog, comments all blocked; per-owner counts correct). (~4,500 tokens)
 
 ### v2.9 — Jun 28, 2026
 
@@ -676,12 +689,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (160 items)</summary>
+<summary><strong>✅ Completed</strong> (161 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-110 | **Newsletter: data isolation + steerability overhaul** — (1) Scoped the `daily-insight` edge function to a single `INSIGHT_OWNER` (default `mark`) via a `scopeToOwner()` helper + `*_scoped` RPCs + new `run_data_health_check_scoped`, ending the leak of other household members' transactions into the newsletter (top cause of recent 2-3/10 ratings). (2) Fixed the self-tuning loop: the inbound-email distiller no longer rewrites (and silently truncates) the whole principles doc — it appends one bounded lesson under `FEEDBACK-DERIVED LESSONS`; principles reset to a clean GENERAL-only baseline; portal "Dismiss all" for a stalled queue. (3) Moved hardcoded per-archetype prompt guidance into editable `insight_strategy.prompt_guidance` + `accrual_basis` columns (seeded for 17 archetypes, edited inline in the AI portal — no deploy). (4) Added a guarded, read-only, owner-scoped ad-hoc SQL tool (`insight_run_query` over `insight_ro` views, service_role-only, single SELECT, catalog/schema-escape blocked, GUC-pinned owner, row cap) wired to an Anthropic tool-use loop so the writer can fetch data the fixed facts lack. Migrations validated against the live DB in rolled-back transactions. | Feature → Done | Jul 5 |
 | FEA-109 | **Change audit ledger + revert/undo** — `disciplan.audit_log` records every INSERT/UPDATE/DELETE on all 18 owner-stamped tables via one generic `SECURITY DEFINER` trigger (`fn_audit`): full `old_data`/`new_data` JSONB, changed columns, row owner/household, `actor` (resolved from JWT via `profiles`), and `txid_current()` to group an operation. Skips no-op/`updated_at`-only writes. `can_write`-gated RPCs `revert_audit_entry(id)`, `revert_operation(txid)`, `undo_last()` reverse changes (and are themselves audited → redoable). RLS-scoped reads, tamper-proof writes, forward-looking. Verified insert→revert round trip on the live DB. | Feature → Done | Jun 28 |
 | FEA-108 | **Ledger payment filter scoped to accounts** — The Ledger payment-type dropdown lists only payment types the viewer holds an account for (`accounts` via `ownerQS()`) rather than the full `PTS` list; falls back to `PTS` before load/when empty and keeps the active selection. | Feature → Done | Jun 28 |
 | FEA-107 | **On-behalf-of onboarding** — `writeOwner()` (`js/config.js`) stamps new rows to the active person-view when an admin views another member (else the signed-in user), mirroring RLS `can_write()`. Onboarding scopes its account list, slug dedup, reconcile RPC, and earliest-date lookup to the `acting` owner (`actQS`), with a read-only banner when viewing a member you can't write. Fixes accounts/imports landing under the wrong owner. | Feature → Done | Jun 28 |

@@ -9,6 +9,19 @@
 
 ## 🚀 Releases
 
+### v2.10 — Jul 5, 2026 _(committed; pending DB push + function deploy)_
+
+#### v2.10.0
+<sub>Newsletter overhaul (FEA-110): per-recipient data isolation · self-tuning loop repair · DB-driven per-archetype guidance · agentic read-only query tool</sub>
+
+##### Fixes
+- **Newsletter data isolation (FEA-110)** — The `daily-insight` edge function ran as service-role and read the whole household's ledger (`get_income_statement`, `get_tag_summaries`, `run_data_health_check`, and every raw `transactions`/`tags`/`balance_snapshots`/`cashback_redemptions` query had **no owner filter**), so Shilpa's ~1,900 transactions were blended into Mark's newsletter — the top driver of recent 2-3/10 ratings ("this is pulling Shilpa's transaction data"). Every fetch is now scoped to a configurable `INSIGHT_OWNER` (default `mark`) via a `scopeToOwner()` helper + the existing `*_scoped` RPCs, plus a new owner-scoped `run_data_health_check_scoped`. Legacy whole-household mode preserved by unsetting the secret. (~4,000 tokens)
+- **Self-tuning principles loop repaired (FEA-110)** — The inbound-email feedback distiller regenerated the *entire* principles document at `max_tokens: 800`; once the doc outgrew that budget it silently **truncated** — the live doc was cut off mid-sentence at `large_transactions`, dropping the whole GENERAL section. It now asks Haiku for ONE concise lesson (or `NONE`) and **appends** it under a `FEEDBACK-DERIVED LESSONS` section (bounded, never truncates), with a banned-prefix check on the lesson itself. The principles doc was reset to a clean GENERAL-only baseline (per-archetype specifics moved to `prompt_guidance`), and the AI portal gained a "Dismiss all" to clear a stalled pending queue. (~2,500 tokens)
+
+##### Features
+- **DB-driven per-archetype guidance (FEA-110)** — The per-insight writing/formatting guidance that was hardcoded in `buildArchetypePrompt` now lives in two operator-editable `insight_strategy` columns: `prompt_guidance` (free-text instructions injected into the prompt for the chosen insight) and `accrual_basis` (`accrual`/`cash`, so figures are described on the right basis — addressing repeated "this uses logged date not service date" feedback). Seeded for all 17 active archetypes and editable inline from the AI portal's strategy table, so tone/structure/emphasis can change with **no code deploy**. (~3,500 tokens)
+- **Agentic read-only query tool (FEA-110)** — The newsletter writer can now fetch numbers the fixed archetype facts never computed (split spend by trip tag, verify a net-accrual figure, derive a YTD run-rate) via an Anthropic tool-use loop backed by a guarded `disciplan.insight_run_query()`. Safety: single read-only `SELECT`/`WITH` only, runs with `search_path = insight_ro` over owner-scoped views (base tables unreachable), schema-qualified/catalog references and comments rejected, statement timeout + 500-row cap, `EXECUTE` granted to `service_role` only. Owner is pinned via a GUC the views read (fail-closed) — the model can never see another member's data. Guardrails validated against the live DB (writes, schema-escape, catalog, comments all blocked; per-owner counts correct). (~4,500 tokens)
+
 ### v2.9 — Jun 28, 2026
 
 #### v2.9.0

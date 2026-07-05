@@ -63,6 +63,12 @@ export interface Strategy {
   // because parse_fallback (and any not-yet-categorised future strategies) have
   // no theme. Selection treats null theme as "no rotation pressure".
   theme: string | null;
+  // Operator-editable steering (migration 20260705162936). prompt_guidance is
+  // the per-archetype instruction block injected into the LLM prompt for the
+  // chosen insight; accrual_basis ('accrual' | 'cash') tells the writer how to
+  // describe this archetype's figures. Both editable in the AI portal — no deploy.
+  prompt_guidance: string | null;
+  accrual_basis: string;
 }
 
 // Schema sourced from the public.categories table at runtime so the newsletter
