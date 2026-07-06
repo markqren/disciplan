@@ -332,7 +332,7 @@ async function swCallEdge(payload){
   return data;
 }
 async function swFetchFriends(){const d=await swCallEdge({action:"friends"});return d.friends||[]}
-async function swFetchGroups(){const d=await swCallEdge({action:"groups"});return d.groups||[]}
+async function swFetchGroups(){const d=await swCallEdge({action:"groups"});return {groups:d.groups||[],me:d.current_user_id||null}}
 async function swCreateExpense(payload){return await swCallEdge({...(payload||{}),action:"create_expense"})}
 // Per-account connection (FEA-29D): each logged-in user connects their own key.
 async function swAccountStatus(){return await swCallEdge({action:"account_status"})}

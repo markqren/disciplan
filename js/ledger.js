@@ -213,24 +213,28 @@ function openLedgerEditModal(txn,onSaved){
       }
     }).catch(()=>{personSelect.classList.add("hidden")});
 
-    // Splitwise push section (FEA-29C). Once a person is chosen we load the
-    // Splitwise friends + groups and show dropdowns: pick who's reimbursing you
-    // and (optionally) the group the expense belongs to. The choice is
-    // remembered per person label so it pre-selects next time. An opt-in
-    // checkbox controls whether the matching Splitwise expense is created.
-    let swFriends=[],swGroups=[],swLoaded=false,swLastLookup=null,swLookupTimer=null;
+    // Splitwise push section (FEA-29C / group split). Pick the group first: once a
+    // group is chosen we list its members and split the expense across everyone on
+    // the trip (equal by default, each share editable). "No group" falls back to a
+    // single-friend direct split. An opt-in checkbox controls whether the matching
+    // Splitwise expense is created.
+    let swFriends=[],swGroups=[],swMe=null,swLoaded=false,swLastLookup=null,swLookupTimer=null;
+    let swMemberRows=[]; // [{member, cb, amt}] for the currently selected group
+    let swYouLine=null;  // "you owe / others owe / total" summary in group mode
     const swWrap=h("div",{style:{marginBottom:"14px",padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:"8px",display:"none"}});
     const swMsg=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginBottom:"6px"}});
-    const swFriendSel=h("select",{class:"inp",onChange:()=>onSwFriendChange()});
-    const swGroupSel=h("select",{class:"inp",style:{marginTop:"6px",display:"none"},onChange:()=>persistSwMap()});
+    const swGroupSel=h("select",{class:"inp",onChange:()=>onSwGroupChange()});
+    const swFriendSel=h("select",{class:"inp",style:{marginTop:"6px",display:"none"},onChange:()=>onSwFriendChange()});
+    const swMembersWrap=h("div",{style:{marginTop:"8px",display:"none"}});
     const swCheckRow=h("label",{style:{display:"none",alignItems:"center",gap:"8px",fontSize:"12px",color:"#fff",cursor:"pointer",marginTop:"8px"}});
-    const swCheck=h("input",{type:"checkbox",style:{width:"auto",margin:"0"}});
+    const swCheck=h("input",{type:"checkbox",style:{width:"auto",margin:"0"},onChange:()=>updateRPreview()});
     swCheckRow.append(swCheck,h("span",{},"Also create this expense in Splitwise"));
-    swWrap.append(swMsg,swFriendSel,swGroupSel,swCheckRow);
+    swWrap.append(swMsg,swGroupSel,swFriendSel,swMembersWrap,swCheckRow);
     modal.append(swWrap);
 
     function selectedSwFriend(){const id=Number(swFriendSel.value);return id?swFriends.find(f=>f.id===id):null}
     function selectedSwGroup(){const id=Number(swGroupSel.value);return id?swGroups.find(g=>g.id===id):null}
+    function swGroupActive(){return !!selectedSwGroup()&&swMemberRows.length>0}
     function fillSwFriends(selId){
       swFriendSel.innerHTML="";
       swFriendSel.append(h("option",{value:""},"\u2014 Not on Splitwise \u2014"));
@@ -241,13 +245,75 @@ function openLedgerEditModal(txn,onSaved){
       swGroupSel.append(h("option",{value:"0"},"No group (direct split)"));
       swGroups.forEach(g=>{const o=h("option",{value:String(g.id)},g.name);if(selId&&g.id===selId)o.selected=true;swGroupSel.append(o)});
     }
+    // Build a checklist of the group's OTHER members (you are the payer). Every
+    // member starts checked; amounts default to an equal split incl. yourself.
+    function buildMemberChecklist(group){
+      swMembersWrap.innerHTML="";swMemberRows=[];swYouLine=null;
+      const others=(group.members||[]).filter(m=>m.id!==swMe);
+      if(!others.length){swMembersWrap.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)"}},"No other members in this group."));return}
+      swMembersWrap.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"6px"}},"Split with"));
+      others.forEach(m=>{
+        const row=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginBottom:"5px"}});
+        const cb=h("input",{type:"checkbox",style:{width:"auto",margin:"0"},onChange:()=>{recomputeEqualSplit();updateRPreview()}});
+        cb.checked=true;
+        const nm=h("span",{style:{flex:"1",fontSize:"12px",color:"#fff"}},m.name);
+        const amt=h("input",{class:"inp",type:"number",step:"0.01",style:{width:"90px",margin:"0"},onInput:()=>updateRPreview()});
+        row.append(cb,nm,amt);
+        swMembersWrap.append(row);
+        swMemberRows.push({member:m,cb,amt});
+      });
+      swYouLine=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginTop:"6px"}});
+      swMembersWrap.append(swYouLine);
+      recomputeEqualSplit();
+    }
+    // Reset each checked member's amount to an equal share (cost / (others + you)).
+    function recomputeEqualSplit(){
+      const cost=Math.round(txn.amount_usd*100)/100;
+      const checked=swMemberRows.filter(r=>r.cb.checked);
+      const n=checked.length+1; // + you
+      const share=Math.round(cost/n*100)/100;
+      swMemberRows.forEach(r=>{r.amt.disabled=!r.cb.checked;r.amt.value=r.cb.checked?share.toFixed(2):""});
+    }
+    // Sum the checked members' shares (what others owe you) + your remaining share.
+    function computeGroupSplit(){
+      const cost=Math.round(txn.amount_usd*100)/100;
+      let othersOwed=0;const participants=[];
+      swMemberRows.forEach(r=>{
+        if(!r.cb.checked)return;
+        const owed=Math.round((parseFloat(r.amt.value)||0)*100)/100;
+        if(owed>0){othersOwed+=owed;participants.push({user_id:r.member.id,owed})}
+      });
+      othersOwed=Math.round(othersOwed*100)/100;
+      return {othersOwed,yourShare:Math.round((cost-othersOwed)*100)/100,participants};
+    }
+    // The local reimbursement credit amount: in group mode = what others owe you
+    // (the push checkbox only gates the Splitwise write, not the local amount).
+    function currentReimbAmt(){
+      if(swGroupActive())return computeGroupSplit().othersOwed;
+      return manualMode?Math.round(manualAmt*100)/100:Math.round(txn.amount_usd*selectedRatio*100)/100;
+    }
+    function onSwGroupChange(){
+      const g=selectedSwGroup();
+      if(g){
+        swFriendSel.style.display="none";
+        buildMemberChecklist(g);
+        swMembersWrap.style.display="block";
+        swCheckRow.style.display="flex";
+        swCheck.checked=true;
+      }else{
+        swMembersWrap.style.display="none";swMembersWrap.innerHTML="";swMemberRows=[];swYouLine=null;
+        swFriendSel.style.display="block";
+        syncSwControls();
+      }
+      updateRPreview();
+    }
     function syncSwControls(){
+      if(selectedSwGroup())return; // group mode manages its own controls
       const f=selectedSwFriend();
-      swGroupSel.style.display=f?"block":"none";
       swCheckRow.style.display=f?"flex":"none";
       if(!f)swCheck.checked=false;
     }
-    function onSwFriendChange(){const f=selectedSwFriend();if(f)swCheck.checked=true;syncSwControls();persistSwMap()}
+    function onSwFriendChange(){const f=selectedSwFriend();if(f)swCheck.checked=true;syncSwControls();persistSwMap();updateRPreview()}
     function persistSwMap(){
       const f=selectedSwFriend(),label=selectedPerson.trim();
       if(!label||!f)return;
@@ -255,13 +321,13 @@ function openLedgerEditModal(txn,onSaved){
     }
     async function ensureSwLoaded(){
       if(swLoaded)return;
-      swMsg.textContent="Loading Splitwise friends\u2026";
+      swMsg.textContent="Loading Splitwise\u2026";
       try{
         const [fr,gr]=await Promise.all([swFetchFriends(),swFetchGroups()]);
-        swFriends=fr||[];swGroups=gr||[];swLoaded=true;
-        swMsg.textContent=swFriends.length?"":"No Splitwise friends found (is the sync deployed?).";
-      }catch(e){swFriends=[];swGroups=[];swMsg.textContent="Couldn't reach Splitwise: "+e.message}
-      fillSwFriends();fillSwGroups();
+        swFriends=fr||[];swGroups=(gr&&gr.groups)||[];swMe=(gr&&gr.me)||null;swLoaded=true;
+        swMsg.textContent=(swFriends.length||swGroups.length)?"":"No Splitwise friends or groups found (is the sync deployed?).";
+      }catch(e){swFriends=[];swGroups=[];swMe=null;swMsg.textContent="Couldn't reach Splitwise: "+e.message}
+      fillSwGroups();fillSwFriends();
     }
     function refreshSwSection(){
       const label=selectedPerson.trim();
@@ -272,11 +338,15 @@ function openLedgerEditModal(txn,onSaved){
       swLastLookup=key;
       ensureSwLoaded().then(()=>getSwFriendMap(label)).then(m=>{
         if(selectedPerson.trim().toLowerCase()!==key)return;
+        // A remembered group takes precedence and opens the member checklist.
+        const rememberGroup=m&&m.sw_group_id&&swGroups.some(g=>g.id===m.sw_group_id);
+        fillSwGroups(rememberGroup?m.sw_group_id:null);
         fillSwFriends(m?m.sw_user_id:null);
-        fillSwGroups(m?m.sw_group_id:null);
-        if(m)swCheck.checked=true;
-        syncSwControls();
-        if(swFriends.length&&!m)swMsg.textContent=`Pick ${label}'s Splitwise friend to push this split.`;
+        if(rememberGroup){onSwGroupChange();if(m)swCheck.checked=true}
+        else{swMembersWrap.style.display="none";swFriendSel.style.display="block";if(m)swCheck.checked=true;syncSwControls()}
+        if(swGroups.length&&!rememberGroup)swMsg.textContent="Pick a group to split with the whole trip \u2014 or a friend for a 1:1 split.";
+        else if(!swGroups.length&&swFriends.length&&!m)swMsg.textContent=`Pick ${label}'s Splitwise friend to push this split.`;
+        updateRPreview();
       }).catch(()=>{});
     }
     function scheduleSwRefresh(){clearTimeout(swLookupTimer);swLookupTimer=setTimeout(refreshSwSection,300)}
@@ -346,7 +416,7 @@ function openLedgerEditModal(txn,onSaved){
     modal.append(errEl);
 
     function updateRPreview(){
-      const amt=manualMode?Math.round(manualAmt*100)/100:Math.round(txn.amount_usd*selectedRatio*100)/100;
+      const amt=currentReimbAmt();
       amtVal.textContent=fmtF(-amt);
       const pName=selectedPerson||"___";
       const firstName=pName.split(" ")[0];
@@ -355,6 +425,12 @@ function openLedgerEditModal(txn,onSaved){
         <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
         <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-amt)} \u00B7 ${rPt.value} \u00B7 ${txn.category_id}</div>
         <div style="font-size:11px;color:rgba(74,111,165,0.7);margin-top:4px">\uD83D\uDD17 Linked to: ${txn.description}</div>`;
+      if(swGroupActive()&&swYouLine){
+        const g=computeGroupSplit();
+        const total=Math.round(txn.amount_usd*100)/100;
+        swYouLine.textContent=`You owe ${fmtF(g.yourShare)} \u00B7 others owe ${fmtF(g.othersOwed)} \u00B7 total ${fmtF(total)}`;
+        swYouLine.style.color=(g.yourShare<-0.005)?"var(--r)":"rgba(255,255,255,0.5)";
+      }
       scheduleSwRefresh();
     }
     updateRPreview();
@@ -365,29 +441,37 @@ function openLedgerEditModal(txn,onSaved){
       // Validate
       const person=selectedPerson.trim();
       if(!person){errEl.textContent="Please select or type a person name.";return}
-      const reimbAmt=manualMode?Math.round(manualAmt*100)/100:Math.round(txn.amount_usd*selectedRatio*100)/100;
+      const reimbAmt=currentReimbAmt();
       if(reimbAmt<=0){errEl.textContent="Reimbursement amount must be greater than $0.";return}
       errEl.textContent="";
       rCreate.textContent="Creating...";rCreate.disabled=true;
-      const effectiveRatio=manualMode?manualAmt/txn.amount_usd:selectedRatio;
+      const effectiveRatio=reimbAmt/txn.amount_usd;
       try{
         const r=await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"");
         // Capture Splitwise intent before the modal (and its closures) go away.
-        const swFriend=selectedSwFriend();
-        const wantSw=swCheck.checked&&swFriend;
-        const swPayload=wantSw?{
-          friend_user_id:swFriend.id,
-          group_id:Number(swGroupSel.value)||0,
-          cost:Math.round(txn.amount_usd*100)/100,
-          friend_owed:reimbAmt,
-          date:txn.date,
-          description:(txn.description||"Expense").replace(/^Reimbursed\s*-\s*/i,""),
-          currency_code:"USD",
-          details:rNote.value||"",
-          expense_txn_id:r&&r.originalId,
-          reimburse_txn_id:r&&r.newId,
-          transaction_group_id:r&&r.groupId
-        }:null;
+        // Group mode fans the owed amount out across everyone on the trip;
+        // no-group mode is a single-friend direct split.
+        let swPayload=null;
+        if(swCheck.checked){
+          const base={
+            group_id:Number(swGroupSel.value)||0,
+            cost:Math.round(txn.amount_usd*100)/100,
+            date:txn.date,
+            description:(txn.description||"Expense").replace(/^Reimbursed\s*-\s*/i,""),
+            currency_code:"USD",
+            details:rNote.value||"",
+            expense_txn_id:r&&r.originalId,
+            reimburse_txn_id:r&&r.newId,
+            transaction_group_id:r&&r.groupId
+          };
+          if(swGroupActive()){
+            const g=computeGroupSplit();
+            if(g.participants.length)swPayload={...base,participants:g.participants};
+          }else{
+            const swFriend=selectedSwFriend();
+            if(swFriend)swPayload={...base,friend_user_id:swFriend.id,friend_owed:reimbAmt};
+          }
+        }
         bg.remove();
         const msg=document.getElementById("ledgerOkMsg");
         if(msg){msg.textContent="Reimbursement created";msg.classList.remove("hidden");setTimeout(()=>msg.classList.add("hidden"),2500)}

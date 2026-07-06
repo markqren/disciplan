@@ -167,10 +167,12 @@ function round2(v: unknown): number {
 }
 
 // ── Write-back (FEA-29C): create a Splitwise expense from a Disciplan split ──
-// The current user paid the full cost; the friend owes `friend_owed`, the user
-// owes the remainder. After creating it, we record a splitwise_expenses mapping
-// row (status='imported') so the very next sync recognizes our own write and
-// never re-imports it as a new receivable.
+// The current user paid the full cost; each participant owes their share and the
+// user owes the remainder. Supports two payload shapes:
+//   - participants: [{ user_id, owed }]   → N-way group split (whole trip)
+//   - friend_user_id + friend_owed        → legacy single-friend split
+// After creating it, we record a splitwise_expenses mapping row (status='imported')
+// so the very next sync recognizes our own write and never re-imports it.
 // deno-lint-ignore no-explicit-any
 async function handleCreateExpense(
   body: any,
@@ -180,13 +182,40 @@ async function handleCreateExpense(
   householdId: number | null,
   swKey: string,
 ) {
-  const friendId = Number(body?.friend_user_id);
   const cost = round2(body?.cost);
-  const friendOwed = round2(body?.friend_owed);
-  if (!friendId || !(cost > 0) || !(friendOwed > 0) || friendOwed > cost + 0.005) {
-    return json({ error: "Invalid create_expense params (need friend_user_id, cost, friend_owed <= cost)" }, 400);
+  if (!(cost > 0)) {
+    return json({ error: "Invalid create_expense params (need cost > 0)" }, 400);
   }
-  const yourOwed = round2(cost - friendOwed);
+
+  // Normalize both payload shapes into a single participants list (people who
+  // owe you a share). "You" (the payer) is handled separately as users[0].
+  const rawParts: Array<{ user_id: number; owed: number }> = [];
+  if (Array.isArray(body?.participants) && body.participants.length) {
+    for (const p of body.participants) {
+      const uid = Number(p?.user_id);
+      const owed = round2(p?.owed);
+      if (uid && uid !== currentUserId && owed > 0) rawParts.push({ user_id: uid, owed });
+    }
+  } else if (body?.friend_user_id) {
+    const uid = Number(body.friend_user_id);
+    const owed = round2(body.friend_owed);
+    if (uid && uid !== currentUserId && owed > 0) rawParts.push({ user_id: uid, owed });
+  }
+  if (!rawParts.length) {
+    return json({ error: "Invalid create_expense params (need at least one participant with owed > 0)" }, 400);
+  }
+  // Collapse any duplicate user ids by summing their owed shares (defensive).
+  const owedByUser = new Map<number, number>();
+  for (const p of rawParts) owedByUser.set(p.user_id, round2((owedByUser.get(p.user_id) || 0) + p.owed));
+  const participants = [...owedByUser.entries()].map(([user_id, owed]) => ({ user_id, owed }));
+
+  const othersOwed = round2(participants.reduce((s, p) => s + p.owed, 0));
+  if (othersOwed > cost + 0.005) {
+    return json({ error: "Participant shares exceed cost" }, 400);
+  }
+  // The payer absorbs any rounding remainder so all owed_shares sum to cost.
+  const yourOwed = round2(cost - othersOwed);
+
   const date = (body?.date || new Date().toISOString().slice(0, 10)).toString().slice(0, 10);
   const description = (body?.description || "Expense").toString().trim().slice(0, 250) || "Expense";
   const currency = (body?.currency_code || "USD").toString();
@@ -205,10 +234,13 @@ async function handleCreateExpense(
   form.set("users__0__user_id", String(currentUserId));
   form.set("users__0__paid_share", cost.toFixed(2));
   form.set("users__0__owed_share", yourOwed.toFixed(2));
-  // users[1] = friend: paid nothing, owes their share (what they reimburse).
-  form.set("users__1__user_id", String(friendId));
-  form.set("users__1__paid_share", "0.00");
-  form.set("users__1__owed_share", friendOwed.toFixed(2));
+  // users[1..N] = each participant: paid nothing, owes their share.
+  participants.forEach((p, i) => {
+    const idx = i + 1;
+    form.set(`users__${idx}__user_id`, String(p.user_id));
+    form.set(`users__${idx}__paid_share`, "0.00");
+    form.set(`users__${idx}__owed_share`, p.owed.toFixed(2));
+  });
 
   let created: SWExpense | null = null;
   try {
@@ -394,17 +426,28 @@ Deno.serve(async (req) => {
       if (!r.ok) return json({ error: "Splitwise get_groups failed", detail: await r.text() }, 502);
       const d = await r.json();
       // Drop the synthetic id-0 "Non-group expenses" bucket — the UI models that
-      // as "No group". Expose member ids so the client can validate friend ∈ group.
+      // as "No group". Expose full member objects (id + name) so the client can
+      // build a per-member split checklist for the whole trip, not just one friend.
       // deno-lint-ignore no-explicit-any
       const groups = (Array.isArray(d?.groups) ? d.groups : [])
         .filter((g: any) => Number(g?.id) > 0)
-        .map((g: any) => ({
-          id: g.id,
-          name: g.name || `Group ${g.id}`,
+        .map((g: any) => {
           // deno-lint-ignore no-explicit-any
-          member_ids: (Array.isArray(g.members) ? g.members : []).map((m: any) => m.id),
-        }));
-      return json({ status: "ok", groups });
+          const members = (Array.isArray(g.members) ? g.members : []).map((m: any) => ({
+            id: m.id,
+            first_name: m.first_name || "",
+            last_name: m.last_name || "",
+            name: [m.first_name, m.last_name].filter(Boolean).join(" ") || m.email || `User ${m.id}`,
+          }));
+          return {
+            id: g.id,
+            name: g.name || `Group ${g.id}`,
+            member_ids: members.map((m: { id: number }) => m.id),
+            members,
+          };
+        });
+      // current_user_id lets the client exclude "you" from the split checklist.
+      return json({ status: "ok", groups, current_user_id: currentUserId });
     } catch (e) {
       return json({ error: "Splitwise request failed", detail: String(e) }, 502);
     }

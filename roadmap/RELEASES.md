@@ -11,6 +11,12 @@
 
 ### v2.10 — Jul 5, 2026
 
+#### v2.10.2
+<sub>Splitwise write-back: multi-person group splits (FEA-29C)</sub>
+
+##### Features
+- **Splitwise multi-person group splits (FEA-29C)** — The reimburse form's Splitwise push previously only created a two-person expense (you + one friend); picking a group filed it in that group but left everyone else owing $0. Now the group dropdown comes first, and selecting a group loads its full member list (the `groups` edge action returns each member's name plus your own `current_user_id` so you're excluded as the payer) and renders a **per-member checklist** — everyone pre-checked, each share editable, defaulting to an **equal split including yourself** (`cost ÷ N`) with a live "you owe / others owe / total" summary. On submit, `handleCreateExpense` accepts a `participants:[{user_id, owed}]` array and writes `users__0` (you: paid the whole cost, owe your share) + `users__1..N` (each member owes their share), with the payer absorbing any cent-rounding so all `owed_share`s sum exactly to `cost`. Members don't need to be your direct Splitwise friends — group membership is enough. The legacy single-friend "No group (direct split)" path and its `friend_user_id`/`friend_owed` payload are preserved as a fallback; the local reimbursement credit tracks the group split (what others owe you) regardless of the push checkbox. (~3,500 tokens)
+
 #### v2.10.1
 <sub>Adobe-style change history &amp; undo panel (FEA-112)</sub>
 
