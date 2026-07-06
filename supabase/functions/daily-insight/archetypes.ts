@@ -968,9 +968,17 @@ function buildOnThisDayFlashback(features: Features, strategy: Strategy): Candid
 function buildStreakOrGap(features: Features, strategy: Strategy): Candidate {
   const minGap         = (strategy.requires?.min_current_gap_days as number | undefined) ?? 7;
   const rankWithinTopN = (strategy.requires?.rank_within_top_n as number | undefined) ?? 3;
+  // An objectively long gap is newsworthy on its own, even if it isn't a top-3
+  // gap for the trailing year. Requiring BOTH gap≥7 AND rank≤3 meant this never
+  // fired (skip reason `no_parent_meets_gap_or_rank`); the long-gap escape hatch
+  // lets a genuinely long dry spell surface regardless of rank.
+  const longGapDays    = (strategy.requires?.long_gap_days as number | undefined) ?? 14;
 
   const stats = features.streakStats || {};
-  const parents = Object.values(stats).filter(s => s.current_gap_days >= minGap && s.rank_in_trailing12 <= rankWithinTopN);
+  const parents = Object.values(stats).filter(s =>
+    s.current_gap_days >= minGap &&
+    (s.rank_in_trailing12 <= rankWithinTopN || s.current_gap_days >= longGapDays)
+  );
   if (parents.length === 0) return ineligible("streak_or_gap", "no_parent_meets_gap_or_rank");
 
   // Pick the parent with the longest current gap as the focus.
@@ -1028,12 +1036,19 @@ function buildNetWorthVelocity(features: Features, strategy: Strategy): Candidat
   const recentPoints  = series.filter(p => inWindow(p.month, windowStartMs, todayMs));
   const yearAgoPoints = series.filter(p => inWindow(p.month, yearAgoStartMs, yearAgoEndMs));
 
-  if (recentPoints.length < minRecent)   return ineligible("net_worth_velocity", `recent_window_only_${recentPoints.length}_points`);
-  if (yearAgoPoints.length < minYearAgo) return ineligible("net_worth_velocity", `yearago_window_only_${yearAgoPoints.length}_points`);
+  // The recent window is required; the year-ago comparison is a bonus. Snapshot
+  // cadence is usually too sparse to populate a 90-day window a full year back,
+  // and gating on it meant this archetype NEVER fired (skip reason
+  // `yearago_window_only_1_points`). We now fire on the recent window alone and
+  // simply omit the YoY comparison when the year-ago window is too thin.
+  if (recentPoints.length < minRecent) return ineligible("net_worth_velocity", `recent_window_only_${recentPoints.length}_points`);
 
   const recentDelta  = recentPoints[recentPoints.length - 1].total_net  - recentPoints[0].total_net;
-  const yearAgoDelta = yearAgoPoints[yearAgoPoints.length - 1].total_net - yearAgoPoints[0].total_net;
   const annualizedRate = recentDelta * (365 / primaryWindowDays);
+  const hasYearAgo = yearAgoPoints.length >= minYearAgo;
+  const yearAgoDelta: number | null = hasYearAgo
+    ? yearAgoPoints[yearAgoPoints.length - 1].total_net - yearAgoPoints[0].total_net
+    : null;
 
   const liquidDelta   = recentPoints[recentPoints.length - 1].total_liquid   - recentPoints[0].total_liquid;
   const investedDelta = recentPoints[recentPoints.length - 1].total_invested - recentPoints[0].total_invested;
@@ -1057,13 +1072,13 @@ function buildNetWorthVelocity(features: Features, strategy: Strategy): Candidat
         liquid_delta: Math.round(liquidDelta),
         invested_delta: Math.round(investedDelta),
       },
-      year_ago_window: {
+      year_ago_window: hasYearAgo ? {
         from: yearAgoPoints[0].month,
         to: yearAgoPoints[yearAgoPoints.length - 1].month,
         starting_net: Math.round(yearAgoPoints[0].total_net),
         ending_net: Math.round(yearAgoPoints[yearAgoPoints.length - 1].total_net),
-        delta: Math.round(yearAgoDelta),
-      },
+        delta: Math.round(yearAgoDelta as number),
+      } : null,
       annualized_rate: Math.round(annualizedRate),
       monthly_series_24mo: series.slice(-24).map(p => ({
         month: p.month,
@@ -1071,9 +1086,9 @@ function buildNetWorthVelocity(features: Features, strategy: Strategy): Candidat
         liquid: Math.round(p.total_liquid),
         invested: Math.round(p.total_invested),
       })),
-      hint: "Lead with the dollar delta over the last {window_days} days and annualized rate. Compare to the same window 1y ago plainly — don't speculate on causes. If liquid_delta and invested_delta have opposite signs, that's interesting structural color worth noting (e.g. 'cash up, investments down'). Chart should be a 24-month line of total_net.",
+      hint: "Lead with the dollar delta over the last {window_days} days and annualized rate. If year_ago_window is present, compare to the same window 1y ago plainly; if it's null, omit the YoY comparison entirely (don't invent one). Don't speculate on causes. If liquid_delta and invested_delta have opposite signs, that's interesting structural color worth noting (e.g. 'cash up, investments down'). Chart should be a 24-month line of total_net.",
     },
-    summary: `net worth ${recentDelta >= 0 ? "+" : ""}$${Math.round(recentDelta).toLocaleString()} (${primaryWindowDays}d) vs ${yearAgoDelta >= 0 ? "+" : ""}$${Math.round(yearAgoDelta).toLocaleString()} same window 1y ago`,
+    summary: `net worth ${recentDelta >= 0 ? "+" : ""}$${Math.round(recentDelta).toLocaleString()} (${primaryWindowDays}d)${hasYearAgo ? ` vs ${(yearAgoDelta as number) >= 0 ? "+" : ""}$${Math.round(yearAgoDelta as number).toLocaleString()} same window 1y ago` : " (no year-ago comparison available)"}`,
   };
 }
 
