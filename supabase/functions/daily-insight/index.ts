@@ -1301,7 +1301,10 @@ async function generateInsightText(
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // deno-lint-ignore no-explicit-any
-    const body: any = { model: MODEL, max_tokens: 2000, messages };
+    // 3500 (was 2000): a 24-month multi-dataset chart config plus the write-up
+    // can exceed 2000 output tokens and truncate mid-JSON — the cause of the
+    // 2026-07-06 net_worth_velocity chart that uploaded but 400'd on render.
+    const body: any = { model: MODEL, max_tokens: 3500, messages };
     if (useTools) body.tools = [RUN_QUERY_TOOL];
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -1507,7 +1510,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         },
         body: JSON.stringify({
           model: MODEL,
-          max_tokens: 1200,
+          max_tokens: 2500,
           messages: [
             { role: "user", content: prompt },
             { role: "assistant", content: gen.text || "{}" },
@@ -1567,7 +1570,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return "";
       }
       const qcData = await qcRes.json();
-      return qcData.url || "";
+      const url = qcData.url || "";
+      if (!url) return "";
+      // /chart/create accepts configs that later 400 on render (malformed or
+      // unsupported Chart.js), which is how a broken 400 error-image reached the
+      // 2026-07-06 email. Confirm the short URL actually renders before we trust
+      // it; a failed check drops to the clean empty-state fallback below.
+      try {
+        const renderCheck = await fetch(url, { method: "GET" });
+        if (!renderCheck.ok) {
+          console.error("QuickChart render check failed:", renderCheck.status, "for", url);
+          return "";
+        }
+      } catch (e) {
+        console.error("QuickChart render check error:", e);
+        return "";
+      }
+      return url;
     } catch (e) {
       console.error("QuickChart error:", e);
       return "";
