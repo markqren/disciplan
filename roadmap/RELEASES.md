@@ -9,9 +9,15 @@
 
 ## 🚀 Releases
 
-### v2.10 — Jul 5, 2026 _(committed; pending DB push + function deploy)_
+### v2.10 — Jul 5, 2026
 
-#### v2.10.0
+#### v2.10.1
+<sub>Adobe-style change history &amp; undo panel (FEA-112)</sub>
+
+##### Features
+- **Change history &amp; undo panel (FEA-112)** — A slide-out **History** panel (new `↺` button in the header, openable from any tab) turns the v2.9 `audit_log` backend (FEA-109) into an Adobe-style, user-facing undo. `js/history.js` reads the household's audit trail newest-first, groups rows by `txid` into one entry per action (a 300-row import shows as a single "Added 300 transactions · total $X" line), and renders human-readable labels built from the before/after JSONB — e.g. `Edited "Starbucks": amount $5.00 → $6.00`, `Deleted "Rent"`, `Added "Whole Foods" · $84.20 · 7/2/26` — color-coded by op (green add / yellow edit / red delete) with actor + relative time. Two revert actions per entry: **"Revert to here"** rolls back everything newer via a new atomic `disciplan.revert_to(p_id)` RPC (one transaction, one `txid` → redoable as a unit, disabled on the newest entry), and **"Revert just this"** undoes a single action via `revert_operation`, warning first when a newer un-reverted change touched the same row (the non-linear-history clobber case). Reverted actions render greyed + struck-through; each revert clears caches, re-renders the active tab, and reloads the list (the inverse change appears as a new entry — append-only trail). New migration `20260706004055_revert_to.sql` pushed to the live DB and verified in migration history; frontend-only deploy (v2.10.0 newsletter backend still pending). (~6,500 tokens)
+
+#### v2.10.0 _(committed; pending DB push + function deploy)_
 <sub>Newsletter overhaul (FEA-110): per-recipient data isolation · self-tuning loop repair · DB-driven per-archetype guidance · agentic read-only query tool — plus follow-up Q&A (FEA-111)</sub>
 
 ##### Fixes

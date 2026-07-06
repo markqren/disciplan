@@ -8,9 +8,15 @@
 
 ## 🚀 Releases
 
-### v2.10 — Jul 5, 2026 _(committed; pending DB push + function deploy)_
+### v2.10 — Jul 5, 2026
 
-#### v2.10.0
+#### v2.10.1
+<sub>Adobe-style change history &amp; undo panel (FEA-112)</sub>
+
+##### Features
+- **Change history &amp; undo panel (FEA-112)** — A slide-out **History** panel (new `↺` button in the header, openable from any tab) turns the v2.9 `audit_log` backend (FEA-109) into an Adobe-style, user-facing undo. `js/history.js` reads the household's audit trail newest-first, groups rows by `txid` into one entry per action (a 300-row import shows as a single "Added 300 transactions · total $X" line), and renders human-readable labels built from the before/after JSONB — e.g. `Edited "Starbucks": amount $5.00 → $6.00`, `Deleted "Rent"`, `Added "Whole Foods" · $84.20 · 7/2/26` — color-coded by op (green add / yellow edit / red delete) with actor + relative time. Two revert actions per entry: **"Revert to here"** rolls back everything newer via a new atomic `disciplan.revert_to(p_id)` RPC (one transaction, one `txid` → redoable as a unit, disabled on the newest entry), and **"Revert just this"** undoes a single action via `revert_operation`, warning first when a newer un-reverted change touched the same row (the non-linear-history clobber case). Reverted actions render greyed + struck-through; each revert clears caches, re-renders the active tab, and reloads the list (the inverse change appears as a new entry — append-only trail). New migration `20260706004055_revert_to.sql` pushed to the live DB and verified in migration history; frontend-only deploy (v2.10.0 newsletter backend still pending). (~6,500 tokens)
+
+#### v2.10.0 _(committed; pending DB push + function deploy)_
 <sub>Newsletter overhaul (FEA-110): per-recipient data isolation · self-tuning loop repair · DB-driven per-archetype guidance · agentic read-only query tool — plus follow-up Q&A (FEA-111)</sub>
 
 ##### Fixes
@@ -690,12 +696,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (162 items)</summary>
+<summary><strong>✅ Completed</strong> (163 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-112 | **Change history &amp; undo panel** — Slide-out History panel (header `↺`, any tab) over the FEA-109 `audit_log`: reads the household trail newest-first, groups rows by `txid` into one entry per action, and renders human-readable labels from the before/after JSONB (`Edited "Starbucks": amount $5.00 → $6.00`, `Deleted "Rent"`), color-coded by op with actor + relative time. **"Revert to here"** rolls back everything newer via a new atomic `disciplan.revert_to(p_id)` RPC (one txn/`txid`, redoable); **"Revert just this"** undoes one action via `revert_operation`, warning on the newer-change clobber case. Reverted entries greyed/struck-through; each revert re-renders the active tab + reloads the list. Migration `20260706004055_revert_to.sql` pushed and verified in remote history. Frontend-only deploy at v2.10.1. | Feature → Done | Jul 5 |
 | FEA-111 | **Newsletter follow-up Q&A** — Replies that ask a question (detected by a `?` or an interrogative/imperative phrase) are queued in `disciplan.insight_followups` by `inbound-email`. The next `daily-insight` reads pending questions, answers them in a dedicated "Following up on your question" email block (using the read-only query tool for exact numbers), and marks them answered only on a real, non-fallback send. AI portal surfaces pending/answered follow-ups with a "Dismiss all" escape hatch. Closes the feedback loop so questions get answered without a code change. Migration validated against the live DB in a rolled-back transaction. | Feature → Done | Jul 5 |
 | FEA-110 | **Newsletter: data isolation + steerability overhaul** — (1) Scoped the `daily-insight` edge function to a single `INSIGHT_OWNER` (default `mark`) via a `scopeToOwner()` helper + `*_scoped` RPCs + new `run_data_health_check_scoped`, ending the leak of other household members' transactions into the newsletter (top cause of recent 2-3/10 ratings). (2) Fixed the self-tuning loop: the inbound-email distiller no longer rewrites (and silently truncates) the whole principles doc — it appends one bounded lesson under `FEEDBACK-DERIVED LESSONS`; principles reset to a clean GENERAL-only baseline; portal "Dismiss all" for a stalled queue. (3) Moved hardcoded per-archetype prompt guidance into editable `insight_strategy.prompt_guidance` + `accrual_basis` columns (seeded for 17 archetypes, edited inline in the AI portal — no deploy). (4) Added a guarded, read-only, owner-scoped ad-hoc SQL tool (`insight_run_query` over `insight_ro` views, service_role-only, single SELECT, catalog/schema-escape blocked, GUC-pinned owner, row cap) wired to an Anthropic tool-use loop so the writer can fetch data the fixed facts lack. Migrations validated against the live DB in rolled-back transactions. | Feature → Done | Jul 5 |
 | FEA-109 | **Change audit ledger + revert/undo** — `disciplan.audit_log` records every INSERT/UPDATE/DELETE on all 18 owner-stamped tables via one generic `SECURITY DEFINER` trigger (`fn_audit`): full `old_data`/`new_data` JSONB, changed columns, row owner/household, `actor` (resolved from JWT via `profiles`), and `txid_current()` to group an operation. Skips no-op/`updated_at`-only writes. `can_write`-gated RPCs `revert_audit_entry(id)`, `revert_operation(txid)`, `undo_last()` reverse changes (and are themselves audited → redoable). RLS-scoped reads, tamper-proof writes, forward-looking. Verified insert→revert round trip on the live DB. | Feature → Done | Jun 28 |
