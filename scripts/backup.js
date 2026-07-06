@@ -1,18 +1,33 @@
 #!/usr/bin/env node
 // Disciplan weekly backup — fetches all key tables from Supabase, writes CSVs to BACKUP_DIR
-// Usage: node scripts/backup.js
-//        BACKUP_DIR=/path/to/output node scripts/backup.js
+// Requires the service_role key (bypasses RLS, has access to the disciplan schema).
+// Usage: SUPABASE_SERVICE_ROLE_KEY=<key> node scripts/backup.js
+//        SUPABASE_SERVICE_ROLE_KEY=<key> BACKUP_DIR=/path/to/output node scripts/backup.js
 
 const { writeFileSync, mkdirSync } = require('fs');
 const { join } = require('path');
 
 const SB_URL = 'https://mjuannepfodstbsxweuc.supabase.co/rest/v1';
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1qdWFubmVwZm9kc3Ric3h3ZXVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEzODcwMzksImV4cCI6MjA4Njk2MzAzOX0.6TqLUAhvWMjDunpird0_9FMnDiT4qRuYaH6XbXmKOnA';
+
+// The disciplan schema grants access only to the authenticated and service_role
+// roles (see 20260513000003_disciplan_schema.sql), so the anon key cannot read it.
+// A backup should also bypass RLS to capture every user's rows, which requires the
+// service_role key — supplied via the SUPABASE_SERVICE_ROLE_KEY env var, never hardcoded.
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!SB_KEY) {
+  console.error('Backup failed: SUPABASE_SERVICE_ROLE_KEY environment variable is not set.');
+  process.exit(1);
+}
+
+// Tables live in the "disciplan" schema, so PostgREST must be told to read from it via
+// Accept-Profile. Without this, requests resolve against "public" and 404 with PGRST205.
+const DB_SCHEMA = 'disciplan';
 
 const HEADERS = {
   'apikey': SB_KEY,
   'Authorization': `Bearer ${SB_KEY}`,
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/json',
+  'Accept-Profile': DB_SCHEMA
 };
 
 const TABLES = [

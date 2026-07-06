@@ -19,6 +19,7 @@ jobs:
       - name: Run backup
         env:
           BACKUP_DIR: ${{ github.workspace }}/backup_output
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: node scripts/backup.js
 
       - name: Upload artifact
