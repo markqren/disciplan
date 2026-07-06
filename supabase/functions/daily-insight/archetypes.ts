@@ -348,40 +348,80 @@ function computeSmartDrillDown(
   };
 }
 
-// ── Archetype: large_transactions ───────────────────────────────────────────
+// ── Archetype: large_transactions (reframed: new commitments & forward impact) ─
+// Old behavior was a backward-looking list of big charges in the last 7 days,
+// keyed to logged date — Mark rated it 4/10: "just noting transactions by the
+// logged date rather than service date... not actually useful or any novel
+// insight." New behavior: surface COMMITMENTS whose service period just began
+// (fetched by service_start in the last 14 days) and that span ≥ ~1 month, then
+// rank by REMAINING forward accrual (daily_cost × days left in the service
+// window). The insight becomes "here's the future spend you just locked in and
+// its daily cost", which is forward-looking and accrual-native. One-off single
+// day purchases are filtered out (they carry no future commitment).
 
 function buildLargeTransactions(features: Features, strategy: Strategy): Candidate {
-  const minGroups = (strategy.requires?.min_total_groups as number | undefined) ?? 3;
-  const groups = groupLargeTxns(features.largeTxns);
-  if (groups.length < minGroups) return ineligible("large_transactions", `only_${groups.length}_groups`);
+  const minCommitments = (strategy.requires?.min_commitments as number | undefined) ?? 2;
+  const minServiceDays = (strategy.requires?.min_service_days as number | undefined) ?? 28;
+  const minForward     = (strategy.requires?.min_forward_accrual as number | undefined) ?? 100;
 
-  const data_strength = Math.min(1, groups.length / 8);
+  const commitments = groupCommitments(features.largeTxns, features.today)
+    .filter(g => g.service_days >= minServiceDays && g.forward_accrual >= minForward)
+    .sort((a, b) => b.forward_accrual - a.forward_accrual);
+  if (commitments.length < minCommitments) return ineligible("large_transactions", `only_${commitments.length}_new_commitments`);
+
+  const totalForward = commitments.reduce((s, c) => s + c.forward_accrual, 0);
+  const data_strength = Math.min(1, totalForward / 1500);
+
   return {
     insight_type: "large_transactions",
     eligible: true,
     ineligibility_reason: null,
     data_strength,
     facts: {
-      window: "last_7_days",
-      groups: groups.slice(0, 8),
-      hint: "Always discuss net group amounts (transaction_group_id), never individual lines.",
+      window: "service periods that began in the last 14 days",
+      total_forward_accrual: Math.round(totalForward),
+      commitments: commitments.slice(0, 8).map(c => ({
+        description: c.descs[0] || c.cat,
+        category: c.cat,
+        net_amount: Math.round(c.net),
+        service_start: c.service_start,
+        service_end: c.service_end,
+        service_days: c.service_days,
+        daily_cost: Number(c.daily_cost.toFixed(2)),
+        remaining_days: c.remaining_days,
+        forward_accrual: Math.round(c.forward_accrual),
+      })),
+      hint: "ACCRUAL, forward-looking — this is NOT a list of recent charges. Each item is a commitment whose service period just started and that locks in future spend. Lead with total_forward_accrual ('you locked in ~$X of future spend this fortnight'), then name the biggest 1-2 by description with their daily_cost and remaining_days (e.g. 'the $1,200 annual X renewal is $3.29/day for ~11 more months'). Frame it as awareness of committed future cost, not a spending critique. Discuss net group amounts, never individual lines.",
     },
-    summary: `${groups.length} groups, top: $${Math.round(Math.abs(groups[0].net))} ${groups[0].cat}`,
+    summary: `${commitments.length} new commitments, $${Math.round(totalForward)} forward accrual; top: ${commitments[0].descs[0] || commitments[0].cat} $${Math.round(commitments[0].forward_accrual)}`,
   };
 }
 
-function groupLargeTxns(txns: Transaction[]): Array<{ net: number; descs: string[]; cat: string; date: string; service_start: string | null; service_end: string | null }> {
-  const groups: Record<string, { net: number; descs: string[]; cat: string; date: string; service_start: string | null; service_end: string | null }> = {};
+// Group recently-started transactions into commitments (net by group), computing
+// the remaining forward accrual = daily_cost × days left in the service window.
+function groupCommitments(
+  txns: Transaction[],
+  today: string,
+): Array<{ net: number; descs: string[]; cat: string; service_start: string | null; service_end: string | null; service_days: number; daily_cost: number; remaining_days: number; forward_accrual: number }> {
+  const todayMs = Date.parse(today);
+  const groups: Record<string, { net: number; descs: string[]; cat: string; service_start: string | null; service_end: string | null }> = {};
   for (const t of txns) {
-    if (Math.abs(t.amount_usd) < 50) continue;
     const key = t.transaction_group_id ? `g${t.transaction_group_id}` : `s${t.date}${t.description}`;
-    if (!groups[key]) groups[key] = { net: 0, descs: [], cat: t.category_id, date: t.date, service_start: t.service_start, service_end: t.service_end };
+    if (!groups[key]) groups[key] = { net: 0, descs: [], cat: t.category_id, service_start: t.service_start, service_end: t.service_end };
     groups[key].net += t.amount_usd;
+    if (t.service_start && (!groups[key].service_start || t.service_start < groups[key].service_start!)) groups[key].service_start = t.service_start;
+    if (t.service_end && (!groups[key].service_end || t.service_end > groups[key].service_end!)) groups[key].service_end = t.service_end;
     if (t.description) groups[key].descs.push(t.description);
   }
-  return Object.values(groups)
-    .filter(g => Math.abs(g.net) >= 50)
-    .sort((a, b) => Math.abs(b.net) - Math.abs(a.net));
+  return Object.values(groups).map(g => {
+    const startMs = g.service_start ? Date.parse(g.service_start) : todayMs;
+    const endMs   = g.service_end   ? Date.parse(g.service_end)   : todayMs;
+    const service_days = Math.max(1, Math.round((endMs - startMs) / 86_400_000) + 1);
+    const daily_cost = g.net / service_days;
+    const remaining_days = Math.max(0, Math.round((endMs - todayMs) / 86_400_000) + 1);
+    const forward_accrual = daily_cost * remaining_days;
+    return { ...g, service_days, daily_cost, remaining_days, forward_accrual };
+  });
 }
 
 // ── Archetype: spend_projection ─────────────────────────────────────────────

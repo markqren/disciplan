@@ -245,13 +245,18 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     );
   }
 
-  // Large transactions in last 7 days
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 7);
+  // New commitments: charges whose SERVICE period began in the last 14 days.
+  // Reframed from the old "big charges in the last 7 days" logged-date list
+  // (which Mark found un-novel — "just noting transactions by logged date") into
+  // a forward-looking, accrual-native view: what future spend did you just lock
+  // in? The builder keeps only multi-month commitments and ranks by remaining
+  // forward accrual. daily_cost + service_days are needed for that math.
+  const commitLookback = new Date(today);
+  commitLookback.setUTCDate(commitLookback.getUTCDate() - 14);
   const { data: largeTxns } = await scopeToOwner(supabase
     .from("transactions")
-    .select("date,description,amount_usd,category_id,transaction_group_id,service_start,service_end"))
-    .gte("date", sevenDaysAgo.toISOString().slice(0, 10))
+    .select("date,description,amount_usd,category_id,transaction_group_id,service_start,service_end,service_days,daily_cost"))
+    .gte("service_start", commitLookback.toISOString().slice(0, 10))
     .not("category_id", "in", "(income,investment,adjustment)")
     .order("amount_usd", { ascending: false });
 
