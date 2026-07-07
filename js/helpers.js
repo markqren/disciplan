@@ -258,6 +258,54 @@ function buildCreditSelect(currentVal){
   return wrap;
 }
 
+// ── Owner-scoped payment-account labels (multi-user separation) ──────────────
+// Payment-account pickers must offer the accounts the ACTIVE person-view holds,
+// not the global PTS vocabulary. PTS mixes every household member's legacy
+// account names (so Shilpa sees Mark's Chase Sapphire/Bilt/etc.) AND omits
+// custom accounts added in Onboarding (e.g. "Chase United Club" lives in
+// accounts.label, never in PTS). Reads accounts.label scoped by ownerQS(),
+// cached per active view so one render doesn't refetch. Falls back to the full
+// PTS list before accounts load, or for users/views with no accounts (legacy
+// single-user, Combined pre-migration). Mirrors the Ledger payment filter.
+let _acctLabels=[],_acctLabelsView="\u0000",_acctLabelsFetch=null;
+function acctLabelsReady(){
+  const view=(typeof state!=="undefined"&&state.view)||null;
+  if(_acctLabelsFetch&&_acctLabelsView===view)return _acctLabelsFetch;
+  _acctLabelsView=view;_acctLabels=[]; // drop stale view's labels until refetch
+  _acctLabelsFetch=sb("accounts?select=label&order=display_order"+ownerQS())
+    .then(rows=>{_acctLabels=(rows||[]).map(r=>r.label).filter(Boolean);return _acctLabels})
+    .catch(()=>{_acctLabels=[];return _acctLabels});
+  return _acctLabelsFetch;
+}
+// Force a refetch next time (e.g. after an account is added in Onboarding).
+function invalidateAcctLabels(){_acctLabels=[];_acctLabelsView="\u0000";_acctLabelsFetch=null}
+
+// Populate a <select> with the active view's payment-account options.
+// opts.selected  – a row's existing payment_type; always kept + preselected
+//                  (preserves legacy values not present as accounts).
+// opts.keep      – pseudo/generic values that must always appear (e.g.
+//                  "Transfer", "Splitwise") even when the viewer holds no
+//                  matching account.
+// opts.prefer    – ordered default picks used when nothing is preselected.
+// Preserves the user's current manual selection across the async refill.
+// Returns the value left selected.
+function fillPtSelect(sel,opts){
+  opts=opts||{};
+  const keep=opts.keep||[];
+  let labels=_acctLabels.length?_acctLabels.slice():PTS.slice();
+  for(let i=keep.length-1;i>=0;i--){const k=keep[i];if(k&&!labels.includes(k))labels.unshift(k)}
+  if(opts.selected&&!labels.includes(opts.selected))labels.unshift(opts.selected);
+  const prev=sel.value;
+  sel.innerHTML="";
+  labels.forEach(p=>sel.append(h("option",{value:p},p)));
+  let want=opts.selected||null;
+  if(want==null&&prev&&labels.includes(prev))want=prev;
+  if(want==null&&opts.prefer)for(const p of opts.prefer){if(labels.includes(p)){want=p;break}}
+  if(want==null)want=labels[0]||"";
+  sel.value=want;
+  return want;
+}
+
 function h(tag,attrs,children){
   const el=document.createElement(tag);
   if(attrs)for(const[k,v]of Object.entries(attrs)){if(k==="style"&&typeof v==="object")Object.assign(el.style,v);else if(k.startsWith("on"))el.addEventListener(k.slice(2).toLowerCase(),v);else el.setAttribute(k,v)}

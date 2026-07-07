@@ -1,5 +1,6 @@
 function renderEntry(el){
   fetchCreditNames();
+  const acctReady=acctLabelsReady();
   const card=h("div",{class:"cd"});
   card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">New Transaction</h3><span id="okMsg" class="ok-msg hidden">✓ Saved to Supabase</span></div>`;
 
@@ -41,11 +42,17 @@ function renderEntry(el){
   const creditRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
   creditRow.append(field("Credit Sub-Account",creditSel));
   const ptSel=h("select",{class:"inp",onChange:e=>{f.pt=e.target.value;creditRow.style.display=f.pt==="Transfer"?"grid":"none";updatePreview()}});
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Chase Sapphire")o.selected=true;ptSel.append(o)});
+  f.pt=fillPtSelect(ptSel,{prefer:["Chase Sapphire"],keep:["Transfer"]});
   const ptLabel=h("label",{class:"lbl"},"Payment Account");
   const ptField=h("div");ptField.append(ptLabel,ptSel);
   const toPtSel=h("select",{class:"inp",onChange:e=>{f.toPt=e.target.value;updatePreview()}});
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Cash")o.selected=true;toPtSel.append(o)});
+  f.toPt=fillPtSelect(toPtSel,{prefer:["Cash"],keep:["Transfer"]});
+  acctReady.then(()=>{
+    f.pt=fillPtSelect(ptSel,{prefer:["Chase Sapphire"],keep:["Transfer"]});
+    f.toPt=fillPtSelect(toPtSel,{prefer:["Cash"],keep:["Transfer"]});
+    creditRow.style.display=f.pt==="Transfer"?"grid":"none";
+    updatePreview();
+  });
   const toRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
   toRow.append(field("To Account",toPtSel));
   const tagInp=h("input",{class:"inp",type:"text",placeholder:"e.g., cozumel",onInput:e=>f.tag=e.target.value});
@@ -189,7 +196,8 @@ function renderEntry(el){
   const fileInp=h("input",{class:"inp",type:"file",accept:".csv"});
   let impPtManual=false;
   const impPtSel=h("select",{class:"inp",onChange:()=>{impPtManual=true}});
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Chase Sapphire")o.selected=true;impPtSel.append(o)});
+  fillPtSelect(impPtSel,{prefer:["Chase Sapphire"]});
+  acctReady.then(()=>{if(!impPtManual)fillPtSelect(impPtSel,{prefer:["Chase Sapphire"]})});
   const impTagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
   const apiKeyInp=h("input",{class:"inp",type:"password",placeholder:"sk-ant-...",value:getApiKey()||""});
   const apiKeyHelp=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"2px"}},"Get one at console.anthropic.com \u00b7 Stored locally in your browser");
@@ -231,13 +239,17 @@ function renderEntry(el){
       if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo");
       if(profile.reparse)csv=profile.reparse(text);
 
-      // Auto-detect payment type from filename (only if user hasn't manually changed it)
+      // Auto-detect payment type from filename (only if user hasn't manually
+      // changed it). Only apply when the guessed account is actually one of the
+      // viewer's options — otherwise their explicit account choice stands.
       if(!impPtManual){
-        if(profile.name==="chase_checking")impPtSel.value="Chase Chequing";
-        else if(profile.name==="chase")impPtSel.value="Chase Sapphire";
-        else if(profile.name==="amex")impPtSel.value="AMEX Rose Gold";
-        else if(profile.name==="bilt"||profile.name==="bilt_legacy")impPtSel.value="Bilt";
-        else if(profile.name==="wells_fargo")impPtSel.value=/sav/i.test(file.name)?"Wells Fargo Savings":"Wells Fargo Checking";
+        let guess="";
+        if(profile.name==="chase_checking")guess="Chase Chequing";
+        else if(profile.name==="chase")guess="Chase Sapphire";
+        else if(profile.name==="amex")guess="AMEX Rose Gold";
+        else if(profile.name==="bilt"||profile.name==="bilt_legacy")guess="Bilt";
+        else if(profile.name==="wells_fargo")guess=/sav/i.test(file.name)?"Wells Fargo Savings":"Wells Fargo Checking";
+        if(guess&&[...impPtSel.options].some(o=>o.value===guess))impPtSel.value=guess;
       }
       const pt=impPtSel.value;
       const tag=impTagInp.value.trim();

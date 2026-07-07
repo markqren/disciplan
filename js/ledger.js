@@ -61,8 +61,8 @@ function openLedgerEditModal(txn,onSaved){
   const mCreditRow=h("div",{style:{display:txn.payment_type==="Transfer"?"grid":"none",gridTemplateColumns:"1fr 2fr",gap:"6px",marginBottom:"14px"}});
   mCreditRow.append(mField("Credit Sub-Account",mCredit));
   const mPt=h("select",{class:"inp",onChange:()=>{mCreditRow.style.display=mPt.value==="Transfer"?"grid":"none"}});
-  if(txn.payment_type&&!PTS.includes(txn.payment_type))mPt.append(h("option",{value:txn.payment_type,selected:true},txn.payment_type));
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===txn.payment_type)o.selected=true;mPt.append(o)});
+  fillPtSelect(mPt,{selected:txn.payment_type,keep:["Transfer"]});
+  acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:txn.payment_type,keep:["Transfer"]}));
   const mTag=h("input",{class:"inp",type:"text",value:txn.tag||""});
 
   // Accrual preview
@@ -394,7 +394,8 @@ function openLedgerEditModal(txn,onSaved){
 
     // Payment method
     const rPt=h("select",{class:"inp",onChange:()=>{rCreditRow.style.display=rPt.value==="Transfer"?"grid":"none";updateRPreview()}});
-    PTS.forEach(p=>{const o=h("option",{value:p},p);if(p==="Splitwise")o.selected=true;rPt.append(o)});
+    fillPtSelect(rPt,{prefer:["Splitwise"],keep:["Splitwise","Venmo","Transfer"]});
+    acctLabelsReady().then(()=>fillPtSelect(rPt,{prefer:["Splitwise"],keep:["Splitwise","Venmo","Transfer"]}));
     modal.append(mRow(mField("Payment Method",rPt)));
 
     // Credit sub-account (only for Transfer payment type)
@@ -556,9 +557,8 @@ function openLedgerEditModal(txn,onSaved){
 
     // Payment type + category (defaults to parent, can be changed)
     const cbPtSel=h("select",{class:"inp",onChange:()=>{cbPaymentType=cbPtSel.value;updateCPreview()}});
-    if(cbPaymentType&&!PTS.includes(cbPaymentType))cbPtSel.append(h("option",{value:cbPaymentType,selected:true},cbPaymentType));
-    PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===cbPaymentType)o.selected=true;cbPtSel.append(o)});
-    if(!cbPaymentType&&cbPtSel.options.length){cbPaymentType=cbPtSel.options[0].value;cbPtSel.value=cbPaymentType}
+    cbPaymentType=fillPtSelect(cbPtSel,{selected:cbPaymentType||null,keep:["Transfer"]});
+    acctLabelsReady().then(()=>{cbPaymentType=fillPtSelect(cbPtSel,{selected:cbPaymentType||null,keep:["Transfer"]});updateCPreview()});
     const cbCatSel=h("select",{class:"inp",onChange:()=>{cbCategory=cbCatSel.value;updateCPreview()}});
     CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===cbCategory)o.selected=true;cbCatSel.append(o)});
     modal.append(mRow(mField("Payment Type",cbPtSel),mField("Category",cbCatSel)));
@@ -797,8 +797,9 @@ function openBatchEditModal(txns,onDone){
   CATS_LIST.forEach(c=>bCat.append(h("option",{value:c.id},c.l)));
 
   const bPt=h("select",{class:"inp"});
-  bPt.append(h("option",{value:""},"— no change —"));
-  PTS.forEach(p=>bPt.append(h("option",{value:p},p)));
+  function fillBPt(){const prev=bPt.value;fillPtSelect(bPt,{keep:["Transfer"]});bPt.insertBefore(h("option",{value:""},"\u2014 no change \u2014"),bPt.firstChild);bPt.value=[...bPt.options].some(o=>o.value===prev)?prev:""}
+  fillBPt();
+  acctLabelsReady().then(fillBPt);
 
   const bTag=h("input",{class:"inp",type:"text",placeholder:"no change"});
   const bTagClear=h("label",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",display:"flex",alignItems:"center",gap:"4px",marginTop:"4px"}});
@@ -1384,8 +1385,10 @@ function openGroupEditModal(gid,members,summary,override,onSaved){
   gCat.append(h("option",{value:""},"Auto (dominant)"));
   CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===(override?.category_id||""))o.selected=true;gCat.append(o)});
   const gPt=h("select",{class:"inp"});
-  gPt.append(h("option",{value:""},"Auto (dominant)"));
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===(override?.payment_type||""))o.selected=true;gPt.append(o)});
+  const gPtVal=override?.payment_type||"";
+  function fillGPt(){fillPtSelect(gPt,{selected:gPtVal||null,keep:["Transfer"]});gPt.insertBefore(h("option",{value:""},"Auto (dominant)"),gPt.firstChild);gPt.value=gPtVal}
+  fillGPt();
+  acctLabelsReady().then(fillGPt);
   const gTag=h("input",{class:"inp",type:"text",value:override?.tag||"",placeholder:summary.dominantTag||""});
   modal.append(gRow(gField("Group Label",gLabel)));
   modal.append(gRow(gField("Category",gCat),gField("Payment Type",gPt)));

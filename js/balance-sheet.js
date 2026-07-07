@@ -110,11 +110,11 @@ async function renderBS(el){
 
     // Live ledger account groups
     const row2=h("div",{class:"g2"});
-    function acctGroup(title,accts,color,isAsset){
+    function acctGroup(title,accts,color,isAsset,acctType){
       if(!accts.length)return"";
       const total=accts.reduce((s,a)=>s+a.bal,0);
       let html=`<div class="acct-grp"><div class="acct-hdr"><span style="font-size:12px;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:0.05em">${title}</span><span style="font-size:13px;font-weight:700;color:${color};font-family:var(--mono)">${fmtF(total)}</span></div>`;
-      accts.forEach(a=>{const isTD=a.name.startsWith("TD");const cadRate=DFX.CAD||0.73;const cadVal=isTD?`<span style="color:rgba(255,255,255,0.28);font-size:11px;margin-right:6px;font-family:var(--mono)">CA$${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(a.bal/cadRate))}</span>`:"";html+=`<div class="acct-row" data-acct="${a.name}" data-asset="${isAsset?1:0}" data-bal="${a.bal}" title="Right-click for actions"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${isTD?` title="CA$${(a.bal/cadRate).toFixed(2)}"`:""} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${cadVal}${fmtF(a.bal)}</span></div>`;
+      accts.forEach(a=>{const isTD=a.name.startsWith("TD");const cadRate=DFX.CAD||0.73;const cadVal=isTD?`<span style="color:rgba(255,255,255,0.28);font-size:11px;margin-right:6px;font-family:var(--mono)">CA$${new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(Math.abs(a.bal/cadRate))}</span>`:"";html+=`<div class="acct-row" data-acct="${a.name}" data-asset="${isAsset?1:0}" data-type="${acctType||""}" data-bal="${a.bal}" title="Right-click for actions"><span style="color:rgba(255,255,255,0.6)">${a.name}</span><span${isTD?` title="CA$${(a.bal/cadRate).toFixed(2)}"`:""} style="color:rgba(255,255,255,0.7);font-family:var(--mono)">${cadVal}${fmtF(a.bal)}</span></div>`;
         // Owner break-out: only when 2+ household members actually hold this account.
         if(isCombined&&multi&&a.owners){const obs=Object.entries(a.owners).filter(([,b])=>Math.abs(b)>0.5);if(obs.length>1){obs.sort((x,y)=>Math.abs(y[1])-Math.abs(x[1]));html+=`<div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 0 7px 12px">`;obs.forEach(([ow,b])=>{const meta=ownerMeta[ow]||{name:ow,color:"#888"};html+=`<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;background:${meta.color}1a;border:1px solid ${meta.color}33;padding:2px 7px;border-radius:5px"><span style="color:${meta.color};font-weight:600">${meta.name}</span><span style="font-family:var(--mono);color:rgba(255,255,255,0.55)">${fmtF(b)}</span></span>`});html+=`</div>`;}}});
       return html+"</div>";
@@ -124,7 +124,7 @@ async function renderBS(el){
     row2.append(assetsCard);
 
     const liabCard=h("div",{class:"cd"});
-    liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)",false);
+    liabCard.innerHTML=`<h3 style="color:var(--r)">Liabilities</h3>`+acctGroup("Credit Cards",byType.credit,"var(--r)",false,"credit");
     const workCap=[...byType.working_capital,...byType.liability];
     if(workCap.length)liabCard.innerHTML+=acctGroup("Working Capital",workCap,"var(--y)",false);
     if(!byType.credit.length&&!workCap.length)liabCard.innerHTML+=`<div style="color:rgba(255,255,255,0.2);font-size:12px;padding:20px;text-align:center">No liabilities recorded</div>`
@@ -136,7 +136,7 @@ async function renderBS(el){
       const rowEl=e.target.closest(".acct-row[data-acct]");
       if(!rowEl)return;
       e.preventDefault();
-      showAcctContextMenu(e.clientX,e.clientY,rowEl.dataset.acct,rowEl.dataset.asset==="1",parseFloat(rowEl.dataset.bal)||0);
+      showAcctContextMenu(e.clientX,e.clientY,rowEl.dataset.acct,rowEl.dataset.asset==="1",parseFloat(rowEl.dataset.bal)||0,rowEl.dataset.type||"");
     });
 
     // Credits & Transfers — standalone expandable card
@@ -206,7 +206,7 @@ function showSnapshotForm(accounts, lastDate, onSave, liveBals){
 // Right-clicking an account row opens a small dropdown. First action lets the
 // user state the account's real current value; a single "adjustment" txn trues
 // up the ledger without touching the income statement.
-function showAcctContextMenu(x,y,name,isAsset,bal){
+function showAcctContextMenu(x,y,name,isAsset,bal,acctType){
   document.querySelectorAll(".acct-ctx-menu").forEach(m=>m.remove());
   const menu=h("div",{class:"acct-ctx-menu",style:{position:"fixed",zIndex:"9999",minWidth:"190px",background:"#1c1c22",border:"1px solid var(--bdr)",borderRadius:"8px",padding:"4px",boxShadow:"0 10px 30px rgba(0,0,0,0.5)"}});
   menu.append(h("div",{style:{padding:"4px 12px 6px",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",color:"rgba(255,255,255,0.35)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:"220px"}},name));
@@ -216,6 +216,7 @@ function showAcctContextMenu(x,y,name,isAsset,bal){
     it.addEventListener("mouseleave",()=>{it.style.background="transparent"});
     return it;
   }
+  if(acctType==="credit")menu.append(menuItem("Pay Bill",()=>showBillPayment(name,bal)));
   menu.append(menuItem("Balance Adjustment",()=>showBalanceAdjustment(name,isAsset,bal)));
   menu.append(menuItem("Rename Account",()=>showAcctRename(name)));
   document.body.append(menu);
@@ -300,6 +301,96 @@ function showBalanceAdjustment(name,_isAsset,fallbackBal){
       });
       renderContent();
     }catch(e){alert("Error creating adjustment: "+e.message);saveBtn.disabled=false;saveBtn.textContent="Create Adjustment"}
+  });
+}
+
+// Modal: pay off a credit-card bill. Records the app's usual two-leg financial
+// pair — a "Bill Paid: <card>" credit on the card (reduces the liability) and a
+// matching "<card> Bill Payment" debit on the funding account (reduces cash) —
+// then links the pair into one transaction_group so it nets to $0. Uses
+// CC_PAY_NAMES so descriptions match the CSV importer's format exactly.
+function showBillPayment(name,fallbackBal){
+  const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
+  const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
+  const modal=h("div",{class:"modal",style:{maxWidth:"460px"}});
+  const names=CC_PAY_NAMES[name]||["Bill Paid: "+name,name+" Bill Payment"];
+  modal.innerHTML=`<div style="display:flex;justify-content:space-between;margin-bottom:16px"><div><h2 style="font-size:20px;margin:0">Pay Bill</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${name}</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">\u2715</button></div>`;
+
+  const owedLbl=h("label",{class:"lbl"},"Amount to pay (USD)");
+  const owed=fallbackBal<0?Math.round(-fallbackBal*100)/100:0;
+  const amtInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"0.00",value:owed?owed.toFixed(2):"",style:{maxWidth:"200px",fontFamily:"var(--mono)"}});
+  const amtField=h("div",{style:{marginBottom:"14px"}});amtField.append(owedLbl,amtInp);
+  const balHint=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.3)",marginTop:"-8px",marginBottom:"14px"}},fallbackBal<0?`Current balance owed: ${fmtF(-fallbackBal)}`:`This card currently carries no balance.`);
+
+  const fromLbl=h("label",{class:"lbl"},"Pay from");
+  const fromSel=h("select",{class:"inp",style:{maxWidth:"240px"}});
+  fromSel.append(h("option",{value:"Chase Chequing"},"Chase Chequing"));
+  const fromField=h("div",{style:{marginBottom:"14px"}});fromField.append(fromLbl,fromSel);
+
+  const dateLbl=h("label",{class:"lbl"},"Date");
+  const dateInp=h("input",{class:"inp",type:"date",value:today(),style:{maxWidth:"200px"}});
+  const dateField=h("div",{style:{marginBottom:"14px"}});dateField.append(dateLbl,dateInp);
+
+  const preview=h("div",{style:{fontSize:"12px",lineHeight:"1.7",margin:"4px 0 14px"}});
+  const saveBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},disabled:true},"Record Payment");
+
+  modal.append(amtField,balHint,fromField,dateField,preview,saveBtn);
+  bg.append(modal);document.body.append(bg);
+
+  function recompute(){
+    const amt=parseFloat(amtInp.value);
+    const from=fromSel.value;
+    if(isNaN(amt)||amt<=0||from===name){preview.innerHTML=from===name?`<div style="color:var(--r)">Pick a funding account other than the card.</div>`:"";saveBtn.disabled=true;return}
+    const v=Math.round(amt*100)/100;
+    preview.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Payment Preview</div>`+
+      `<div>Pays <b style="font-family:var(--mono)">${fmtF(v)}</b> from <b>${from}</b> \u2192 <b>${name}</b></div>`+
+      `<div style="font-size:11px;color:rgba(129,178,154,0.7);margin-top:4px">Creates 2 linked financial rows \u00b7 nets to ${fmtF(0)}</div>`;
+    saveBtn.disabled=false;
+  }
+  amtInp.addEventListener("input",recompute);
+  fromSel.addEventListener("change",recompute);
+  recompute();
+
+  // Populate the funding dropdown with the household's cash accounts, defaulting
+  // to Chase Chequing (the usual bill-pay source). Falls back to the hardcoded
+  // default if the lookup fails.
+  sb("accounts?account_type=in.(checking,savings)&order=display_order"+ownerQS()).then(accts=>{
+    const labels=(accts||[]).map(a=>a.label).filter(l=>l&&l!==name);
+    if(!labels.length)return;
+    fromSel.innerHTML="";
+    labels.forEach(l=>fromSel.append(h("option",{value:l},l)));
+    fromSel.value=labels.includes("Chase Chequing")?"Chase Chequing":labels[0];
+    recompute();
+  }).catch(()=>{});
+  setTimeout(()=>{amtInp.focus();amtInp.select()},0);
+
+  saveBtn.addEventListener("click",async()=>{
+    const amt=parseFloat(amtInp.value);if(isNaN(amt)||amt<=0)return;
+    const from=fromSel.value;if(from===name)return;
+    const v=Math.round(amt*100)/100;
+    const d=dateInp.value||today();
+    saveBtn.disabled=true;saveBtn.textContent="Recording\u2026";
+    try{
+      const leg=(pt,desc,usd)=>({date:d,service_start:d,service_end:d,service_days:1,
+        description:desc,category_id:"financial",amount_usd:usd,original_amount:usd,
+        currency:"USD",fx_rate:1,daily_cost:usd,payment_type:pt,tag:"",credit:""});
+      const created=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify([
+        leg(name,names[0],-v),   // card credit (reduces liability)
+        leg(from,names[1],v)     // cash debit (reduces asset)
+      ])});
+      const ids=(created||[]).map(c=>c.id).filter(Boolean);
+      if(ids.length===2)await linkToGroup({id:ids[0],transaction_group_id:null},{id:ids[1],transaction_group_id:null});
+      state.txnCount+=ids.length;
+      const ds=document.getElementById("dbStatus");if(ds)ds.textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+      dcClearAll();
+      bg.remove();
+      if(ids.length&&typeof showUndo==="function")showUndo(`\u2713 Paid ${fmtF(v)} to ${name}`,async()=>{
+        await sb(`transactions?id=in.(${ids.join(",")})`,{method:"DELETE"});
+        state.txnCount-=ids.length;const d2=document.getElementById("dbStatus");if(d2)d2.textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+        dcClearAll();renderContent();
+      });
+      renderContent();
+    }catch(e){alert("Error recording payment: "+e.message);saveBtn.disabled=false;saveBtn.textContent="Record Payment"}
   });
 }
 

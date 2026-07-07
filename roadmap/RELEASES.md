@@ -11,6 +11,15 @@
 
 ### v2.10 — Jul 5, 2026
 
+#### v2.10.4
+<sub>Owner-scoped payment-account pickers across the app (multi-user separation) · pay-a-credit-card-bill from the Balance Sheet</sub>
+
+##### Features
+- **Pay a credit-card bill from the Balance Sheet** — Right-clicking a credit-card account row now offers a **"Pay Bill"** action (in addition to Balance Adjustment / Rename). It opens a modal pre-filled with the amount currently owed, lets you pick the funding account (dropdown populated from the household's checking/savings accounts scoped by `ownerQS()`, defaulting to Chase Chequing), and on save records the app's standard two-leg financial pair — a `Bill Paid: <card>` credit on the card (reduces the liability) and a matching `<card> Bill Payment` debit on the funding account (reduces cash) — using `CC_PAY_NAMES` so the descriptions match the CSV importer's format exactly. The pair is linked into one `transaction_group` so it nets to $0, caches are cleared, and an Undo toast removes both rows. Credit-card rows are tagged via a new `data-type` attribute so only they surface the action. (~4,000 tokens)
+
+##### Fixes
+- **Payment-account pickers now scoped to the active person view** — Every "Payment Account" dropdown in the **Entry** tab (new transaction, transfer "To Account", CSV import) plus every edit modal (Ledger edit/reimburse/cashback/batch/group-override, and the CSV/email/payslip import-review tables) was built from the global `PTS` constant — a single hardcoded list shared by the whole household. So Shilpa's Entry tab offered **Mark's** accounts (Chase Sapphire, Bilt, AMEX Rose Gold, TD…), and **custom accounts added in Onboarding — e.g. "Chase United Club" — never appeared at all**, because those live in `accounts.label`, not in `PTS` (which only has the legacy `"Chase United"`). Stored data was never leaking (transactions are separated by `transactions.owner` and every read is already owner-scoped); this was purely which *options* were offered. Added one shared helper in `js/helpers.js` — `acctLabelsReady()` (fetches `accounts.label` scoped by `ownerQS()`, cached per view) + `fillPtSelect()` — and routed all 11 payment pickers through it, mirroring the existing Ledger payment filter. It always preserves a row's existing value and pseudo-accounts (`Transfer`/`Splitwise`), and **falls back to the full `PTS` list when the viewer has no account rows**, so legacy/single-user data is unaffected. Onboarding invalidates the cache when an account is added so it appears immediately, and the CSV-import filename auto-detect no longer blanks the select when its guessed bank isn't one of the viewer's accounts. (~12,000 tokens)
+
 #### v2.10.3
 <sub>Bilt rent auto-detection + confirmed Splitwise split on import (FEA-114)</sub>
 

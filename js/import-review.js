@@ -13,6 +13,9 @@ function normalizeCandidateServicePeriod(c){
 
 function renderReviewTable(container,candidates){
   container.innerHTML="";
+  // Load the active view's account labels for payment/transfer pickers; re-render
+  // once they arrive so scoped options replace the PTS fallback.
+  if(!_acctLabels.length)acctLabelsReady().then(l=>{if(l&&l.length)renderReviewTable(container,candidates)});
   const skipped=candidates.filter(c=>c._status==="skipped");
   const dupes=candidates.filter(c=>c._isDuplicate);
   const hi=candidates.filter(c=>c.ai_confidence==="high"&&c._status!=="skipped");
@@ -107,8 +110,8 @@ function renderReviewTable(container,candidates){
     if(c._isTransfer){
       // Transfer rows pick a counter-account (not a category — they stay financial).
       const xferSel=h("select",{style:{...selStyle,border:c._transferTo?selStyle.border:"1px solid var(--y)"},onChange:e=>{c._transferTo=e.target.value;renderReviewTable(container,candidates)}});
-      if(!c._transferTo)xferSel.append(h("option",{value:"",selected:true},"\u2014 pick account \u2014"));
-      PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c._transferTo)o.selected=true;xferSel.append(o)});
+      fillPtSelect(xferSel,{selected:c._transferTo||null});
+      if(!c._transferTo){xferSel.insertBefore(h("option",{value:"",selected:true},"\u2014 pick account \u2014"),xferSel.firstChild);xferSel.value=""}
       catTd.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)",marginRight:"4px"}},"\u2194"));
       catTd.append(xferSel);
       tr.append(catTd);
@@ -193,8 +196,8 @@ function openImportEditModal(candidates,idx,reviewContainer){
   const seField=h("div");seField.append(seLbl);seField.append(mSe);
 
   const mPt=h("select",{class:"inp"});
-  if(c.payment_type&&!PTS.includes(c.payment_type))mPt.append(h("option",{value:c.payment_type,selected:true},c.payment_type));
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
+  fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
+  acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
   const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
 
   // Accrual preview
@@ -875,8 +878,8 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   const emSeField=h("div");emSeField.append(emSeLbl);emSeField.append(mSe);
 
   const mPt=h("select",{class:"inp"});
-  if(c.payment_type&&!PTS.includes(c.payment_type))mPt.append(h("option",{value:c.payment_type,selected:true},c.payment_type));
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
+  fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
+  acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
   const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
 
   const emPreviewEl=h("div",{class:"preview hidden"});
@@ -1043,7 +1046,8 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
   const psSeField=h("div");psSeField.append(psSeLbl);psSeField.append(mSe);
 
   const mPt=h("select",{class:"inp"});
-  PTS.forEach(p=>{const o=h("option",{value:p},p);if(p===c.payment_type)o.selected=true;mPt.append(o)});
+  fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
+  acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
   const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
 
   const psPreviewEl=h("div",{class:"preview hidden"});

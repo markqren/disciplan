@@ -116,6 +116,7 @@ async function renderOnboarding(el){
         }
       }
       labelInp.value="";balInp.value="";
+      invalidateAcctLabels();
       renderAcctList();refreshAccountPickers(label);
       addStatus.classList.remove("hidden");addStatus.style.color="var(--g)";addStatus.textContent=`\u2713 Added ${label}${openMsg}`;
     }catch(e){addStatus.classList.remove("hidden");addStatus.style.color="var(--r)";addStatus.textContent="Error: "+e.message}
