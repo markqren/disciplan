@@ -40,6 +40,7 @@ import type {
   FollowupRow,
   HealthCheckResult,
   ISRow,
+  IncomeYear,
   InsightContextRow,
   InsightLogRow,
   InsightResponse,
@@ -312,10 +313,10 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     .limit(500);
   const currentMonthTxns = (currentMonthTxnsRaw || []) as TxnDetail[];
 
-  // Phase B: YTD income series for income_breakdown YoY+CAGR rework. Compares
-  // this year's YTD income through `today` against the same calendar-day range
-  // for prior years — apples-to-apples regardless of biweekly/month-end timing.
-  const ytdIncomeByYear = await fetchYtdIncome(supabase, today);
+  // income_breakdown: owner-scoped compensation breakdown (equity/cash/bonus/tax/
+  // 401K) for this year + prior 2, each through today's calendar day. Replaces the
+  // old abs()-summed YTD income (which double-counted tax withholding + refunds).
+  const incomeComposition = await fetchIncomeComposition(supabase, today);
 
   // Phase B: past-tag candidates for tag_recap. Filters by trip-style criteria
   // and pre-computes top-5 txns + top-3 spend days per candidate so the archetype
@@ -350,7 +351,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     schema,
     expenses,
     income,
-    ytdIncomeByYear,
+    incomeComposition,
     largeTxns: (largeTxns || []) as Transaction[],
     expiring: (expiring || []) as Transaction[],
     currentMonthTxns,
@@ -371,31 +372,105 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
 
 // ── Phase B helpers ──────────────────────────────────────────────────────────
 
-// YTD income for current and prior 2 years, through today's calendar day. Income
-// rows live in transactions (category_id='income') with negative amounts (per
-// accounting convention), so we abs() the sum for downstream display.
-async function fetchYtdIncome(supabase: SupabaseClient, today: string): Promise<Record<string, number>> {
+// Bucket an income-category transaction by its description. WORD-BOUNDARY SAFE by
+// design: "Pinterest" contains the substrings "interest" and "interest income",
+// which silently inflated ad-hoc classification ~400x during design. Never use
+// bare substring matching here. Order matters — most specific first, first match
+// wins. Mirrors the reference SQL handed to the writer in prompt_guidance.
+type IncomeBucket = "equity" | "cash" | "bonus" | "taxes" | "k401_match" | "interest" | "excluded";
+function classifyIncomeDescription(descRaw: string): IncomeBucket {
+  const d = (descRaw || "").toLowerCase();
+  // Non-income noise misfiled under income: expense refunds, cashback, card
+  // offers, airline/rideshare credits, HSA gifts, self-transfers (Zelle), and
+  // tax-return settlements. Excluded from every comp bucket.
+  if (/\brefund\b|\bcashback\b|amex offer|in-?flight credit|rideshare credit|\bhsa\b|\bzelle\b|income tax return/.test(d)) return "excluded";
+  if (/stock units vested|\brsu\b/.test(d)) return "equity";
+  if (/\bbonus\b|\bseverance\b|vacation income payout|\bstipend\b/.test(d)) return "bonus";
+  if (/401k match/.test(d)) return "k401_match";
+  if (/\btax|social security/.test(d)) return "taxes";     // withholding (positive)
+  if (/\binterest\b/.test(d)) return "interest";           // \b does NOT match inside "Pinterest"
+  if (/income$|\bpayroll/.test(d)) return "cash";
+  return "excluded"; // unknown income-category rows: conservatively kept out of gross
+}
+
+// Owner-scoped compensation breakdown for the current year + prior 2 years, each
+// through today's calendar day. Replaces the old abs()-summed fetchYtdIncome
+// (which wrongly treated tax withholding and refunds as income). Two source
+// streams per year: income-category rows (classified above) and financial-category
+// 401K employee-deposit legs (the money-into-account side; rollovers excluded).
+async function fetchIncomeComposition(supabase: SupabaseClient, today: string): Promise<Record<string, IncomeYear>> {
   const [yyyy, mm, dd] = today.split("-");
   const currentYear = parseInt(yyyy, 10);
-  const out: Record<string, number> = {};
-  const queries = [currentYear, currentYear - 1, currentYear - 2].map(async (y) => {
+  const out: Record<string, IncomeYear> = {};
+
+  const perYear = [currentYear, currentYear - 1, currentYear - 2].map(async (y) => {
     const yearStart = `${y}-01-01`;
     const yearTodayEquiv = `${y}-${mm}-${dd}`;
-    const { data, error } = await scopeToOwner(supabase
-      .from("transactions")
-      .select("amount_usd")
-      .eq("category_id", "income"))
-      .gte("date", yearStart)
-      .lte("date", yearTodayEquiv);
-    if (error) {
-      console.error(`fetchYtdIncome ${y} error:`, error);
-      return [String(y), 0] as [string, number];
+
+    const [incomeRes, k401Res] = await Promise.all([
+      scopeToOwner(supabase
+        .from("transactions")
+        .select("description,amount_usd")
+        .eq("category_id", "income"))
+        .gte("date", yearStart)
+        .lte("date", yearTodayEquiv),
+      // 401K employee deposits live in the financial category. Pull the "%401%"
+      // slice and keep only the "deposited …401k" legs in TS so rollover-in/out
+      // transfers (equal-and-opposite, not new savings) are excluded.
+      scopeToOwner(supabase
+        .from("transactions")
+        .select("description,amount_usd")
+        .eq("category_id", "financial")
+        .ilike("description", "%401%"))
+        .gte("date", yearStart)
+        .lte("date", yearTodayEquiv),
+    ]);
+
+    if (incomeRes.error) console.error(`fetchIncomeComposition income ${y} error:`, incomeRes.error);
+    if (k401Res.error) console.error(`fetchIncomeComposition 401k ${y} error:`, k401Res.error);
+
+    const b = { cash: 0, equity: 0, bonus: 0, interest: 0, k401_match: 0, taxes: 0 };
+    for (const r of (incomeRes.data || [])) {
+      const amt = Number(r.amount_usd) || 0;
+      const bucket = classifyIncomeDescription(String(r.description || ""));
+      if (bucket === "excluded") continue;
+      if (bucket === "taxes") b.taxes += amt;             // already positive (withheld)
+      else b[bucket] += -amt;                             // inflows stored negative → flip
     }
-    const total = (data || []).reduce((s, r) => s + Math.abs(Number(r.amount_usd) || 0), 0);
-    return [String(y), total] as [string, number];
+
+    let k401_deposited = 0;
+    for (const r of (k401Res.data || [])) {
+      const desc = String(r.description || "").toLowerCase();
+      if (!/deposited.*401k/.test(desc)) continue;        // deposit leg only, skip rollovers
+      k401_deposited += -(Number(r.amount_usd) || 0);     // into-account leg stored negative → flip
+    }
+
+    const gross = b.cash + b.equity + b.bonus + b.k401_match + b.interest;
+    const taxable_comp = b.cash + b.equity + b.bonus;
+    const entry: IncomeYear = {
+      year: y,
+      through: yearTodayEquiv,
+      gross,
+      cash: b.cash,
+      equity: b.equity,
+      bonus: b.bonus,
+      interest: b.interest,
+      k401_match: b.k401_match,
+      taxes: b.taxes,
+      net: gross - b.taxes,
+      k401_deposited,
+      taxable_comp,
+      effective_tax_rate: taxable_comp > 0 ? b.taxes / taxable_comp : null,
+      k401_savings_rate: gross > 0 ? (k401_deposited + b.k401_match) / gross : null,
+    };
+    return entry;
   });
-  const results = await Promise.all(queries);
-  for (const [yr, tot] of results) out[yr] = tot;
+
+  for (const entry of await Promise.all(perYear)) {
+    // Only surface years that actually have income; an empty year would otherwise
+    // masquerade as "income dropped to $0" in the YoY comparison.
+    if (entry.gross > 0 || entry.taxes > 0 || entry.k401_deposited > 0) out[String(entry.year)] = entry;
+  }
   return out;
 }
 

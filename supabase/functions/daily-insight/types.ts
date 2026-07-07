@@ -85,6 +85,35 @@ export interface CategorySchema {
   budgetTargets: Record<string, number>;
 }
 
+// Owner-scoped compensation breakdown for one YTD window (through today's
+// calendar day), used by income_breakdown. Income rows live in
+// transactions(category_id='income') with inflows stored NEGATIVE and tax
+// withholding stored POSITIVE; 401K employee deposits live in
+// transactions(category_id='financial'). All bucket totals below are POSITIVE
+// dollars (sign already normalised). Classification is word-boundary safe — see
+// classifyIncomeDescription in index.ts. Definitions:
+//   gross              = cash + equity + bonus + k401_match + interest (all received)
+//   taxable_comp       = cash + equity + bonus (what withholding roughly maps to)
+//   net                = gross - taxes
+//   effective_tax_rate = taxes / taxable_comp   (null when taxable_comp == 0)
+//   k401_savings_rate  = (k401_deposited + k401_match) / gross  (null when gross == 0)
+export interface IncomeYear {
+  year: number;
+  through: string;              // calendar-day cutoff used, e.g. "2025-07-06"
+  gross: number;
+  cash: number;
+  equity: number;
+  bonus: number;
+  interest: number;
+  k401_match: number;
+  taxes: number;
+  net: number;
+  k401_deposited: number;
+  taxable_comp: number;
+  effective_tax_rate: number | null;
+  k401_savings_rate: number | null;
+}
+
 // Pre-fetched data the candidate engine consumes to evaluate every archetype.
 // Each archetype's builder reads only the fields it cares about.
 export interface Features {
@@ -94,10 +123,13 @@ export interface Features {
   schema: CategorySchema;   // dynamic from `categories` table — never use module-level rollups
   expenses: MonthlyMap;
   income: Record<string, number>;
-  // Phase B income_breakdown rework: YTD income through today's calendar day for
-  // current year and prior 2 years. Apples-to-apples comparison; null entry means
-  // no transactions for that year (year-old enough that no comparison is possible).
-  ytdIncomeByYear: Record<string, number>;
+  // income_breakdown: owner-scoped compensation breakdown (equity/cash/bonus/tax/
+  // 401K) for the current year and prior 2 years, each through today's calendar
+  // day (apples-to-apples regardless of biweekly/month-end pay timing). Keyed by
+  // year string ("2026","2025","2024"). A year is absent when it has no income
+  // rows. Replaces the old abs()-summed ytdIncomeByYear, which incorrectly counted
+  // tax withholding and refunds as income.
+  incomeComposition: Record<string, IncomeYear>;
   largeTxns: Transaction[];
   expiring: Transaction[];
   // Phase B category_anomaly drill-down: every txn dated within current calendar

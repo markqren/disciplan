@@ -14,6 +14,7 @@ import type {
   Candidate,
   Features,
   FlashbackDayBreakdown,
+  IncomeYear,
   Strategy,
   StreakStats,
   Transaction,
@@ -231,6 +232,7 @@ function buildCategoryAnomaly(features: Features, strategy: Strategy): Candidate
   const anomalies: Anomaly[] = [];
 
   for (const parent of Object.keys(current)) {
+    if (NON_CONSUMPTION_PARENTS.has(parent)) continue;
     const trail = trailingMonths.map(t => parentTotalsForMonth(features.expenses, t, rollup)[parent] || 0);
     const mean = trail.reduce((s, x) => s + x, 0) / trail.length;
     if (mean < 50) continue;
@@ -502,62 +504,99 @@ function buildSubscriptionCreep(features: Features, _strategy: Strategy): Candid
   };
 }
 
-// ── Archetype: income_breakdown (Phase B rework: YTD YoY + 3Y CAGR) ─────────
-// Mark's 2026-04-22 feedback flagged the previous "month-velocity" framing as
-// noise — income posts biweekly + month-end so partial-month comparisons against
-// trailing means are timing artifacts, not signal. The 2026-04-09 feedback
-// asked for deeper YoY/CAGR analysis. This rework pivots to:
-//   • YTD income through today's calendar day, current year + prior 2 years
-//     (apples-to-apples regardless of pay schedule)
-//   • 1-year delta % and 3-year CAGR
-//   • Eligibility gates: at least 60 calendar days into the year, prior-year YTD
-//     must be > 0 (so the YoY comparison is meaningful)
+// ── Archetype: income_breakdown (compensation breakdown: equity/cash/tax/401K) ─
+// History: the original "month-velocity" framing was noise (income posts biweekly
+// + month-end, so partial-month vs trailing-mean comparisons are timing artifacts
+// — Mark's 2026-04-22 feedback). Phase B pivoted to a clean YTD-vs-YTD gross figure.
+// This upgrade (FEA-115, Mark's 2026-07-06 request) deepens it into a real
+// COMPENSATION breakdown, all owner-scoped and cash-basis (income timing is cash,
+// not accrual):
+//   • Gross YTD vs same-calendar-day prior years — now on a CORRECTED gross that
+//     excludes tax withholding, refunds, and self-transfers (the old abs()-sum
+//     counted all of those as income).
+//   • Composition: equity (RSU vests) vs cash salary vs bonus/severance.
+//   • Effective tax rate (taxes / taxable comp) vs prior years.
+//   • 401K savings rate ((employee deposits + employer match) / gross) vs prior years.
 //
-// Note: this still skips when YTD is essentially flat YoY (within ±3%) so we
-// don't burn a slot on "income is exactly the same as last year" insights.
+// Eligibility: ≥ 60 calendar days into the year (early-year YTD is too thin to
+// compare), current + prior-year gross > 0, and a material YoY move in gross
+// (default ±6% — a smaller move is usually just RSU-vest / bonus timing, not signal).
+// The writer is handed all three years of composition in `facts`; per-bucket
+// drivers are explained via the run_finance_query tool (see prompt_guidance).
 
-function buildIncomeBreakdown(features: Features, _strategy: Strategy): Candidate {
+function buildIncomeBreakdown(features: Features, strategy: Strategy): Candidate {
   const today = features.today;
-  const [yyyy, mm, dd] = today.split("-");
+  const [yyyy] = today.split("-");
   const cy = parseInt(yyyy, 10);
+  const minYoyDeltaPct = (strategy.requires?.min_yoy_delta_pct as number | undefined) ?? 0.06;
+
   const dayOfYear = Math.floor((Date.parse(today) - Date.parse(`${cy}-01-01`)) / 86_400_000) + 1;
   if (dayOfYear < 60) return ineligible("income_breakdown", `only_day_${dayOfYear}_of_year`);
 
-  const ytd = features.ytdIncomeByYear || {};
-  const cyYtd = ytd[String(cy)] ?? 0;
-  const py1Ytd = ytd[String(cy - 1)] ?? 0;
-  const py2Ytd = ytd[String(cy - 2)] ?? 0;
+  const comp = features.incomeComposition || {};
+  const cur = comp[String(cy)] as IncomeYear | undefined;
+  const py1 = comp[String(cy - 1)] as IncomeYear | undefined;
+  const py2 = comp[String(cy - 2)] as IncomeYear | undefined;
 
-  if (cyYtd <= 0) return ineligible("income_breakdown", "no_current_year_ytd_income");
-  if (py1Ytd <= 0) return ineligible("income_breakdown", "no_prior_year_ytd_income");
+  if (!cur || cur.gross <= 0) return ineligible("income_breakdown", "no_current_year_ytd_income");
+  if (!py1 || py1.gross <= 0) return ineligible("income_breakdown", "no_prior_year_ytd_income");
 
-  const yoy_delta_abs = cyYtd - py1Ytd;
-  const yoy_delta_pct = py1Ytd > 0 ? yoy_delta_abs / py1Ytd : 0;
-  if (Math.abs(yoy_delta_pct) < 0.03) return ineligible("income_breakdown", "yoy_within_3pct_band");
+  const yoy_delta_abs = cur.gross - py1.gross;
+  const yoy_delta_pct = py1.gross > 0 ? yoy_delta_abs / py1.gross : 0;
+  if (Math.abs(yoy_delta_pct) < minYoyDeltaPct) {
+    return ineligible("income_breakdown", `yoy_within_${(minYoyDeltaPct * 100).toFixed(0)}pct_band`);
+  }
 
-  // CAGR over 3 years (cyYtd vs py2Ytd, 2 periods). Only compute if py2Ytd > 0.
-  const cagr_3y_pct = py2Ytd > 0 ? Math.pow(cyYtd / py2Ytd, 1 / 2) - 1 : null;
+  // 3Y CAGR on gross (cur vs py2 — 2 periods). Only when py2 has income.
+  const cagr_3y_pct = py2 && py2.gross > 0 ? Math.pow(cur.gross / py2.gross, 1 / 2) - 1 : null;
 
-  // data_strength: bigger YoY moves get more weight, but cap at 100% delta.
+  // data_strength: driven by the size of the YoY move, capped at a full doubling.
   const data_strength = Math.min(1, Math.abs(yoy_delta_pct));
+
+  // Composition-share helper for the narrative (equity vs cash vs bonus of gross).
+  const share = (part: number) => (cur.gross > 0 ? part / cur.gross : 0);
+
+  const years = [cur, py1, py2].filter((y): y is IncomeYear => !!y);
 
   return {
     insight_type: "income_breakdown",
     eligible: true,
     ineligibility_reason: null,
     data_strength,
+    subject_key: "income:comp",
     facts: {
       today,
       day_of_year: dayOfYear,
-      ytd_current_year: { year: cy, value: cyYtd, through: today },
-      ytd_prior_year:   { year: cy - 1, value: py1Ytd, through: `${cy - 1}-${mm}-${dd}` },
-      ytd_two_years_ago: { year: cy - 2, value: py2Ytd, through: py2Ytd > 0 ? `${cy - 2}-${mm}-${dd}` : null },
-      yoy_delta_abs,
-      yoy_delta_pct,
+      basis: "cash",
+      // Full per-year composition (current + prior 2), each YTD through today's
+      // calendar day. All dollar figures POSITIVE; see IncomeYear docs.
+      years,
+      current: cur,
+      prior_year: py1,
+      two_years_ago: py2 ?? null,
+      gross_yoy_delta_abs: yoy_delta_abs,
+      gross_yoy_delta_pct: yoy_delta_pct,
       cagr_3y_pct,
-      hint: "Lead with YTD-vs-YTD (apples-to-apples through today's calendar day) — Mark explicitly disliked partial-month velocity comparisons. State the % delta plainly. If 3Y CAGR is available, mention it. Don't speculate on causes; just present the comparison.",
+      composition_shares: {
+        equity: share(cur.equity),
+        cash: share(cur.cash),
+        bonus: share(cur.bonus),
+      },
+      effective_tax_rate_trend: years.map(y => ({ year: y.year, rate: y.effective_tax_rate })),
+      k401_savings_rate_trend: years.map(y => ({ year: y.year, rate: y.k401_savings_rate })),
+      chart_hint: {
+        multi_chart: true,
+        chart_count: 2,
+        // [0] stacked bar of comp composition by year; [1] line of effective tax
+        // rate (and/or 401K savings rate) by year.
+        charts: [
+          "STACKED BAR: one bar per year in facts.years, stacked datasets = cash / equity / bonus / interest. Title: \"Comp Composition (YTD through <through>)\".",
+          "LINE: effective_tax_rate_trend by year (as %); optionally overlay k401_savings_rate_trend. Title: \"Effective Tax Rate & 401K Savings Rate\".",
+        ],
+      },
+      hint: "Lead with gross YTD vs same-calendar-day prior year (this is CASH-basis, not accrual). Then break down the composition: how much is equity (RSU vests) vs cash salary vs bonus/severance, and how that mix shifted YoY. Report the effective tax rate and 401K savings rate vs prior years. These `facts` are the correct, pre-classified baseline — do NOT recompute them. Use run_finance_query only to NAME a driver (e.g. which RSU grant or bonus moved the number) or answer a follow-up. Never treat tax withholding or refunds as income.",
     },
-    summary: `YTD ${(yoy_delta_pct >= 0 ? "+" : "")}${(yoy_delta_pct * 100).toFixed(1)}% YoY ($${Math.round(cyYtd).toLocaleString()} vs $${Math.round(py1Ytd).toLocaleString()})`,
+    summary: `gross YTD ${(yoy_delta_pct >= 0 ? "+" : "")}${(yoy_delta_pct * 100).toFixed(1)}% YoY ($${Math.round(cur.gross).toLocaleString()} vs $${Math.round(py1.gross).toLocaleString()}); equity ${(share(cur.equity) * 100).toFixed(0)}% / cash ${(share(cur.cash) * 100).toFixed(0)}% / bonus ${(share(cur.bonus) * 100).toFixed(0)}%; eff-tax ${cur.effective_tax_rate != null ? (cur.effective_tax_rate * 100).toFixed(0) + "%" : "n/a"}`,
   };
 }
 
@@ -581,16 +620,18 @@ function buildIncomeBreakdown(features: Features, _strategy: Strategy): Candidat
 // Goal: each fire teaches the user something *new* about *a different* parent,
 // with enough child-level breakdown to answer "where is this coming from?".
 
-// Parents that are NOT meaningful "spending categories" for trend analysis:
+// Parents that are NOT meaningful "spending categories" for trend/anomaly analysis:
 // - financial: credit-card bill payments, 401K transfers, etc. (transfers, not consumption)
-// - other: catch-all bucket; trends here are uninformative
-const TREND_EXCLUDED_PARENTS = new Set(["financial", "other"]);
+// - other: catch-all bucket; movements here are uninformative
+// Shared by category_trend and category_anomaly so neither surfaces a bogus
+// "Other Category Spike" or a financial-transfer wobble as if it were spending.
+const NON_CONSUMPTION_PARENTS = new Set(["financial", "other"]);
 
 function buildCategoryTrend(features: Features, strategy: Strategy): Candidate {
   const minMonths       = (strategy.requires?.min_months as number | undefined) ?? 6;
   const minSlope        = (strategy.requires?.min_slope as number | undefined) ?? 15;
-  const minR2           = (strategy.requires?.min_r2 as number | undefined) ?? 0.10;
-  const minRelStrength  = (strategy.requires?.min_relative_strength as number | undefined) ?? 0.15;
+  const minR2           = (strategy.requires?.min_r2 as number | undefined) ?? 0.30;
+  const minRelStrength  = (strategy.requires?.min_relative_strength as number | undefined) ?? 0.20;
   const exclusionDays   = (strategy.requires?.recent_parent_exclusion_days as number | undefined) ?? 35;
 
   // Fit on 12 *complete* months only — drop the partial current month so mid-month
@@ -622,7 +663,7 @@ function buildCategoryTrend(features: Features, strategy: Strategy): Candidate {
   };
   const cands: Cand[] = [];
   for (const parent of Object.keys(rollup)) {
-    if (TREND_EXCLUDED_PARENTS.has(parent)) continue;
+    if (NON_CONSUMPTION_PARENTS.has(parent)) continue;
     const series = completeMonths.map(m => parentTotalsForMonth(features.expenses, m, rollup)[parent] || 0);
     const nonZero = series.filter(x => x > 0).length;
     if (nonZero < minMonths) continue;
