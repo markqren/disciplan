@@ -11,6 +11,12 @@
 
 ### v2.10 — Jul 5, 2026
 
+#### v2.10.3
+<sub>Bilt rent auto-detection + confirmed Splitwise split on import (FEA-114)</sub>
+
+##### Features
+- **Bilt rent auto-detected on import + one-click Shilpa split (FEA-114)** — The Bilt CSV posts each month's rent as two `$3,495` lines that both contain the word "Payment" (`Bilt Housing Payment`, the charge, and `Payment - Bilt Housing`, the card payoff), so the greedy `detectPayment:/payment/i` rule turned **both** into a `Bill Paid: Bilt → Chase Chequing` financial pair — the rent charge never became Rent. The only reliable charge-vs-payoff signal is the **sign** (charge = positive, payoff = negative), so `detectPayment` now requires a negative amount and a new `detectRent` (`/housing/i` + positive) classifies the charge. `transformCSVRow` emits it as `Rent - <Month YYYY>` (via `monthLabel`), category `rent`, payment `Bilt`, accrued across the whole month (`ACCRUAL_D.rent="month"`), and `applyAIResults` leaves `_isRent` rows untouched so the classification/description/accrual can't be clobbered. At commit the rent charge is auto-grouped with its same-month card-payoff pair (matching the prior-month manual grouping: Rent + Bill Paid + Bilt Card Payment). **Split with Shilpa is now confirm-during-import, not manual:** a "Split rent?" dialog appears before saving (per-charge checkbox, editable %, "Push to Splitwise" toggle — all default on), and on confirm `createRentSplit` writes the `Reimbursed - Rent - <Month> - Shilpa` credit into the same group (tagged with the import batch so Undo removes it) **and pushes a real 50/50 Splitwise expense via the API** (`pushRentSplitToSplitwise` reuses the saved friend/group mapping + `swCreateExpense`, non-fatal on failure). Partner name defaults to the other household member; ratio defaults to 50%. (~16,000 tokens)
+
 #### v2.10.2
 <sub>Splitwise multi-person group splits (FEA-29C) · newsletter archetype audit &amp; tuning (FEA-113)</sub>
 

@@ -32,6 +32,15 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
       if(rawAmt>0)return{...baseFields,amount_usd:amt,category_id:"income",ai_confidence:"medium",service_days:1,daily_cost:amt,_status:"pending",_isDuplicate:false,_skipReason:null,_isCredit:true};
     }
   }
+  // Bilt rent charge (positive "Bilt Housing Payment") -> Rent, accrued across the
+  // whole month. The card payoff ("Payment - Bilt Housing", negative) is a distinct
+  // row that still flows through the CC-payment path below and is auto-grouped with
+  // this rent charge at commit. The only reliable charge-vs-payoff signal is sign.
+  if(!badDate&&profile.detectRent&&profile.detectRent(row)){
+    const rss=startOfMonth(date),rse=endOfMonth(rss);
+    const rsd=Math.max(1,Math.floor((new Date(rse+"T00:00:00")-new Date(rss+"T00:00:00"))/864e5)+1);
+    return{...baseFields,description:`Rent - ${monthLabel(date)}`,amount_usd:amt,category_id:"rent",ai_confidence:"high",service_start:rss,service_end:rse,service_days:rsd,daily_cost:Math.round(amt/rsd*1e6)/1e6,_status:"pending",_isDuplicate:false,_skipReason:null,_isRent:true};
+  }
   if(isCCPay){
     const names=CC_PAY_NAMES[paymentType]||["Bill Paid: "+paymentType,paymentType+" Bill Payment"];
     return{
@@ -98,7 +107,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
   if(!aiResults){
     for(const c of candidates){
       if(c._status==="skipped")continue;
-      if(c._isCCPayment)continue;
+      if(c._isCCPayment||c._isRent)continue;
       if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);
       if(!c.ai_confidence)c.ai_confidence="low";
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
@@ -113,7 +122,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
   for(let i=0;i<candidates.length;i++){
     const c=candidates[i];
     if(c._status==="skipped")continue;
-    if(c._isCCPayment)continue;
+    if(c._isCCPayment||c._isRent)continue;
     const ai=byIdx[i];
     if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc;c._aiOriginal={cat:ai.cat,conf:ai.conf,desc:ai.desc}}
     else{if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);if(!c.ai_confidence)c.ai_confidence="low"}
@@ -130,7 +139,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
   if(detectedSubs&&detectedSubs.length){
     const subMerchants=new Set(detectedSubs.map(s=>s.merchant));
     for(const c of candidates){
-      if(c._status==="skipped"||c._isCCPayment)continue;
+      if(c._status==="skipped"||c._isCCPayment||c._isRent)continue;
       if(subMerchants.has(normalizeMerchant(c._rawDescription||c.description))){
         c.service_start=startOfMonth(c.date);
         c.service_end=endOfMonth(c.service_start);

@@ -317,6 +317,65 @@ async function createReimbursement(originalTxn,person,splitRatio,paymentType,not
   return{result,newId,groupId,originalId:originalTxn.id,reimbAmount};
 }
 
+// Create the confirmed rent split for an imported Bilt rent charge: a local
+// Splitwise reimbursement (joined to the rent's group, tagged with the import
+// batch so undo removes it) plus, when requested, a real Splitwise API expense.
+// rentTxn must be the inserted row {id,date,description,category_id,amount_usd,
+// service_start,service_end,transaction_group_id,tag}. Never throws — the local
+// reimbursement is created first; a Splitwise push failure is logged, not fatal.
+async function createRentSplit(rentTxn,split,batchId){
+  const person=(split&&split.person)||"Shilpa";
+  const ratio=(split&&split.ratio)||0.5;
+  const r=await createReimbursement(rentTxn,person,ratio,"Splitwise","","");
+  if(r&&r.newId&&batchId){
+    try{await sb(`transactions?id=eq.${r.newId}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({import_batch:batchId})})}catch(e){}
+  }
+  if(split&&split.push){
+    try{await pushRentSplitToSplitwise(rentTxn,r,person)}
+    catch(e){console.warn("Rent Splitwise push failed:",e&&e.message)}
+  }
+  return r;
+}
+
+// Push a rent split to Splitwise using the remembered friend/group mapping for
+// `person` (falling back to a name match against the live friend list). Mirrors
+// the payload the manual Reimburse form builds (group participants vs 1:1 friend).
+async function pushRentSplitToSplitwise(rentTxn,r,person){
+  const reimbAmt=Math.abs((r&&r.reimbAmount)||0);
+  if(!(reimbAmt>0))return;
+  let map=await getSwFriendMap(person);
+  if(!map){const fn=person.split(" ")[0];if(fn&&fn!==person)map=await getSwFriendMap(fn)}
+  let friendId=map&&map.sw_user_id;
+  const groupId=(map&&map.sw_group_id)||0;
+  if(!friendId){
+    try{
+      const friends=await swFetchFriends();
+      const fn=person.split(" ")[0].toLowerCase();
+      const hit=(friends||[]).find(f=>(f.name||"").toLowerCase().includes(fn));
+      if(hit)friendId=hit.id;
+    }catch(e){}
+  }
+  if(!friendId)throw new Error(`no Splitwise friend mapping for "${person}"`);
+  const base={
+    group_id:groupId||0,
+    cost:Math.round(rentTxn.amount_usd*100)/100,
+    date:rentTxn.date,
+    description:(rentTxn.description||"Rent").replace(/^Reimbursed\s*-\s*/i,""),
+    currency_code:"USD",details:"",
+    expense_txn_id:rentTxn.id,
+    reimburse_txn_id:r&&r.newId,
+    transaction_group_id:r&&r.groupId
+  };
+  const payload=groupId
+    ?{...base,participants:[{user_id:friendId,owed:reimbAmt}]}
+    :{...base,friend_user_id:friendId,friend_owed:reimbAmt};
+  const res=await swCreateExpense(payload);
+  if(res&&res.expense_id&&rentTxn.id){
+    try{await sb(`pending_shared_txns?source_txn_id=eq.${rentTxn.id}&sw_expense_id=is.null`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({sw_expense_id:res.expense_id})})}catch(e){}
+  }
+  return res;
+}
+
 // ── Splitwise write-back (FEA-29C) ──
 // Call the auth-gated splitwise-sync Edge Function with a write action.
 async function swCallEdge(payload){

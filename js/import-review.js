@@ -37,7 +37,10 @@ function renderReviewTable(container,candidates){
     if(saving)return;
     const approved=candidates.filter(c=>c._status==="approved");
     if(!approved.length)return alert("No approved transactions to save.");
-    saving=true;saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    saving=true;saveBtn.disabled=true;
+    const proceed=await confirmRentSplits(candidates);
+    if(!proceed){saving=false;saveBtn.disabled=false;saveBtn.textContent="Save Approved";return}
+    saveBtn.textContent="Saving...";
     try{
       const summary=await commitImport(candidates);
       renderReviewTable(container,candidates);
@@ -328,6 +331,76 @@ function openImportEditModal(candidates,idx,reviewContainer){
   document.body.append(bg);
 }
 
+// Default split partner: the other household member's name, else "Shilpa".
+function defaultSplitPerson(){
+  try{
+    if(typeof householdMembers!=="undefined"&&householdMembers&&householdMembers.length){
+      const other=householdMembers.find(m=>m.owner!==currentOwner);
+      if(other&&other.display_name)return other.display_name;
+    }
+  }catch(e){}
+  return "Shilpa";
+}
+
+// Ask the user to confirm splitting each detected rent charge before committing.
+// Sets c._splitRent={person,ratio,push} (or null) and c._splitDecided on each
+// rent row, then resolves true to proceed. Resolves false only if the user
+// dismisses via the backdrop. No rent rows -> resolves true immediately.
+function confirmRentSplits(candidates){
+  return new Promise(resolve=>{
+    const rents=candidates.filter(c=>c._isRent&&c._status==="approved"&&!c._splitDecided);
+    if(!rents.length)return resolve(true);
+    const person=defaultSplitPerson();
+    const firstName=person.split(" ")[0];
+    let done=false;
+    const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)cleanup(false)}});
+    const modal=h("div",{class:"modal",style:{maxWidth:"520px"}});
+    function cleanup(v){if(done)return;done=true;bg.remove();resolve(v)}
+    modal.append(h("h3",{style:{margin:"0 0 6px"}},"Split rent?"));
+    modal.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"14px"}},
+      `Detected ${rents.length} rent charge${rents.length>1?"s":""}. Confirm the split with ${firstName} \u2014 this also creates a matching Splitwise expense via the API.`));
+    const rows=[];
+    rents.forEach(c=>{
+      const row=h("div",{style:{background:"rgba(255,255,255,0.04)",borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
+      const top=h("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:"8px"}});
+      top.append(h("span",{style:{color:"#fff",fontSize:"13px"}},c.description));
+      top.append(h("span",{style:{fontFamily:"var(--mono)",color:"rgba(255,255,255,0.6)"}},fmtF(c.amount_usd)));
+      const ctrl=h("div",{style:{display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}});
+      const cb=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"#fff",cursor:"pointer"}});
+      const cbInput=h("input",{type:"checkbox",style:{width:"auto",margin:"0"}});cbInput.checked=true;
+      cb.append(cbInput,h("span",{},`Split with ${firstName}`));
+      const pctWrap=h("label",{style:{display:"flex",alignItems:"center",gap:"4px",fontSize:"12px",color:"rgba(255,255,255,0.6)"}});
+      const pct=h("input",{class:"inp",type:"number",step:"1",min:"1",max:"99",style:{width:"64px",margin:"0"}});pct.value="50";
+      pctWrap.append(pct,h("span",{},"%"));
+      const push=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"rgba(255,255,255,0.6)",cursor:"pointer"}});
+      const pushInput=h("input",{type:"checkbox",style:{width:"auto",margin:"0"}});pushInput.checked=true;
+      push.append(pushInput,h("span",{},"Push to Splitwise"));
+      ctrl.append(cb,pctWrap,push);
+      row.append(top,ctrl);
+      modal.append(row);
+      rows.push({c,cbInput,pct,pushInput});
+    });
+    const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"10px"}});
+    const confirm=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+      rows.forEach(({c,cbInput,pct,pushInput})=>{
+        c._splitDecided=true;
+        if(cbInput.checked){
+          const ratio=Math.min(0.99,Math.max(0.01,(parseFloat(pct.value)||50)/100));
+          c._splitRent={person,ratio,push:pushInput.checked};
+        }else c._splitRent=null;
+      });
+      cleanup(true);
+    }},"Confirm & Save");
+    const skip=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{
+      rows.forEach(({c})=>{c._splitDecided=true;c._splitRent=null});
+      cleanup(true);
+    }},"Save without split");
+    btnRow.append(confirm,skip);
+    modal.append(btnRow);
+    bg.append(modal);document.body.append(bg);
+  });
+}
+
 async function commitImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
   if(!approved.length)throw new Error("No approved transactions to save.");
@@ -432,6 +505,26 @@ async function commitImport(candidates){
     const insA=inserted[i],insB=inserted[linkedIdx];
     if(insA?.id&&insB?.id)await linkToGroup(insA,insB);
   }
+  // Group each Bilt rent charge with its same-month card-payoff pair, matching the
+  // manual grouping used in prior months (Rent + Bill Paid: Bilt + Bilt Card Payment),
+  // then create the confirmed reimbursement split (+ Splitwise push) into that group.
+  let splitCount=0;
+  for(const rent of valid.filter(c=>c._isRent)){
+    const rentIns=inserted[valid.indexOf(rent)];
+    if(!rentIns?.id)continue;
+    const pay=valid.find(c=>c._isCCPayment&&c._ccPaymentPair&&c.date.slice(0,7)===rent.date.slice(0,7)&&Math.abs(Math.abs(c.amount_usd)-Math.abs(rent.amount_usd))<0.02);
+    if(pay){
+      const payIns=inserted[valid.indexOf(pay)];
+      if(payIns?.id){const g=await linkToGroup(payIns,{id:rentIns.id,transaction_group_id:rentIns.transaction_group_id||null});rentIns.transaction_group_id=g}
+    }
+    if(rent._splitRent){
+      try{
+        const rentTxn={id:rentIns.id,date:rent.date,description:rent.description,category_id:rent.category_id,amount_usd:Math.round(rent.amount_usd*100)/100,service_start:rent.service_start,service_end:rent.service_end,transaction_group_id:rentIns.transaction_group_id||null,tag:rent.tag||""};
+        await createRentSplit(rentTxn,rent._splitRent,batchId);
+        splitCount++;
+      }catch(e){console.error("Rent split failed:",e)}
+    }
+  }
   // Auto-link AT&T internet charges to existing Connectivity Reimbursement Fund in same month
   const attCharges=valid.filter(c=>c.description&&/AT&T/i.test(c.description)&&c.category_id==="utilities"&&c.amount_usd>0&&c.service_start&&c.service_end);
   for(const att of attCharges){
@@ -450,7 +543,7 @@ async function commitImport(candidates){
   }
   valid.forEach(c=>c._status="committed");
   return{
-    count:valid.length,
+    count:valid.length+splitCount,
     imported:valid,
     skipped:candidates.filter(c=>c._status==="skipped").length,
     dupes:candidates.filter(c=>c._isDuplicate).length,
