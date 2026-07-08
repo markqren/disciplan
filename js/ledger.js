@@ -243,7 +243,8 @@ function openLedgerEditModal(txn,onSaved){
     function fillSwGroups(selId){
       swGroupSel.innerHTML="";
       swGroupSel.append(h("option",{value:"0"},"No group (direct split)"));
-      swGroups.forEach(g=>{const o=h("option",{value:String(g.id)},g.name);if(selId&&g.id===selId)o.selected=true;swGroupSel.append(o)});
+      // Newest group first — Splitwise group ids are sequential, so higher = newer.
+      swGroups.slice().sort((a,b)=>(b.id||0)-(a.id||0)).forEach(g=>{const o=h("option",{value:String(g.id)},g.name);if(selId&&g.id===selId)o.selected=true;swGroupSel.append(o)});
     }
     // Build a checklist of the group's OTHER members (you are the payer). Every
     // member starts checked; amounts default to an equal split incl. yourself.
@@ -1172,12 +1173,14 @@ async function renderLedger(el){
     if(f.dto)q+=`&date=lte.${f.dto}`;
     if(f.q){const eq=encodeURIComponent(f.q);let orParts=`description.ilike.*${eq}*,tag.ilike.*${eq}*,payment_type.ilike.*${eq}*,credit.ilike.*${eq}*`;const num=parseFloat(f.q);if(!isNaN(num)&&String(num)===f.q.trim())orParts+=`,amount_usd.eq.${num}`;q+=`&or=(${orParts})`}
     const txns=await sb(q);
-    // Backfill missing linked group members from other pages
+    // Backfill missing linked group members from other pages. Scope to the active
+    // person view (ownerQS) so a cross-owner link — e.g. Mark's share of an expense
+    // Shilpa fronted — only surfaces in Combined, not in a single person's ledger.
     const pageGroupIds=[...new Set(txns.filter(t=>t.transaction_group_id).map(t=>t.transaction_group_id))];
     if(pageGroupIds.length){
       const pageIds=new Set(txns.map(t=>t.id));
       const missing=await sb(`transactions?transaction_group_id=in.(${pageGroupIds.join(",")})`
-        +`&id=not.in.(${[...pageIds].join(",")})&select=*&order=date.desc,id.desc`);
+        +`&id=not.in.(${[...pageIds].join(",")})&select=*&order=date.desc,id.desc`+ownerQS());
       for(const m of missing){
         const anchorIdx=txns.findIndex(t=>t.transaction_group_id===m.transaction_group_id);
         if(anchorIdx>=0)txns.splice(anchorIdx+1,0,m);else txns.push(m);
@@ -1252,7 +1255,7 @@ async function renderLedger(el){
     currentTxns=txns;
     // Owner differentiation: only meaningful in the Combined household view.
     const showOwner=scopeOwner()==null&&householdMembers.length>1;
-    const ownerMeta={};householdMembers.forEach((m,i)=>{ownerMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    const ownerMeta=buildOwnerMeta();
     function ownerBadge(owner){const meta=ownerMeta[owner]||{name:owner,color:"#888"};return h("span",{class:"badge",style:{marginRight:"5px",background:meta.color+"22",color:meta.color,fontSize:"10px"}},meta.name)}
     const tbody=document.createElement("tbody");
     let prevGroupId=null;

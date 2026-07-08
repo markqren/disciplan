@@ -46,6 +46,12 @@ async function renderOnboarding(el){
   // account another household member already owns.
   try{accts=await sb("accounts?order=display_order"+actQS)}catch(e){accts=[]}
 
+  // ── Card 0: Your Theme ──────────────────────────────────────────────────
+  // Pick an accent color for the acting member. The selected tab + view-switcher
+  // button use it (see applyAccent), so it's obvious whose books are on screen.
+  // Two members can't share a color — swatches held by others are disabled.
+  el.append(renderThemeCard(acting, actingName));
+
   // ── Card 1: My Accounts ─────────────────────────────────────────────────
   const acctCard=h("div",{class:"cd"});
   acctCard.append(h("h3",{style:{marginTop:"0"}},"My Accounts"));
@@ -283,4 +289,42 @@ async function renderOnboarding(el){
     const v=obStatedBalance[recAcctSel.value];recBalInp.value=v!=null?v:"";
   }
   refreshAccountPickers();
+}
+
+// Theme-color picker card. Renders the curated THEME_SWATCHES; the acting
+// member's current color is check-marked, and any color already held by another
+// member is disabled (no two members may share one). Saving persists to the
+// preferences table and immediately repaints the header accent + this grid.
+function renderThemeCard(acting, actingName){
+  const card=h("div",{class:"cd"});
+  card.append(h("h3",{style:{marginTop:"0"}},"Your Theme"));
+  card.append(h("p",{class:"sub",style:{marginTop:"0"}},`Pick an accent color for ${actingName}. The selected tab and the Mark / Shilpa / Combined switcher use it, so it's always clear whose books you're viewing. Combined stays neutral gray.`));
+  const grid=h("div",{style:{display:"flex",flexWrap:"wrap",gap:"10px",marginTop:"6px"}});
+  const status=h("div",{class:"hidden",style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"10px"}});
+  function paint(){
+    grid.innerHTML="";
+    const mine=String(ownerColor(acting)).toLowerCase();
+    const takenBy={};
+    Object.entries(ownerColors).forEach(([ow,c])=>{if(ow!==acting&&c)takenBy[String(c).toLowerCase()]=(householdMembers.find(m=>m.owner===ow)||{}).display_name||ow});
+    THEME_SWATCHES.forEach(hex=>{
+      const lc=hex.toLowerCase();
+      const isMine=lc===mine;
+      const owner=takenBy[lc];
+      const sw=h("button",{title:owner?`Used by ${owner}`:hex,style:{width:"36px",height:"36px",borderRadius:"10px",background:hex,position:"relative",cursor:owner?"not-allowed":"pointer",transition:"all .15s ease",border:isMine?"2px solid #fff":"2px solid rgba(255,255,255,0.15)",boxShadow:isMine?`0 0 0 3px ${hex}66`:"none",opacity:owner?"0.3":"1"},onClick:async()=>{
+        if(owner||isMine)return;
+        status.classList.remove("hidden");status.style.color="rgba(255,255,255,0.4)";status.textContent="Saving\u2026";
+        try{
+          await saveThemeColor(acting,hex);
+          applyAccent();renderViewSwitch();renderTabs();paint();
+          status.style.color="var(--g)";status.textContent="\u2713 Theme updated";
+        }catch(e){status.style.color="var(--r)";status.textContent="Error: "+e.message}
+      }});
+      if(isMine)sw.append(h("span",{style:{position:"absolute",inset:"0",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:"16px",textShadow:"0 1px 2px rgba(0,0,0,0.5)"}},"\u2713"));
+      else if(owner)sw.append(h("span",{style:{position:"absolute",inset:"0",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:"14px"}},"\u2013"));
+      grid.append(sw);
+    });
+  }
+  paint();
+  card.append(grid,status);
+  return card;
 }

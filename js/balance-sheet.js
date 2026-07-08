@@ -6,7 +6,7 @@ async function renderBS(el){
     // out per owner. ownerMeta colors mirror the Tags view for visual consistency.
     const isCombined=scopeOwner()==null&&currentHousehold!=null;
     const multi=(householdMembers||[]).length>1;
-    const ownerMeta={};(householdMembers||[]).forEach((m,i)=>{ownerMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    const ownerMeta=buildOwnerMeta();
     // Fetch live ledger balances, accounts metadata, and snapshots in parallel
     let bsCache=dcGet('bs_'+state.view);
     if(!bsCache){

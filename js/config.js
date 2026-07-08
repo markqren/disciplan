@@ -19,6 +19,71 @@ let currentDisplayName = null;
 let currentRole = null;         // 'admin' | 'member' (enforced by RLS, see migration 20260620000004)
 let householdMembers = [];      // [{owner, display_name}]
 
+// ── Per-user theme colors (FEA: household theme) ─────────────────────────
+// Each member picks a theme color; the active header view (Mark / Shilpa /
+// Combined) drives the accent used for the selected tab + view-switcher button
+// so it's obvious whose books you're looking at. Colors persist per-owner in
+// the `preferences` table (key `theme_color:<owner>`), readable by the whole
+// household and writable only by that owner / an admin (RLS can_write). Loaded
+// into ownerColors in loadProfile(); missing entries fall back to a stable
+// palette by roster index (preserves the pre-feature look).
+let ownerColors = {};                                   // owner -> hex
+const OWNER_PALETTE = ["#6B9AC4","#CB997E","#81B29A","#9B8EA0"];
+const COMBINED_ACCENT = "#8A8F98";                      // neutral gray for Combined
+const DEFAULT_ACCENT = "#81B29A";                       // legacy/single-user green (= --g)
+// Curated, visually distinct swatches the picker offers. Two members can't hold
+// the same one (enforced in the picker UI).
+const THEME_SWATCHES = ["#6B9AC4","#CB997E","#81B29A","#9B8EA0","#E07A5F","#F2CC8F","#4A6FA5","#8B687F","#A8DADC","#2A9D8F"];
+
+async function loadThemeColors(){
+  ownerColors = {};
+  if(currentHousehold == null) return;
+  try{
+    const rows = await sb("preferences?key=like.theme_color:*&select=key,value" + householdQS());
+    (rows || []).forEach(r => { const ow = (r.key || "").slice("theme_color:".length); if(ow && r.value) ownerColors[ow] = r.value; });
+  }catch(e){ /* no prefs yet: fall back to palette */ }
+}
+
+// Upsert an owner's theme color into `preferences` (key `theme_color:<owner>`).
+// Writes are RLS-gated: an owner writes their own, an admin may write any.
+async function saveThemeColor(owner, hex){
+  const key = "theme_color:" + owner;
+  const qs = "key=eq." + encodeURIComponent(key) + householdQS();
+  const existing = await sb("preferences?" + qs + "&select=key&limit=1");
+  if(existing && existing.length){
+    await sb("preferences?" + qs, { method:"PATCH", headers:{ "Prefer":"return=minimal" }, body: JSON.stringify({ value: hex }) });
+  }else{
+    // owner set explicitly so it stamps to the target member even from Combined view.
+    await sb("preferences", { method:"POST", headers:{ "Prefer":"return=minimal" }, body: JSON.stringify({ key, value: hex, owner }) });
+  }
+  ownerColors[owner] = hex;
+}
+
+// Resolved theme color for an owner: their chosen color, else a stable fallback
+// by roster index so untouched households look exactly as before.
+function ownerColor(owner){
+  if(ownerColors[owner]) return ownerColors[owner];
+  const i = (householdMembers || []).findIndex(m => m.owner === owner);
+  return OWNER_PALETTE[(i < 0 ? 0 : i) % OWNER_PALETTE.length];
+}
+
+// {owner:{name,color}} map used by Tags / Ledger / Balance Sheet owner chips.
+// Centralized here so every surface (and the header accent) stays consistent.
+function buildOwnerMeta(){
+  const meta = {};
+  (householdMembers || []).forEach(m => { meta[m.owner] = { name: m.display_name, color: ownerColor(m.owner) }; });
+  return meta;
+}
+
+// Push the active view's accent onto --accent (drives .tab.on / .vw-btn.on).
+// Combined → neutral gray; a single person → their color; legacy (no household)
+// → the original green so the solo experience is unchanged.
+function applyAccent(){
+  let c = DEFAULT_ACCENT;
+  if(currentHousehold != null){ const o = scopeOwner(); c = (o != null) ? ownerColor(o) : COMBINED_ACCENT; }
+  try{ document.documentElement.style.setProperty("--accent", c); }catch(e){}
+}
+
 // Admins may write any row in their household; members only their own. This
 // mirrors the DB RLS (can_write) for UX gating only — the DB is the real guard.
 // Returns true in legacy/single-user mode (no household loaded) so nothing breaks.
@@ -103,6 +168,7 @@ async function loadProfile(){
       currentRole = me[0].role || "member";
       const roster = await sb(`profiles?household_id=eq.${currentHousehold}&select=owner,display_name&order=display_name`);
       householdMembers = roster || [];
+      await loadThemeColors();
     }
   }catch(e){ /* legacy single-user mode: no filtering */ }
 }
@@ -119,7 +185,11 @@ function authHeaders(extra = {}) {
 const CACHE_VERSION="v2";
 const CACHE_PREFIX="dc_"+CACHE_VERSION+"_";
 // One-time purge of caches written by older CACHE_VERSIONs (iterate backwards: removeItem shifts indices).
-(function purgeStaleCache(){try{for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.startsWith("dc_")&&!k.startsWith(CACHE_PREFIX))localStorage.removeItem(k)}}catch(e){}})();
+// PERSISTENT_KEYS are dc_-prefixed preferences (not versioned caches) that must survive the purge —
+// notably dc_view, which stores the active person-view and would otherwise be wiped on every load
+// (this file runs before state.js reads it), breaking view persistence across refreshes.
+const PERSISTENT_KEYS=new Set(["dc_view"]);
+(function purgeStaleCache(){try{for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.startsWith("dc_")&&!k.startsWith(CACHE_PREFIX)&&!PERSISTENT_KEYS.has(k))localStorage.removeItem(k)}}catch(e){}})();
 function cacheSet(key,data){try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch(e){
   if(e.name==='QuotaExceededError'){const entries=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(CACHE_PREFIX)){try{entries.push([k,JSON.parse(localStorage.getItem(k)).ts||0])}catch{}}}entries.sort((a,b)=>a[1]-b[1]);const n=Math.max(1,Math.floor(entries.length*0.25));for(let i=0;i<n;i++)localStorage.removeItem(entries[i][0]);try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch{}}
 }}

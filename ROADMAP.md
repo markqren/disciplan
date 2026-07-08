@@ -10,6 +10,16 @@
 
 ### v2.10 — Jul 5, 2026
 
+#### v2.10.5
+<sub>Per-user theme colors + view-aware accent · view persists across refresh (defaults to Mark) · Splitwise groups newest-first</sub>
+
+##### Features
+- **Per-user theme colors + view-aware accent** — Each household member picks an accent color, and the active header view now drives the color of the selected tab and the Mark / Shilpa / Combined switcher, so it's always obvious whose books you're looking at. Colors persist per-owner in the `preferences` table (key `theme_color:<owner>`) — readable household-wide, writable only by that owner or an admin (existing `can_write` RLS), no migration needed. New `js/config.js` helpers: `loadThemeColors()` (in `loadProfile`), `ownerColor()` (chosen color, else a stable fallback by roster index so untouched setups look unchanged), `buildOwnerMeta()` (replaced **5 duplicated** inline owner-palette builders in Tags ×2 / Ledger / Balance Sheet, so owner chips everywhere follow the chosen colors), `applyAccent()` (a person → their color, **Combined → neutral gray `#8A8F98`**, legacy/single-user → the original green), and `saveThemeColor()`. A new `--accent` CSS var routes `.tab.on` / `.vw-btn.on` through `color-mix()`. Picker lives on the Onboarding tab as a "Your Theme" card: a curated 10-swatch grid where the acting member's color is check-marked and any color already held by another member is disabled (no two members share a color, enforced in the UI). (~13,000 tokens)
+
+##### Fixes
+- **Active view now persists across refresh; defaults to Mark on first entry** — Switching to Shilpa or Combined never survived a reload: `dc_view` is written to `localStorage`, but `purgeStaleCache()` in `js/config.js` (which runs before `state.js` reads it) deletes every `dc_`-prefixed key that isn't the current `dc_v2_*` cache prefix — silently wiping `dc_view` on every load, so the view always fell back to the default. Added a `PERSISTENT_KEYS` allowlist that exempts `dc_view` from the purge. Also changed the first-entry default (no valid stored view) from "the signed-in user's own view" to **Mark** (falling back to the signed-in owner, then Combined). Explicit Mark / Shilpa / Combined picks are now genuinely respected on reload. (~2,500 tokens)
+- **Splitwise group dropdown lists newest first** — The reimburse form's group picker rendered groups in the order the Splitwise API returned them (oldest first). `fillSwGroups()` now sorts by group id descending (Splitwise ids are sequential, so highest = newest) before rendering, keeping "No group (direct split)" pinned at the top. (~500 tokens)
+
 #### v2.10.4
 <sub>Owner-scoped payment-account pickers across the app (multi-user separation) · pay-a-credit-card-bill from the Balance Sheet</sub>
 

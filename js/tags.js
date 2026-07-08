@@ -3,7 +3,7 @@ async function renderTags(el){
   try{
     const o=scopeOwner();
     const multi=(householdMembers||[]).length>1;
-    const ownerMeta={};(householdMembers||[]).forEach((m,i)=>{ownerMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    const ownerMeta=buildOwnerMeta();
     // Tag metadata is shared across the household; ownership is DERIVED from who
     // has tagged transactions (see get_tag_summaries_by_owner). The metadata
     // fetch is never owner-scoped — otherwise a tag contributed to by Mark but
@@ -194,7 +194,7 @@ async function showTagDetail(tag){
   mhtml+=`</div>`;
   // Combined view: separate per-owner sums.
   if(scopeOwner()==null&&(householdMembers||[]).length>1){
-    const oMeta={};householdMembers.forEach((m,i)=>{oMeta[m.owner]={name:m.display_name,color:["#6B9AC4","#CB997E","#81B29A","#9B8EA0"][i%4]}});
+    const oMeta=buildOwnerMeta();
     const obs=Object.entries(ownerTotals).filter(([ow,v])=>ow!=="_"&&Math.abs(v)>0.5).sort((a,b)=>b[1]-a[1]);
     if(obs.length>1){
       mhtml+=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin:-12px 0 24px">`;
