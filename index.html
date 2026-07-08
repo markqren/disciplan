@@ -153,7 +153,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.10.5</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.10.6</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
     <button class="ref-btn" id="historyBtn" title="History &amp; undo" onclick="openHistoryPanel()">↺</button>
@@ -197,13 +197,42 @@ function renderTabs(){
   const bar=document.getElementById("tabBar");
   bar.innerHTML="";
   const offline=!navigator.onLine;
+  const hidden=hiddenTabsFor(state.view);
   TABS.forEach(([id,label])=>{
+    if(hidden.includes(id))return;               // hidden for the active view (Settings)
     const disabled=offline&&(id==="entry"||id==="export");
     const b=h("button",{class:"tab"+(state.tab===id?" on":""),style:disabled?{opacity:"0.3",cursor:"default"}:{},onClick:()=>{state.tab=id;history.replaceState(null,null,"#"+id);renderTabs();renderContent()}},label);
     bar.append(b);
   });
   const so=h("button",{class:"tab",style:{color:"rgba(255,255,255,0.3)",borderColor:"transparent",fontSize:"11px"},onClick:()=>supabaseClient.auth.signOut()},"sign out");
   bar.append(so);
+}
+
+// True when a main tab is hidden for the active view (and shouldn't stay open).
+// 'ai' and 'settings' live in the footer, never in TABS, so they're never hidden.
+function isTabHidden(id){return TABS.some(t=>t[0]===id)&&hiddenTabsFor(state.view).includes(id)}
+
+// Footer Settings panel: per-view tab visibility. Toggling re-renders the nav.
+function renderSettings(el){
+  const viewName=(householdMembers.find(m=>m.owner===state.view)||{}).display_name||(state.view==="combined"?"Combined":(currentDisplayName||"your"));
+  const card=h("div",{class:"cd"});
+  card.innerHTML=`<h3 style="margin-top:0">Settings</h3><p class="sub" style="margin-top:0">Tab visibility for <b style="color:var(--accent)">${viewName}</b>'s view. Unchecked tabs are hidden from the top nav for this view only \u2014 switch the header view to configure another person.</p>`;
+  const list=h("div",{style:{display:"flex",flexDirection:"column",gap:"8px",marginTop:"8px",maxWidth:"420px"}});
+  TABS.forEach(([id,label])=>{
+    const row=h("label",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"10px",padding:"10px 12px",borderRadius:"8px",background:"rgba(255,255,255,0.02)",cursor:"pointer"}});
+    const cb=h("input",{type:"checkbox",style:{accentColor:"var(--accent)",cursor:"pointer",width:"auto",margin:"0"}});
+    cb.checked=!hiddenTabsFor(state.view).includes(id);
+    cb.addEventListener("change",()=>{
+      const set=new Set(hiddenTabsFor(state.view));
+      if(cb.checked)set.delete(id);else set.add(id);
+      setHiddenTabsFor(state.view,[...set]);
+      renderTabs();
+    });
+    row.append(h("span",{style:{fontSize:"13px",color:"rgba(255,255,255,0.8)",textTransform:"capitalize"}},label),cb);
+    list.append(row);
+  });
+  card.append(list);
+  el.append(card);
 }
 
 // Mark | Shilpa | Combined household view switcher. Only shown when the
@@ -226,7 +255,10 @@ function renderViewSwitch(){
       state.view=val;try{localStorage.setItem("dc_view",val)}catch(e){}
       applyAccent();
       dcClearAll();
+      // If the tab you're on is hidden for the new view, fall back to Income.
+      if(isTabHidden(state.tab)){state.tab="income";history.replaceState(null,null,"#income")}
       renderViewSwitch();
+      renderTabs();
       renderContent();
     }},label);
     el.append(b);
@@ -258,6 +290,7 @@ async function renderContent(){
     else if(state.tab==="onboarding")await renderOnboarding(el);
     else if(state.tab==="export")await renderExport(el);
     else if(state.tab==="ai")await renderAIPortal(el);
+    else if(state.tab==="settings")renderSettings(el);
   }catch(e){
     const tabLabel=TABS.find(t=>t[0]===state.tab)?.[1]||state.tab;
     el.innerHTML=`<div class="cd" style="border-color:rgba(224,122,95,0.3);text-align:center;padding:48px 24px"><h3 style="color:var(--r);margin-bottom:8px">Failed to load ${tabLabel}</h3><p style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:20px;font-family:var(--mono)">${e.message||String(e)}</p><button class="pg-btn" onclick="renderContent()" style="padding:8px 20px">Retry</button></div>`;
@@ -287,11 +320,14 @@ async function init(){
   const hash=location.hash.slice(1);
   if(hash==="income-all"){state.tab="income";state.year="all"}
   else if(hash==="ai"){state.tab="ai"}
+  else if(hash==="settings"){state.tab="settings"}
   else if(validTabs.includes(hash)){state.tab=hash}
   if(!location.hash)history.replaceState(null,null,"#"+state.tab);
 
-  renderTabs();
   renderViewSwitch();
+  // A hidden tab (per the active view) shouldn't open from a stale hash.
+  if(isTabHidden(state.tab)){state.tab="income";history.replaceState(null,null,"#income")}
+  renderTabs();
   fetchLiveFX();
   try{
     const r=await fetch(`${SB_URL}/rest/v1/transactions?select=id&limit=1`,{headers:authHeaders({Prefer:"count=exact"})});
@@ -423,7 +459,7 @@ if('serviceWorker' in navigator){
 checkAuthAndInit();
 </script>
 
-<div class="foot">the disciplan · accrual-based personal finance · connected to supabase · <a href="#ai" style="color:rgba(255,255,255,0.25);text-decoration:none" onmouseover="this.style.color='rgba(255,255,255,0.5)'" onmouseout="this.style.color='rgba(255,255,255,0.25)'" onclick="state.tab='ai';history.replaceState(null,null,'#ai');renderTabs();renderContent();return false">ai portal</a></div>
+<div class="foot">the disciplan · accrual-based personal finance · connected to supabase · <a href="#ai" style="color:rgba(255,255,255,0.25);text-decoration:none" onmouseover="this.style.color='rgba(255,255,255,0.5)'" onmouseout="this.style.color='rgba(255,255,255,0.25)'" onclick="state.tab='ai';history.replaceState(null,null,'#ai');renderTabs();renderContent();return false">ai portal</a> · <a href="#settings" style="color:rgba(255,255,255,0.25);text-decoration:none" onmouseover="this.style.color='rgba(255,255,255,0.5)'" onmouseout="this.style.color='rgba(255,255,255,0.25)'" onclick="state.tab='settings';history.replaceState(null,null,'#settings');renderTabs();renderContent();return false">settings</a></div>
 
 </body>
 </html>

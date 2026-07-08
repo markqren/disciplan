@@ -1266,7 +1266,7 @@ async function renderLedger(el){
       const gSize=t.transaction_group_id?(groupCounts[t.transaction_group_id]||0):0;
       const isLinked=gSize>=2;
       const tr=h("tr",{style:{cursor:"pointer",
-        ...(indent?{borderLeft:"3px solid rgba(74,111,165,0.3)",background:"rgba(74,111,165,0.02)"}:isLinked?{borderLeft:"3px solid var(--b)"}:{}),
+        ...(indent?{borderLeft:"3px solid color-mix(in srgb,var(--accent) 35%,transparent)",background:"color-mix(in srgb,var(--accent) 5%,transparent)"}:isLinked?{borderLeft:"3px solid var(--accent)"}:{}),
         ...(isLinked&&!indent&&prevGroupId&&prevGroupId!==t.transaction_group_id?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})}
       ,onClick:()=>openLedgerEditModal(t,loadPage)});
       if(!indent)prevGroupId=t.transaction_group_id||null;
@@ -1297,7 +1297,7 @@ async function renderLedger(el){
       if(isLinked&&gSize>=2&&summary&&!renderedGroups.has(gid)){
         renderedGroups.add(gid);
         // Summary row
-        const str=h("tr",{class:"grp-summary",style:{cursor:"pointer",borderLeft:"3px solid var(--b)",background:"rgba(74,111,165,0.04)",
+        const str=h("tr",{class:"grp-summary",style:{cursor:"pointer",borderLeft:"3px solid var(--accent)",background:"color-mix(in srgb,var(--accent) 8%,transparent)",
           ...(prevGroupId&&prevGroupId!==gid?{borderTop:"2px solid rgba(255,255,255,0.12)"}:{})},
           onClick:()=>openGroupEditModal(gid,groupMembers[gid]||[],summary,overrideMap[gid],loadPage)});
         prevGroupId=gid;
@@ -1318,7 +1318,7 @@ async function renderLedger(el){
           document.querySelectorAll(`[data-grp-child="${gid}"]`).forEach(r=>{r.style.display=state.expandedGroups.has(gid)?"table-row":"none"});
           const ch=document.querySelector(`[data-grp-chev="${gid}"]`);if(ch)ch.style.transform=state.expandedGroups.has(gid)?"rotate(90deg)":"";
         }},"\u25B6"));
-        descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"var(--b)"}},`\uD83D\uDD17${summary.memberCount}`));
+        descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"var(--accent)"}},`\uD83D\uDD17${summary.memberCount}`));
         if(showOwner){[...new Set((groupMembers[gid]||[]).map(m=>m.owner).filter(Boolean))].forEach(o=>descTd.append(ownerBadge(o)))}
         descTd.append(h("span",{"data-grp-label":gid},sessionStorage.getItem(`grp_label_${gid}`)||summary.label));
         str.append(descTd);

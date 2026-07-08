@@ -188,7 +188,7 @@ const CACHE_PREFIX="dc_"+CACHE_VERSION+"_";
 // PERSISTENT_KEYS are dc_-prefixed preferences (not versioned caches) that must survive the purge —
 // notably dc_view, which stores the active person-view and would otherwise be wiped on every load
 // (this file runs before state.js reads it), breaking view persistence across refreshes.
-const PERSISTENT_KEYS=new Set(["dc_view"]);
+const PERSISTENT_KEYS=new Set(["dc_view","dc_hidden_tabs"]);
 (function purgeStaleCache(){try{for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.startsWith("dc_")&&!k.startsWith(CACHE_PREFIX)&&!PERSISTENT_KEYS.has(k))localStorage.removeItem(k)}}catch(e){}})();
 function cacheSet(key,data){try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch(e){
   if(e.name==='QuotaExceededError'){const entries=[];for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k.startsWith(CACHE_PREFIX)){try{entries.push([k,JSON.parse(localStorage.getItem(k)).ts||0])}catch{}}}entries.sort((a,b)=>a[1]-b[1]);const n=Math.max(1,Math.floor(entries.length*0.25));for(let i=0;i<n;i++)localStorage.removeItem(entries[i][0]);try{localStorage.setItem(CACHE_PREFIX+key,JSON.stringify({ts:Date.now(),data}))}catch{}}

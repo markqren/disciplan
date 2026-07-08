@@ -10,6 +10,15 @@
 
 ### v2.10 — Jul 5, 2026
 
+#### v2.10.6
+<sub>Per-view tab visibility (Cashback + Portfolio hidden in Shilpa's view) with a footer Settings panel · Ledger linked-group accents now follow the theme color</sub>
+
+##### Features
+- **Per-view tab visibility + footer Settings panel** — Tabs can now be hidden per person-view. Cashback and Portfolio are hidden by default in **Shilpa's view** (Mark's / Combined views are unchanged). A new **Settings** link in the footer (next to *ai portal*) opens a per-view checklist of every tab; unchecking hides it from the top nav for that view only, and re-checking brings it back instantly. Hidden sets are stored per-view in `localStorage` (`dc_hidden_tabs`, exempted from the cache purge via `PERSISTENT_KEYS`); `DEFAULT_HIDDEN_TABS` seeds the initial hidden set and the persisted list overrides it once you toggle. Switching to a view where the current tab is hidden — or landing on a stale hash for one — now falls back to Income so you're never stranded. Helpers `hiddenTabsFor()` / `setHiddenTabsFor()` in `js/state.js`; `visibleTabIds`-style filtering, `isTabHidden()` and `renderSettings()` in `index.html`. (~6,500 tokens)
+
+##### Fixes
+- **Ledger linked-group accents follow the theme color** — The blue left-edge bars on linked transactions (parent rows, group summary rows, indented children) and the 🔗 count badge were hardcoded blue (`var(--b)` / `rgba(74,111,165,…)`). They now derive from the active view's `--accent` (via `color-mix()` for the translucent tints), so linked rows show blue on Mark's view, yellow on Shilpa's, and neutral gray in Combined — matching the tabs and switcher. (~1,500 tokens)
+
 #### v2.10.5
 <sub>Per-user theme colors + view-aware accent · view persists across refresh (defaults to Mark) · Splitwise groups newest-first</sub>
 

@@ -15,6 +15,26 @@ function dcInvalidatePortfolio(){delete _dc['portfolio']}
 // every cached aggregate is scope-specific).
 function dcClearAll(){for(const k in _dc)delete _dc[k]}
 
+// ── Per-view tab visibility (Settings) ───────────────────────────────────
+// Some tabs are hidden per person-view (e.g. Cashback + Portfolio in Shilpa's
+// view). Stored per-view in localStorage (key dc_hidden_tabs, exempt from the
+// cache purge via PERSISTENT_KEYS) and editable in the footer Settings panel.
+// DEFAULT_HIDDEN_TABS seeds the initial hidden set for a view the user hasn't
+// customized; once they toggle in Settings, that view's full list is persisted.
+const DEFAULT_HIDDEN_TABS={shilpa:["cashback","portfolio"]};
+function _htKey(view){return view||"__solo__"}
+function hiddenTabsFor(view){
+  const k=_htKey(view);
+  try{const raw=localStorage.getItem("dc_hidden_tabs");if(raw){const m=JSON.parse(raw);if(m&&Array.isArray(m[k]))return m[k]}}catch(e){}
+  return DEFAULT_HIDDEN_TABS[k]||[];
+}
+function setHiddenTabsFor(view,list){
+  const k=_htKey(view);
+  let m={};try{m=JSON.parse(localStorage.getItem("dc_hidden_tabs")||"{}")||{}}catch(e){}
+  m[k]=list;
+  try{localStorage.setItem("dc_hidden_tabs",JSON.stringify(m))}catch(e){}
+}
+
 
 // Ensure a tag exists in the tags table; prompt user to create if new
 async function ensureTagExists(tagName){
