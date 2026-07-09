@@ -90,7 +90,40 @@ interface ForwardingNote {
   servicePeriodHint: string | null; // natural language service period from user note
 }
 
-function extractForwardingNote(textBody: string | null): ForwardingNote | null {
+// Convert an HTML body to plaintext that preserves line breaks well enough for the
+// divider-based forwarding-note extraction. Forwarded HTML emails (e.g. Apple Mail
+// forwards of Rakuten cashback notices) often ship a degraded/empty text body, so
+// the user's typed note only survives in the HTML part.
+function htmlToText(html: string): string {
+  return html
+    .replace(/<\s*br\s*\/?>/gi, "\n")
+    .replace(/<\/\s*(?:p|div|tr|li|h[1-6]|table|blockquote)\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    // Trim whitespace around line breaks so anchored dividers (e.g. /^Begin
+    // forwarded message:/m) still match after tags collapse to spaces.
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+// Extract a forwarding note, falling back to the HTML body when the plaintext body
+// lacks a recognizable forwarding divider (common for forwarded HTML emails whose
+// text/plain alternative is degraded or empty).
+function extractForwardingNote(textBody: string | null, htmlBody: string | null = null): ForwardingNote | null {
+  const fromText = extractForwardingNoteFrom(textBody);
+  if (fromText) return fromText;
+  if (htmlBody) return extractForwardingNoteFrom(htmlToText(htmlBody));
+  return null;
+}
+
+function extractForwardingNoteFrom(textBody: string | null): ForwardingNote | null {
   if (!textBody) return null;
 
   // Gmail forwarding divider patterns
@@ -1318,8 +1351,9 @@ Reply with the lesson OR "NONE" — nothing else.`,
     }
   }
 
-  // 4.5. Extract forwarding note
-  const forwardingNote = extractForwardingNote(textBody);
+  // 4.5. Extract forwarding note (fall back to HTML body — forwarded HTML emails
+  // like Rakuten cashback notices often have a degraded/empty plaintext body).
+  const forwardingNote = extractForwardingNote(textBody, htmlBody);
 
   // 5. Detect source and parse
   let source = "unknown";
