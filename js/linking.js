@@ -1,18 +1,31 @@
-// Strip Rakuten cruft from a store name so it matches the ledger description.
-// "Rakuten - Chewy" / "Chewy is confirmed" / "Chewy!" → "Chewy"
+// Strip cruft from a Rakuten store name so it matches the ledger description.
+// Handles source prefixes, forwarding-note labels, and status trailers:
+//   "Rakuten - Chewy"                                  -> "Chewy"
+//   "Chewy is confirmed" / "Chewy!"                     -> "Chewy"
+//   "Merchant: Priceline (Comfort Inn Hotel)\nCategory: Accommodation" -> "Priceline"
 function cleanRakutenStore(s){
   return String(s||"")
-    .replace(/^rakuten\s*[-\u2013]\s*/i,"")
+    .replace(/^rakuten\s*[-\u2013]\s*/i,"")          // source prefix
+    .replace(/^\s*merchant\s*[:\-]\s*/i,"")           // forwarding-note "Merchant:" label
+    .split(/\r?\n/)[0]                                 // first line (notes append "Category: ...")
+    .replace(/\bcategor(?:y|ies)\s*[:\-].*$/i,"")     // inline "Category: ..." trailer
+    .replace(/\s*\([^)]*\)/g," ")                     // parentheticals e.g. "(Comfort Inn Hotel)"
     .replace(/\s+is\s+(?:now\s+)?confirmed\b.*$/i,"")
     .replace(/\s+is\s+now\b.*$/i,"")
     .replace(/[!.].*$/,"")
+    .replace(/\s+/g," ")
     .trim();
 }
 
-// Find the original purchase a Rakuten cashback should attach to.
-// Strategy: ilike the store name within a date window around the order date, then
-// prefer the row whose amount matches the order total (the full purchase price),
-// falling back to the closest-dated store match. Returns the txn row or null.
+// Find the original purchase a Rakuten cashback should attach to, and decide whether
+// it is a strong enough match to auto-propose. Every candidate already name-matches
+// (the ILIKE filter guarantees it); we then score amount + date proximity and only
+// return a match at/above RAKUTEN_MATCH_BAR so weak guesses are left for manual
+// linking. Returns the txn row (stamped with _confidence + _matchScore) or null.
+//   name matched (guaranteed) ............ 40
+//   order total matches (within 2%/$0.50)  45   -> "high"
+//   date within 3 / 10 / 21 / 45 days .... 20 / 15 / 10 / 5
+const RAKUTEN_MATCH_BAR=55;
 async function findRakutenParentMatch(storeName,orderAmount,searchDate){
   const clean=cleanRakutenStore(storeName);
   if(!clean)return null;
@@ -22,13 +35,25 @@ async function findRakutenParentMatch(storeName,orderAmount,searchDate){
   const to=new Date(base.getTime()+15*864e5).toISOString().slice(0,10);
   const matches=await sb(`transactions?description=ilike.*${encodeURIComponent(clean)}*&date=gte.${from}&date=lte.${to}&amount_usd=gt.0&order=date.desc&limit=25&select=id,date,description,amount_usd,category_id,payment_type,transaction_group_id,service_start,service_end`+ownerQS());
   if(!matches.length)return null;
-  const byDate=(a,b)=>Math.abs(new Date(a.date+"T00:00:00")-base)-Math.abs(new Date(b.date+"T00:00:00")-base);
-  if(orderAmount>0){
-    const tol=Math.max(0.5,orderAmount*0.02);
-    const exact=matches.filter(m=>Math.abs(Math.abs(m.amount_usd)-orderAmount)<=tol);
-    if(exact.length)return exact.sort(byDate)[0];
+  const daysFromBase=m=>Math.abs(new Date(m.date+"T00:00:00")-base)/864e5;
+  const tol=orderAmount>0?Math.max(0.5,orderAmount*0.02):0;
+  const uniqueBonus=matches.length===1?10:0; // a lone name match in-window is unambiguous
+  const scoreOf=m=>{
+    let s=40+uniqueBonus; // name matched (guaranteed by the ILIKE filter)
+    if(orderAmount>0&&Math.abs(Math.abs(m.amount_usd)-orderAmount)<=tol)s+=45; // order total confirms it
+    const d=daysFromBase(m);
+    if(d<=3)s+=20;else if(d<=10)s+=15;else if(d<=21)s+=10;else if(d<=45)s+=5;
+    return s;
+  };
+  let best=null;
+  for(const m of matches){
+    const s=scoreOf(m);
+    if(!best||s>best.score||(s===best.score&&daysFromBase(m)<daysFromBase(best.txn)))best={txn:m,score:s};
   }
-  return matches.sort(byDate)[0];
+  if(!best||best.score<RAKUTEN_MATCH_BAR)return null;
+  best.txn._matchScore=best.score;
+  best.txn._confidence=best.score>=80?"high":"medium";
+  return best.txn;
 }
 
 async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
@@ -36,7 +61,7 @@ async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
     const idx=allValid.indexOf(c);
     const newTxn=createdTxns[idx];
     if(!newTxn?.id)continue;
-    const store=c._parsedData.store_name||c.description;
+    const store=c.description||c._parsedData.store_name;
     const orderAmt=parseFloat(c._parsedData.order_amount)||0;
     const searchDate=c._parsedData.order_date||c.date;
     try{

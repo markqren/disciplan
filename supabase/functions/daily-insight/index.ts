@@ -109,9 +109,12 @@ const REPLY_TO    = "8e70a9e284a1705b967239e049a59b65@inbound.postmarkapp.com";
 const APP_URL     = "https://disciplan.netlify.app";
 const MODEL       = "claude-sonnet-4-6";
 
-// Pricing per million tokens (Sonnet 4.6)
-const COST_INPUT  = 3.0;
-const COST_OUTPUT = 15.0;
+// Pricing per million tokens (Sonnet 4.6). Cache writes bill at 1.25x input,
+// cache reads at 0.1x input (Anthropic prompt caching).
+const COST_INPUT       = 3.0;
+const COST_OUTPUT      = 15.0;
+const COST_CACHE_WRITE = COST_INPUT * 1.25;
+const COST_CACHE_READ  = COST_INPUT * 0.10;
 
 // ── Category schema (loaded from public.categories at request time) ─────────
 // Hardcoded category lists are a known foot-gun: when Mark added 'accommodation'
@@ -1161,10 +1164,10 @@ You may call run_finance_query up to a few times to fetch numbers the facts abov
   accounts(id, label, account_type, institution, currency, is_active)
   balance_snapshots(id, account_id, snapshot_date, balance_usd, notes)
   cashback_redemptions(id, date, item, payment_type, cashback_type, dollar_value, redemption_rate)
-Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. EFFICIENCY: each query is a full model round-trip that re-bills the whole context, so make them count — NEVER query for a number already present in the facts above, and fold everything you need into as few queries as possible (typically 0-2). Derive simple arithmetic (projections, ratios, sums of provided figures) yourself instead of querying.
+Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. EFFICIENCY: make each query count — NEVER query for a number already present in the facts above, and fold everything you need into as few queries as possible (typically 0-2 for the main insight). Derive simple arithmetic (projections, ratios, sums of provided figures) yourself instead of querying. (Follow-up questions below get their own query budget — spend there first.)
 
 ` : ""}${followups.length ? `## MARK'S FOLLOW-UP QUESTIONS (answer these — highest priority):
-Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${INSIGHT_TOOLS_ENABLED ? "Use run_finance_query to pull the exact numbers each question needs — don't guess or defer." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
+Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${INSIGHT_TOOLS_ENABLED ? "Use run_finance_query to pull the exact numbers each question needs — don't guess or defer. IMPORTANT: run the follow-up's queries FIRST, before any optional drill-down for today's main insight, so the follow-up never runs out of query budget (the past failure mode). You have ample budget; a follow-up should essentially always be answered with real numbers this send, not deferred to 'tomorrow'." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
 ${followupBlock}
 
 ` : ""}## WRITING INSTRUCTIONS:
@@ -1366,13 +1369,27 @@ const RUN_QUERY_TOOL = {
 async function generateInsightText(
   supabase: SupabaseClient,
   prompt: string,
-): Promise<{ text: string; inputTokens: number; outputTokens: number; toolCalls: number }> {
+): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; toolCalls: number }> {
   const useTools = INSIGHT_TOOLS_ENABLED && INSIGHT_OWNER != null;
-  const MAX_TURNS = 6;
-  const MAX_TOOL_CALLS = 4;
+  // Budget raised (was 6 turns / 4 calls) so a tool-heavy main insight can't
+  // starve follow-up questions of query budget — the "follow-ups cap out"
+  // complaint (2026-07-08). Prompt caching (below) makes the extra turns cheap:
+  // each turn re-reads the cached prefix at 0.1x instead of re-billing it in full.
+  const MAX_TURNS = 10;
+  const MAX_TOOL_CALLS = 8;
+  // Prompt caching: the entire static prefix (tool definition + this prompt with
+  // the day's facts/guidance) is marked cache_control ephemeral, so every tool-
+  // loop round-trip re-reads it at 0.1x instead of re-billing the full context at
+  // 1x. This is the single biggest cost lever — a tool-heavy send previously ran
+  // ~36k cumulative input tokens ($0.16) because each of ~4 turns re-sent the
+  // whole growing context uncached (2026-07-09 budget_pace). The 5-min cache TTL
+  // easily spans one generation's multi-turn loop (all turns happen in seconds).
   // deno-lint-ignore no-explicit-any
-  const messages: any[] = [{ role: "user", content: prompt }];
-  let inputTokens = 0, outputTokens = 0, toolCalls = 0, lastText = "";
+  const messages: any[] = [{
+    role: "user",
+    content: [{ type: "text", text: prompt, cache_control: { type: "ephemeral" } }],
+  }];
+  let inputTokens = 0, outputTokens = 0, cacheWriteTokens = 0, cacheReadTokens = 0, toolCalls = 0, lastText = "";
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // deno-lint-ignore no-explicit-any
@@ -1391,8 +1408,13 @@ async function generateInsightText(
       break;
     }
     const data = await res.json();
-    inputTokens  += data.usage?.input_tokens  || 0;
-    outputTokens += data.usage?.output_tokens || 0;
+    // usage.input_tokens counts only NON-cached input; cached prefix is reported
+    // separately as cache_creation (first write, billed 1.25x) and cache_read
+    // (subsequent reads, billed 0.1x). Track all three so cost is exact.
+    inputTokens      += data.usage?.input_tokens          || 0;
+    outputTokens     += data.usage?.output_tokens         || 0;
+    cacheWriteTokens += data.usage?.cache_creation_input_tokens || 0;
+    cacheReadTokens  += data.usage?.cache_read_input_tokens     || 0;
     // deno-lint-ignore no-explicit-any
     const content: any[] = data.content || [];
     const textPart = content.filter(c => c.type === "text").map(c => c.text).join("");
@@ -1434,7 +1456,7 @@ async function generateInsightText(
     messages.push({ role: "user", content: toolResults });
   }
 
-  return { text: lastText, inputTokens, outputTokens, toolCalls };
+  return { text: lastText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, toolCalls };
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -1558,6 +1580,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let parseFallback = false;
   let inputTokens = 0;
   let outputTokens = 0;
+  let cacheWriteTokens = 0;
+  let cacheReadTokens = 0;
   let toolCalls = 0;
   let insight: InsightResponse | null = null;
 
@@ -1568,9 +1592,11 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const chosenStrategy = strategies.get(chosen.insight_type);
     const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy, pendingFollowups);
     const gen = await generateInsightText(supabase, prompt);
-    inputTokens  += gen.inputTokens;
-    outputTokens += gen.outputTokens;
-    toolCalls     = gen.toolCalls;
+    inputTokens      += gen.inputTokens;
+    outputTokens     += gen.outputTokens;
+    cacheWriteTokens += gen.cacheWriteTokens;
+    cacheReadTokens  += gen.cacheReadTokens;
+    toolCalls         = gen.toolCalls;
     insight = tryParseInsight(gen.text);
 
     if (!insight) {
@@ -1587,7 +1613,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
           model: MODEL,
           max_tokens: 2500,
           messages: [
-            { role: "user", content: prompt },
+            // Reuse the same cached prefix block — if the original call's cache is
+            // still warm (< 5 min) this retry reads it at 0.1x instead of re-billing.
+            { role: "user", content: [{ type: "text", text: prompt, cache_control: { type: "ephemeral" } }] },
             { role: "assistant", content: gen.text || "{}" },
             { role: "user", content: "Your previous reply could not be parsed as JSON. Resend the same insight as a SINGLE valid JSON object only. No prose, no markdown fences. Begin with { and end with }." },
           ],
@@ -1595,8 +1623,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
       if (retryRes.ok) {
         const retryData = await retryRes.json();
-        inputTokens  += retryData.usage?.input_tokens  || 0;
-        outputTokens += retryData.usage?.output_tokens || 0;
+        inputTokens      += retryData.usage?.input_tokens          || 0;
+        outputTokens     += retryData.usage?.output_tokens         || 0;
+        cacheWriteTokens += retryData.usage?.cache_creation_input_tokens || 0;
+        cacheReadTokens  += retryData.usage?.cache_read_input_tokens     || 0;
         insight = tryParseInsight(retryData.content?.[0]?.text || "");
       } else {
         console.error("Retry HTTP error:", retryRes.status, await retryRes.text());
@@ -1615,10 +1645,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     parseFallback = true;
   }
 
-  const costUsd = (inputTokens * COST_INPUT + outputTokens * COST_OUTPUT) / 1_000_000;
+  const costUsd = (
+    inputTokens * COST_INPUT +
+    cacheWriteTokens * COST_CACHE_WRITE +
+    cacheReadTokens * COST_CACHE_READ +
+    outputTokens * COST_OUTPUT
+  ) / 1_000_000;
+  const cacheNote = cacheReadTokens > 0 ? ` · ${(cacheReadTokens/1000).toFixed(1)}k cached` : "";
   const costLine = parseFallback
     ? `Fallback insight (no eligible archetype or LLM JSON parse failed). API cost ~$${costUsd.toFixed(4)}.`
-    : `This insight cost ~$${costUsd.toFixed(4)} to generate (${(inputTokens/1000).toFixed(1)}k input / ${(outputTokens/1000).toFixed(1)}k output tokens · ${MODEL})`;
+    : `This insight cost ~$${costUsd.toFixed(4)} to generate (${(inputTokens/1000).toFixed(1)}k input / ${(outputTokens/1000).toFixed(1)}k output tokens${cacheNote} · ${MODEL})`;
 
   // ── 5. Build chart URL(s) ─────────────────────────────────────────────────
   // Most archetypes emit a single `chart_config`. category_trend's deep-dive can
@@ -1727,6 +1763,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       postmark_message_id: postmarkMessageId,
       input_tokens:        inputTokens,
       output_tokens:       outputTokens,
+      cache_read_tokens:   cacheReadTokens,
+      cache_write_tokens:  cacheWriteTokens,
+      tool_calls:          toolCalls,
       cost_usd:            costUsd,
       parse_fallback:      parseFallback,
       dry_run:             dryRun,

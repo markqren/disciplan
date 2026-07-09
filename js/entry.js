@@ -342,13 +342,14 @@ function renderEntry(el){
         if(c._parsedData?.type!=="cashback_earned")return;
         try{
           const parent=await findRakutenParentMatch(
-            c._parsedData.store_name||c.description,
+            c.description||c._parsedData.store_name,
             parseFloat(c._parsedData.order_amount)||0,
             c._parsedData.order_date||c.date
           );
           if(parent){
             c._linkToTransactionId=parent.id;
             c._linkToGroupId=parent.transaction_group_id||null;
+            c._linkConfidence=parent._confidence||null;
             c._linkDisplay={description:parent.description,date:parent.date,amount_usd:parent.amount_usd,category_id:parent.category_id,payment_type:parent.payment_type};
           }
         }catch(e){console.warn("Rakuten parent lookup failed:",e)}

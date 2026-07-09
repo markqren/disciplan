@@ -57,7 +57,7 @@ async function renderAIPortal(el){
 
 async function renderNewsletter(el){
   const[allLogs,ctxRows,strategies,pending,selections,followups]=await Promise.all([
-    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cost_usd,feedback_rating,feedback_comment,feedback_received_at,parse_fallback,dry_run"),
+    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,tool_calls,cost_usd,feedback_rating,feedback_comment,feedback_received_at,parse_fallback,dry_run"),
     sb("insight_context?select=id,content,updated_at"),
     sb("insight_strategy?order=priority_weight.desc&select=*"),
     sb("principles_pending?status=eq.pending&order=created_at.desc&select=*"),
@@ -74,6 +74,9 @@ async function renderNewsletter(el){
   const rated=logs.filter(l=>l.feedback_rating!=null);
   const avgRating=rated.length?Math.round(rated.reduce((s,l)=>s+parseFloat(l.feedback_rating),0)/rated.length*10)/10:null;
   const totalCost=allLogs.reduce((s,l)=>s+parseFloat(l.cost_usd||0),0);
+  // Avg cost over the last 10 real sends — the number to watch for cost regressions.
+  const recentReal=logs.filter(l=>!l.parse_fallback).slice(0,10);
+  const avgRecentCost=recentReal.length?recentReal.reduce((s,l)=>s+parseFloat(l.cost_usd||0),0)/recentReal.length:0;
   const ratedPct=logs.length?Math.round(rated.length/logs.length*100):0;
   const fallbackCount=logs.filter(l=>l.parse_fallback).length;
   const statRow=h("div",{style:{display:"flex",gap:"12px",marginBottom:"20px",flexWrap:"wrap"}});
@@ -82,6 +85,7 @@ async function renderNewsletter(el){
     statCard(null,"rated",ratedPct+"% ("+rated.length+"/"+logs.length+")",ratedPct>=50?"var(--g)":"var(--y)"),
     statCard(null,"avg rating",avgRating!=null?avgRating+"/10":"n/a",avgRating>=7?"var(--g)":avgRating>=5?"var(--y)":"var(--r)"),
     statCard(null,"total AI cost","$"+totalCost.toFixed(3),"rgba(255,255,255,0.5)"),
+    statCard(null,"avg cost/send (last 10)","$"+avgRecentCost.toFixed(4),avgRecentCost<=0.03?"var(--g)":avgRecentCost<=0.06?"var(--y)":"var(--r)"),
     statCard(null,"parse fallbacks",fallbackCount,fallbackCount===0?"var(--g)":"var(--r)"),
     statCard(null,"dry-run replays",dryLogs.length,dryLogs.length>0?"var(--y)":"rgba(255,255,255,0.3)")
   );
@@ -225,7 +229,9 @@ async function renderNewsletter(el){
         l.feedback_rating!=null
           ?h("span",{style:{fontSize:"13px",fontWeight:"600",color:ratingColor,flexShrink:"0"}},parseFloat(l.feedback_rating)+"/10")
           :h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.2)",flexShrink:"0"}},l.dry_run?"":"unrated"),
-        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",flexShrink:"0"}},"$"+parseFloat(l.cost_usd||0).toFixed(4))
+        (l.tool_calls>0)?h("span",{style:{fontSize:"10px",padding:"1px 6px",background:"rgba(122,162,247,0.15)",color:"var(--b)",borderRadius:"3px",flexShrink:"0",fontFamily:"var(--mono)"},title:"run_finance_query calls"},l.tool_calls+"q"):h("span",{}),
+        (l.cache_read_tokens>0)?h("span",{style:{fontSize:"10px",padding:"1px 6px",background:"rgba(158,206,106,0.12)",color:"var(--g)",borderRadius:"3px",flexShrink:"0",fontFamily:"var(--mono)"},title:parseFloat(l.cache_read_tokens/1000).toFixed(1)+"k tokens read from prompt cache"},"cached"):h("span",{}),
+        h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.25)",flexShrink:"0"},title:(l.input_tokens||0)+" input / "+(l.output_tokens||0)+" output tokens"},"$"+parseFloat(l.cost_usd||0).toFixed(4))
       );
       row.append(top);
       if(hasComment){

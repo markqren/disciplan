@@ -653,7 +653,7 @@ function renderEmailReviewTable(container,candidates){
     descMain.textContent=c.description+(c._linkToTransactionId?" \uD83D\uDD17":"");
     const descSub=h("div",{style:{fontSize:"10px",color:c._linkToTransactionId?"rgba(74,111,165,0.85)":"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     if(c._linkToTransactionId&&c._linkDisplay){
-      descSub.textContent=`\u2192 ${c._linkDisplay.description||"transaction"} ${fmtF(c._linkDisplay.amount_usd)}${c._linkDisplay.date?" \u00b7 "+fmtD(c._linkDisplay.date):""}`;
+      descSub.textContent=`\u2192 ${c._linkDisplay.description||"transaction"} ${fmtF(c._linkDisplay.amount_usd)}${c._linkDisplay.date?" \u00b7 "+fmtD(c._linkDisplay.date):""}${c._linkConfidence?" \u00b7 "+c._linkConfidence+" match":""}`;
     }else{
       descSub.textContent=c._skipReason||c._emailSubject||"";
     }
@@ -925,7 +925,9 @@ function openEmailEditModal(candidates,idx,reviewContainer){
       const info=c._linkDisplay||{};
       const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"rgba(74,111,165,0.12)",borderRadius:"6px"}});
       const left=h("div");
-      left.innerHTML=`<div style="color:rgba(255,255,255,0.75);font-size:12px">\uD83D\uDD17 ${(info.description||"Transaction #"+c._linkToTransactionId).replace(/</g,"&lt;")}</div><div style="color:rgba(255,255,255,0.4);font-size:10px">${info.date?fmtD(info.date):""}${info.category_id?" \u00b7 "+info.category_id:""}${info.payment_type?" \u00b7 "+info.payment_type:""}</div>`;
+      const _cf=c._linkConfidence;
+      const _cfBadge=_cf?`<span style="font-size:9px;background:${_cf==="high"?"rgba(129,178,154,0.22)":"rgba(242,204,143,0.2)"};color:${_cf==="high"?"var(--g)":"#F2CC8F"};padding:1px 5px;border-radius:3px;margin-left:6px">suggested \u00b7 ${_cf}</span>`:"";
+      left.innerHTML=`<div style="color:rgba(255,255,255,0.75);font-size:12px">\uD83D\uDD17 ${(info.description||"Transaction #"+c._linkToTransactionId).replace(/</g,"&lt;")}${_cfBadge}</div><div style="color:rgba(255,255,255,0.4);font-size:10px">${info.date?fmtD(info.date):""}${info.category_id?" \u00b7 "+info.category_id:""}${info.payment_type?" \u00b7 "+info.payment_type:""}</div>`;
       row.append(left);
       const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
       if(info.amount_usd!=null)right.append(h("span",{style:{fontFamily:"var(--mono)",color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(info.amount_usd)));
