@@ -11,7 +11,12 @@
 
 ### v2.10 — Jul 5, 2026
 
-#### v2.10.8
+#### v2.10.9
+<sub>Newsletter: `financial` transfers no longer counted as spending in forecasts/pace; `monthly_burn_forecast` disabled (repeatedly rated 1-2)</sub>
+
+##### Fixes
+- **Forecasts stop counting credit-card payments / loans as "spending" (FEA-118)** — The 2026-07-10 `monthly_burn_forecast` was rated 1/5 ("total nonsense... what is in the variable forecast?") because `fetchMonthlyBurnInputs` only excluded `income/investment/adjustment`, letting the `financial` category (`is_expense=true`, but holds CC bill payments, loans, cash withdrawals, Splitwise settlements — transfers, not consumption) flow into the projection. That inflated the trailing-30d variable bucket to **$40,439** (~$27k of it a $10k Shilpa CC loan + $5.5k/$3.5k/$3.2k/$2.7k card payments), yielding a bogus **~$28k variable forecast** and **~$38k projected total**. Both `fetchMonthlyBurnInputs` and the freshly-shipped `budget_pace` now exclude `NON_CONSUMPTION_PARENTS` (`financial`, `other`) — the same guard `category_anomaly`/`category_trend` already use — so `budget_pace` also stops flagging `financial` ($100 target vs thousands of payments) as a phantom overspend. (~4,000 tokens)
+- **`monthly_burn_forecast` disabled; forecasting deprioritized** — Per Mark ("downgrade the forecasting insights, they've all been terrible so far"), `monthly_burn_forecast` is disabled (`enabled=false`) and `budget_pace`'s `priority_weight` lowered 1.08→0.70. `spend_projection` was already disabled. Config-only (operator-editable `insight_strategy`), no deploy needed for the toggle. (~500 tokens)
 <sub>Newsletter `budget_pace` stops linearly projecting early-posting fixed costs (rent no longer balloons to ~$6k)</sub>
 
 ##### Fixes

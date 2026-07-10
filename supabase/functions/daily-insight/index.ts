@@ -870,13 +870,17 @@ async function fetchMonthlyBurnInputs(
     : null;
 
   // All txns whose service period overlaps the current month and aren't income/transfer.
+  // `financial` (is_expense=true in the schema) holds CC bill payments, loans, cash
+  // withdrawals, Splitwise settlements — transfers, NOT consumption — and `other` is
+  // a noisy catch-all; both are excluded here so they don't inflate the forecast
+  // (they made a 2026-07-10 send project ~$38k of "burn"). Mirrors NON_CONSUMPTION_PARENTS.
   const rows = await fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string; amount_usd: number; date: string; service_days: number | null }>(() =>
     scopeToOwner(supabase
       .from("transactions")
       .select("daily_cost,service_start,service_end,category_id,amount_usd,date,service_days")
       .lte("service_start", monthEnd)
       .gte("service_end", monthStart)
-      .not("category_id", "in", "(income,investment,adjustment)")
+      .not("category_id", "in", "(income,investment,adjustment,financial,other)")
       .gt("daily_cost", 0))
   );
 
@@ -901,7 +905,7 @@ async function fetchMonthlyBurnInputs(
       .select("amount_usd")
       .gte("date", trailingStart)
       .lte("date", today)
-      .not("category_id", "in", "(income,investment,adjustment)")
+      .not("category_id", "in", "(income,investment,adjustment,financial,other)")
       .or("service_days.is.null,service_days.lte.7")
       .gt("amount_usd", 0))
   );

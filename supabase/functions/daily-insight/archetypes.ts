@@ -132,6 +132,11 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
   const accruedByCat = features.accruedMtdByCategory || {};
   const accruedParents: Record<string, number> = {};
   for (const [parent, children] of Object.entries(rollup)) {
+    // Skip financial/other: they carry transfers (CC bill payments, loans, cash
+    // withdrawals, Splitwise settlements) not consumption, so a $100 "budget" vs
+    // thousands of payments would flag a bogus overspend. Same guard as
+    // category_anomaly/category_trend.
+    if (NON_CONSUMPTION_PARENTS.has(parent)) continue;
     const s = children.reduce((acc, c) => acc + (accruedByCat[c] || 0), 0);
     if (s > 0) accruedParents[parent] = s;
   }
