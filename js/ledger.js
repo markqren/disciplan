@@ -69,9 +69,8 @@ function openLedgerEditModal(txn,onSaved){
   const previewEl=h("div",{class:"preview hidden"});
   function updatePreview(){
     const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){previewEl.classList.add("hidden");return}
-    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
-    if(se<ss){previewEl.classList.add("hidden");return}
-    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    if(mSe.value<mSs.value){previewEl.classList.add("hidden");return}
+    const days=daysInclusive(mSs.value,mSe.value);
     const cur=mCur.value;
     const fx=cur==="USD"?1:(parseFloat(mFx.value)||DFX[cur]||1);
     const usd=cur==="USD"?a:a*fx;
@@ -95,8 +94,7 @@ function openLedgerEditModal(txn,onSaved){
   const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr"+(" auto".repeat(extraBtns+2)),gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
     mSave.textContent="Saving...";mSave.disabled=true;
-    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
-    const sdays=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const sdays=daysInclusive(mSs.value,mSe.value);
     const cur=mCur.value;
     const fx=cur==="USD"?1:(parseFloat(mFx.value)||DFX[cur]||1);
     const orig=Math.round(parseFloat(mAmt.value)*100)/100;
@@ -592,7 +590,7 @@ function openLedgerEditModal(txn,onSaved){
         // 1. Create negative income transaction (same pattern as reimbursement)
         const ss=txn.service_start||txn.date;
         const se=txn.service_end||txn.date;
-        const serviceDays=Math.max(1,Math.round((new Date(se)-new Date(ss))/864e5)+1);
+        const serviceDays=daysInclusive(ss,se);
         const amt=-Math.abs(dv);
         const dc=Math.round(amt/serviceDays*1e6)/1e6;
         const newTxn={
@@ -842,8 +840,7 @@ function openBatchEditModal(txns,onDone){
           const ss=bSs.value||t.service_start;
           const se=bSe.value||t.service_end;
           tPatch.service_start=ss;tPatch.service_end=se;
-          const ssD=new Date(ss+"T00:00:00"),seD=new Date(se+"T00:00:00");
-          const days=Math.max(1,Math.floor((seD-ssD)/864e5)+1);
+          const days=daysInclusive(ss,se);
           tPatch.service_days=days;
           tPatch.daily_cost=Math.round(t.amount_usd/days*1e6)/1e6;
           await sb(`transactions?id=eq.${t.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify(tPatch)});

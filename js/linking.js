@@ -81,7 +81,7 @@ async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
         if(parent.service_start)patch.service_start=parent.service_start;
         if(parent.service_end)patch.service_end=parent.service_end;
         if(parent.service_start&&parent.service_end){
-          const sd=Math.max(1,Math.round((new Date(parent.service_end)-new Date(parent.service_start))/864e5)+1);
+          const sd=daysInclusive(parent.service_start,parent.service_end);
           patch.service_days=sd;
           patch.daily_cost=Math.round(c.amount_usd/sd*1e6)/1e6;
         }
@@ -190,7 +190,7 @@ function persistLotRejection(r,rejected){
 async function applyReimbursementLinks(links){
   for(const link of links){
     const expDate=link.expense.date,expSS=link.expense.service_start||expDate,expSE=link.expense.service_end||expDate;
-    const reimbSD=Math.round((new Date(expSE)-new Date(expSS))/864e5)+1;
+    const reimbSD=daysInclusive(expSS,expSE);
     const reimbDC=link.reimbursement.amount_usd/reimbSD;
     const groupId=link.expense.transaction_group_id||Math.min(link.expense.id,link.reimbursement.id);
     await sb(`transactions?id=eq.${link.reimbursement.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({
@@ -306,7 +306,7 @@ async function createReimbursement(originalTxn,person,splitRatio,paymentType,not
   const reimbAmount=Math.round(-(originalTxn.amount_usd*splitRatio)*100)/100;
   const ss=originalTxn.service_start||originalTxn.date;
   const se=originalTxn.service_end||originalTxn.date;
-  const serviceDays=Math.max(1,Math.round((new Date(se)-new Date(ss))/864e5)+1);
+  const serviceDays=daysInclusive(ss,se);
   const dailyCost=Math.round(reimbAmount/serviceDays*1e6)/1e6;
   const firstName=person.split(" ")[0];
   const description=`Reimbursed - ${originalTxn.description} - ${firstName}`;

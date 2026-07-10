@@ -38,7 +38,7 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
   // this rent charge at commit. The only reliable charge-vs-payoff signal is sign.
   if(!badDate&&profile.detectRent&&profile.detectRent(row)){
     const rss=startOfMonth(date),rse=endOfMonth(rss);
-    const rsd=Math.max(1,Math.floor((new Date(rse+"T00:00:00")-new Date(rss+"T00:00:00"))/864e5)+1);
+    const rsd=daysInclusive(rss,rse);
     return{...baseFields,description:`Rent - ${monthLabel(date)}`,amount_usd:amt,category_id:"rent",ai_confidence:"high",service_start:rss,service_end:rse,service_days:rsd,daily_cost:Math.round(amt/rsd*1e6)/1e6,_status:"pending",_isDuplicate:false,_skipReason:null,_isRent:true};
   }
   if(isCCPay){
@@ -112,8 +112,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
       if(!c.ai_confidence)c.ai_confidence="low";
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
       c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
-      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     }
     return;
@@ -128,8 +127,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
     else{if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);if(!c.ai_confidence)c.ai_confidence="low"}
     c.service_start=getDefStart(c.category_id,c.date)||c.date;
     c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
-    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     // The AI often copies a stale month from the few-shot examples; force any
     // trailing "(Month YYYY)"/"- Month YYYY" to match the service month.
@@ -143,8 +141,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
       if(subMerchants.has(normalizeMerchant(c._rawDescription||c.description))){
         c.service_start=startOfMonth(c.date);
         c.service_end=endOfMonth(c.service_start);
-        const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-        c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+        c.service_days=daysInclusive(c.service_start,c.service_end);
         c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
         if(c.description)c.description=fixMonthSuffix(c.description,c.service_start);
       }
@@ -164,8 +161,7 @@ function propagateEdits(candidates,editedIndex){
       c.category_id=edited.category_id;
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
       c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
-      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     }
   }

@@ -6,6 +6,7 @@ function today(){return new Date().toISOString().slice(0,10)}
 function startOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth(),1).toISOString().slice(0,10)}
 function endOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth()+1,0).toISOString().slice(0,10)}
 function addDays(d,n){return new Date(new Date(d+"T00:00:00").getTime()+(n-1)*864e5).toISOString().slice(0,10)}
+function daysInclusive(start,end){const a=(start||"").split("-").map(Number),b=(end||"").split("-").map(Number);if(a.length!==3||b.length!==3||a.some(isNaN)||b.some(isNaN))return 1;return Math.max(1,Math.round((Date.UTC(b[0],b[1]-1,b[2])-Date.UTC(a[0],a[1]-1,a[2]))/864e5)+1)}
 function getDefStart(cat,d){const r=ACCRUAL_D[cat];if(!r||!d)return d;if(r==="month")return startOfMonth(d);return d}
 function getDefEnd(cat,ss){const r=ACCRUAL_D[cat];if(!r||!ss)return ss;if(r==="month")return endOfMonth(ss);return addDays(ss,r)}
 function getQuarterlyVestingPeriod(d){const dt=new Date(d+"T00:00:00"),y=dt.getFullYear(),m=dt.getMonth();if(m<3)return{start:`${y}-01-01`,end:`${y}-03-31`};if(m<6)return{start:`${y}-04-01`,end:`${y}-06-30`};if(m<9)return{start:`${y}-07-01`,end:`${y}-09-30`};return{start:`${y}-10-01`,end:`${y}-12-31`}}

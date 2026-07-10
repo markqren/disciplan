@@ -5,8 +5,7 @@ function syncServiceStartToEnd(startInput,endInput){
 function normalizeCandidateServicePeriod(c){
   if(c.service_start&&c.service_end&&c.service_end<c.service_start)c.service_start=c.service_end;
   if(c.service_start&&c.service_end&&c.amount_usd!=null){
-    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
   }
 }
@@ -121,8 +120,7 @@ function renderReviewTable(container,candidates){
       c.category_id=e.target.value;
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
       c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
-      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
       propagateEdits(candidates,idx);
       renderReviewTable(container,candidates);
@@ -204,9 +202,8 @@ function openImportEditModal(candidates,idx,reviewContainer){
   const previewEl=h("div",{class:"preview hidden"});
   function updatePreview(){
     const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){previewEl.classList.add("hidden");return}
-    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
-    if(se<ss){previewEl.classList.add("hidden");return}
-    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    if(mSe.value<mSs.value){previewEl.classList.add("hidden");return}
+    const days=daysInclusive(mSs.value,mSe.value);
     const daily=a/days;
     previewEl.classList.remove("hidden");
     previewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
@@ -309,8 +306,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
-    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     c._status="approved";
     propagateEdits(candidates,idx);
@@ -668,8 +664,7 @@ function renderEmailReviewTable(container,candidates){
       c.category_id=e.target.value;
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
       c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
-      const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-      c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+      c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
       renderEmailReviewTable(container,candidates);
     }});
@@ -801,8 +796,7 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
         c.category_id=e.target.value;
         c.service_start=getDefStart(c.category_id,c.date||c.service_start)||c.service_start;
         c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_end;
-        const ss2=new Date(c.service_start+"T00:00:00"),se2=new Date(c.service_end+"T00:00:00");
-        c.service_days=Math.max(1,Math.floor((se2-ss2)/864e5)+1);
+        c.service_days=daysInclusive(c.service_start,c.service_end);
         c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
         renderPayslipReviewTable(container,candidates,skippedPages);
       }});
@@ -885,9 +879,8 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   const emPreviewEl=h("div",{class:"preview hidden"});
   function emUpdatePreview(){
     const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){emPreviewEl.classList.add("hidden");return}
-    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
-    if(se<ss){emPreviewEl.classList.add("hidden");return}
-    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    if(mSe.value<mSs.value){emPreviewEl.classList.add("hidden");return}
+    const days=daysInclusive(mSs.value,mSe.value);
     const daily=a/days;
     emPreviewEl.classList.remove("hidden");
     emPreviewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
@@ -982,8 +975,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
-    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     c._status="approved";
     bg.remove();
@@ -1055,9 +1047,8 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
   const psPreviewEl=h("div",{class:"preview hidden"});
   function psUpdatePreview(){
     const a=parseFloat(mAmt.value);if(isNaN(a)||!mSs.value||!mSe.value){psPreviewEl.classList.add("hidden");return}
-    const ss=new Date(mSs.value+"T00:00:00"),se=new Date(mSe.value+"T00:00:00");
-    if(se<ss){psPreviewEl.classList.add("hidden");return}
-    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    if(mSe.value<mSs.value){psPreviewEl.classList.add("hidden");return}
+    const days=daysInclusive(mSs.value,mSe.value);
     const daily=a/days;
     psPreviewEl.classList.remove("hidden");
     psPreviewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
@@ -1090,8 +1081,7 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
-    const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-    c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     c._status="approved";
     bg.remove();
@@ -1219,7 +1209,7 @@ async function commitPayslipImport(candidates){
       if(attMatches.length&&connFresh.length){
         // Stretch service period to match AT&T's full month, then link
         const connAmt=valid[ci].amount_usd;
-        const sd=Math.round((new Date(monthEnd+"T12:00:00Z")-new Date(monthStart+"T12:00:00Z"))/864e5)+1;
+        const sd=daysInclusive(monthStart,monthEnd);
         await sb(`transactions?id=eq.${connFresh[0].id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({service_start:monthStart,service_end:monthEnd,service_days:sd,daily_cost:Math.round(connAmt/sd*10000)/10000})});
         await linkToGroup(connFresh[0],attMatches[0]);
         console.log(`Connectivity: auto-linked to "${attMatches[0].description}" (${monthStart}–${monthEnd})`);

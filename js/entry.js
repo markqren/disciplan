@@ -73,9 +73,8 @@ function renderEntry(el){
       return;
     }
     if(isNaN(a)||!f.ss||!f.se){previewEl.classList.add("hidden");return}
-    const ss=new Date(f.ss+"T00:00:00"),se=new Date(f.se+"T00:00:00");
-    if(se<ss){previewEl.classList.add("hidden");return}
-    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    if(f.se<f.ss){previewEl.classList.add("hidden");return}
+    const days=daysInclusive(f.ss,f.se);
     const fx=f.fx?parseFloat(f.fx):DFX[f.cur]||1;
     const usd=f.cur==="USD"?a:a*fx;
     const daily=usd/days;
@@ -135,8 +134,7 @@ function renderEntry(el){
     const isInc=f.cat==="income";
     const orig=isInc?-Math.abs(a):a;
     const usd=f.cur==="USD"?orig:orig*fx;
-    const ss=new Date(f.ss+"T00:00:00"),se=new Date(f.se+"T00:00:00");
-    const days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+    const days=daysInclusive(f.ss,f.se);
     submitBtn.textContent="Saving...";
     try{
       const tagVal=f.tag.toLowerCase().trim();
@@ -414,8 +412,7 @@ function renderEntry(el){
         c.currency="USD";c.fx_rate=1;
         c.original_amount=c.amount_usd;
         if(c.credit===undefined)c.credit="";
-        const ss=new Date(c.service_start+"T00:00:00"),se=new Date(c.service_end+"T00:00:00");
-        c.service_days=Math.max(1,Math.floor((se-ss)/864e5)+1);
+        c.service_days=daysInclusive(c.service_start,c.service_end);
         c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
       });
 
@@ -909,8 +906,7 @@ function swBuildRow(cand,categoryId,batchId,match,descOverride,tag,svc){
     // Default to the category's estimated accrual window (e.g. furniture = 2yr).
     ss=getDefStart(cat,cand.date)||cand.date;se=getDefEnd(cat,ss)||ss;
   }
-  const d1=new Date(ss+"T00:00:00"),d2=new Date(se+"T00:00:00");
-  const days=Math.max(1,Math.floor((d2-d1)/864e5)+1);
+  const days=daysInclusive(ss,se);
   const amt=Math.round((parseFloat(cand.amount_usd)||0)*100)/100;
   return{
     date:cand.date,service_start:ss,service_end:se,
