@@ -122,6 +122,14 @@ export interface Features {
   monthKey: string;         // "2026-04"
   schema: CategorySchema;   // dynamic from `categories` table — never use module-level rollups
   expenses: MonthlyMap;
+  // budget_pace: accrued-THROUGH-TODAY for the current month, keyed by raw
+  // category_id (daily_cost × overlap with [month_start, today], see overlapDays).
+  // Distinct from `expenses[monthKey]`, which holds FULL-month accrual (all
+  // service-period days incl. future) and must NOT be linearly re-projected.
+  // budget_pace rolls this up to parents and projects it linearly, which for
+  // fixed costs reconstructs the true monthly total instead of tripling an
+  // early-posting lump sum (Mark's repeated "don't linearly project" feedback).
+  accruedMtdByCategory: Record<string, number>;
   income: Record<string, number>;
   // income_breakdown: owner-scoped compensation breakdown (equity/cash/bonus/tax/
   // 401K) for the current year and prior 2 years, each through today's calendar

@@ -122,31 +122,49 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
   const dayMax = (strategy.requires?.month_day_max as number | undefined) ?? 24;
   if (day < dayMin || day > dayMax) return ineligible("budget_pace", `day_${day}_outside_${dayMin}_${dayMax}`);
 
-  const parents = parentTotalsForMonth(features.expenses, mk, features.schema.parentRollup);
-  if (Object.keys(parents).length === 0) return ineligible("budget_pace", "no_current_month_data");
+  // Roll accrued-THROUGH-TODAY (daily_cost × overlap with [month_start, today]) up
+  // to parents. This — NOT the income-statement full-month accrual — is what we
+  // project. Extrapolating accrued-so-far linearly reconstructs the true monthly
+  // total for fixed costs (rent that posted on day 1 isn't tripled) and gives an
+  // honest run-rate for variable costs. See Mark's repeated "don't linearly
+  // project one-time costs" feedback.
+  const rollup = features.schema.parentRollup;
+  const accruedByCat = features.accruedMtdByCategory || {};
+  const accruedParents: Record<string, number> = {};
+  for (const [parent, children] of Object.entries(rollup)) {
+    const s = children.reduce((acc, c) => acc + (accruedByCat[c] || 0), 0);
+    if (s > 0) accruedParents[parent] = s;
+  }
+  if (Object.keys(accruedParents).length === 0) return ineligible("budget_pace", "no_accrued_mtd_data");
+
+  // Full-month accrual from the income statement — reference only (locked-in
+  // costs already booked for the whole month). Never linearly re-projected.
+  const bookedFullMonth = parentTotalsForMonth(features.expenses, mk, rollup);
 
   // Days in this month (UTC)
   const [y, m] = mk.split("-").map(Number);
   const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const fractionElapsed = day / daysInMonth;
 
-  const rows = Object.entries(parents).map(([parent, sum]) => {
+  const rows = Object.entries(accruedParents).map(([parent, accrued]) => {
     const budget = features.schema.budgetTargets[parent] || 0;
     const expected = budget * fractionElapsed;
+    const projected = accrued / Math.max(fractionElapsed, 0.05);
     return {
       parent,
-      sum,
+      accrued_mtd: Math.round(accrued),
+      booked_full_month: Math.round(bookedFullMonth[parent] || 0),
       budget,
-      expected,
-      pct_of_budget: budget > 0 ? sum / budget : null,
-      pct_of_expected: expected > 0 ? sum / expected : null,
-      projected_month_end: budget > 0 ? sum / Math.max(fractionElapsed, 0.05) : null,
+      expected: Math.round(expected),
+      projected_month_end: budget > 0 ? Math.round(projected) : null,
+      // accrued vs where an even-pace budget would sit today == projected/budget.
+      pct_of_budget: budget > 0 ? Number((projected / budget).toFixed(2)) : null,
     };
   }).filter(r => r.budget > 0);
 
-  // Strongest signals: parents over expected pace (ratio > 1.15) and parents under (ratio < 0.7).
-  const overPace = rows.filter(r => r.pct_of_expected != null && r.pct_of_expected > 1.15);
-  const underPace = rows.filter(r => r.pct_of_expected != null && r.pct_of_expected < 0.7);
+  // Strongest signals: parents projected over budget (>1.15×) and well under (<0.7×).
+  const overPace = rows.filter(r => r.pct_of_budget != null && r.pct_of_budget > 1.15);
+  const underPace = rows.filter(r => r.pct_of_budget != null && r.pct_of_budget < 0.7);
   const data_strength = Math.min(1, (overPace.length + underPace.length) / 4);
 
   return {
@@ -162,7 +180,7 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
       categories: rows,
       over_pace: overPace,
       under_pace: underPace,
-      hint: "Project month-end totals assuming fixed-cost categories (rent, health) hold flat. Include this projection in the write-up per Mark's 2026-04-17 feedback.",
+      hint: "projected_month_end is accrued-THROUGH-TODAY extrapolated linearly and is ALREADY correct — report it as-is. For fixed costs (rent, subscriptions) this equals the true monthly total; it does NOT triple a lump sum that posted early. NEVER linearly project raw logged/cash amounts or the booked_full_month figure (Mark's repeated feedback). booked_full_month is the income-statement full-month accrual, shown only for reference.",
     },
     summary: `${overPace.length} over pace, ${underPace.length} under pace, day ${day}/${daysInMonth}`,
   };

@@ -11,7 +11,11 @@
 
 ### v2.10 — Jul 5, 2026
 
-#### v2.10.7
+#### v2.10.8
+<sub>Newsletter `budget_pace` stops linearly projecting early-posting fixed costs (rent no longer balloons to ~$6k)</sub>
+
+##### Fixes
+- **`budget_pace` projects accrued-through-today, not the full-month accrual (FEA-117)** — The archetype took each parent's **full-month** accrual from the income statement (rent already spread across all of July = $1,903) and still divided it by fraction-elapsed to "project" month-end — tripling an early-posting lump sum to a bogus ~$6,000 and repeatedly triggering Mark's "don't linearly project one-time costs" feedback. It now bases the projection on **accrued-through-today** (`daily_cost × overlap([month_start, today])`, via new `fetchAccruedMtdByCategory` → `features.accruedMtdByCategory`) extrapolated linearly: for fixed costs this reconstructs the *true* monthly total (home's $560 accrued by day 9 → ~$1,900, matching the real full-month figure) and for variable costs it's an honest run-rate. Facts now expose `accrued_mtd`, `projected_month_end` (already correct — report as-is), and `booked_full_month` (reference only), and the `prompt_guidance` was updated to forbid re-projecting cash/full-month amounts. No extra Anthropic cost; one small current-month DB query. (~5,000 tokens)
 <sub>Newsletter cost cut via prompt caching + follow-up budget fix + cost observability (FEA-116) · Rakuten email imports read HTML forwarding notes and auto-propose the parent purchase with a confidence bar</sub>
 
 ##### Fixes

@@ -338,6 +338,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     monthlyBurnInputs,
     cashbackYtd,
     tripsByYear,
+    accruedMtdByCategory,
   ] = await Promise.all([
     fetchFlashbackByYear(supabase, today),
     fetchStreakStats(supabase, today, schema),
@@ -345,6 +346,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     fetchMonthlyBurnInputs(supabase, today, expenses),
     fetchCashbackYtd(supabase, today),
     fetchTripsByYear(supabase, today, tagSummaries as TagSummary[] | null),
+    fetchAccruedMtdByCategory(supabase, today),
   ]);
 
   const features: Features = {
@@ -353,6 +355,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     monthKey,
     schema,
     expenses,
+    accruedMtdByCategory,
     income,
     incomeComposition,
     largeTxns: (largeTxns || []) as Transaction[],
@@ -953,6 +956,38 @@ async function fetchMonthlyBurnInputs(
     trailing_12mo_monthly_mean,
     same_month_1y_ago_total,
   };
+}
+
+// budget_pace fetcher: accrued-THROUGH-TODAY for the current month, per raw
+// category_id (daily_cost × overlap days with [month_start, today]). Kept separate
+// from the income-statement `expenses` map, which holds FULL-month accrual (all
+// service-period days incl. future). budget_pace projects THIS linearly — for
+// fixed costs (rent) that reconstructs the true month-end total instead of
+// tripling an already-full-month accrual; for variable costs it's a run-rate.
+// Own fetch (not reused from fetchMonthlyBurnInputs, which returns null with <3mo
+// history) so budget_pace stays robust and decoupled. Current-month rows only.
+async function fetchAccruedMtdByCategory(
+  supabase: SupabaseClient,
+  today: string,
+): Promise<Record<string, number>> {
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const rows = await fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string }>(() =>
+    scopeToOwner(supabase
+      .from("transactions")
+      .select("daily_cost,service_start,service_end,category_id")
+      .lte("service_start", today)
+      .gte("service_end", monthStart)
+      .not("category_id", "in", "(income,investment,adjustment)")
+      .gt("daily_cost", 0))
+  );
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const dc = Number(r.daily_cost) || 0;
+    if (dc <= 0) continue;
+    const acc = dc * overlapDays(r.service_start, r.service_end, monthStart, today);
+    if (acc > 0) out[r.category_id] = (out[r.category_id] || 0) + acc;
+  }
+  return out;
 }
 
 // cashback_roi fetcher.
