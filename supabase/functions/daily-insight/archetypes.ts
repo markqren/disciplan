@@ -130,7 +130,9 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
   // project one-time costs" feedback.
   const rollup = features.schema.parentRollup;
   const accruedByCat = features.accruedMtdByCategory || {};
+  const tripByCat = features.tripAccruedMtdByCategory || {};
   const accruedParents: Record<string, number> = {};
+  const tripParents: Record<string, number> = {};
   for (const [parent, children] of Object.entries(rollup)) {
     // Skip financial/other: they carry transfers (CC bill payments, loans, cash
     // withdrawals, Splitwise settlements) not consumption, so a $100 "budget" vs
@@ -138,7 +140,10 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
     // category_anomaly/category_trend.
     if (NON_CONSUMPTION_PARENTS.has(parent)) continue;
     const s = children.reduce((acc, c) => acc + (accruedByCat[c] || 0), 0);
-    if (s > 0) accruedParents[parent] = s;
+    if (s > 0) {
+      accruedParents[parent] = s;
+      tripParents[parent] = children.reduce((acc, c) => acc + (tripByCat[c] || 0), 0);
+    }
   }
   if (Object.keys(accruedParents).length === 0) return ineligible("budget_pace", "no_accrued_mtd_data");
 
@@ -153,16 +158,25 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
 
   const rows = Object.entries(accruedParents).map(([parent, accrued]) => {
     const budget = features.schema.budgetTargets[parent] || 0;
+    const trip = tripParents[parent] || 0;
+    // Project only the BASELINE (recurring) slice. Trips are lumpy one-offs — a
+    // week of vacation restaurants extrapolated to a full month is exactly the
+    // over-projection Mark flags — so the trip portion is added back FLAT (what's
+    // accrued so far), not scaled by days-remaining.
+    const baseline = Math.max(0, accrued - trip);
+    const baselineProjected = baseline / Math.max(fractionElapsed, 0.05);
+    const projected = baselineProjected + trip;
     const expected = budget * fractionElapsed;
-    const projected = accrued / Math.max(fractionElapsed, 0.05);
     return {
       parent,
       accrued_mtd: Math.round(accrued),
+      trip_accrued_mtd: Math.round(trip),
+      baseline_accrued_mtd: Math.round(baseline),
       booked_full_month: Math.round(bookedFullMonth[parent] || 0),
       budget,
       expected: Math.round(expected),
       projected_month_end: budget > 0 ? Math.round(projected) : null,
-      // accrued vs where an even-pace budget would sit today == projected/budget.
+      // projected (baseline extrapolated + trip flat) vs budget.
       pct_of_budget: budget > 0 ? Number((projected / budget).toFixed(2)) : null,
     };
   }).filter(r => r.budget > 0);
@@ -185,7 +199,7 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
       categories: rows,
       over_pace: overPace,
       under_pace: underPace,
-      hint: "projected_month_end is accrued-THROUGH-TODAY extrapolated linearly and is ALREADY correct — report it as-is. For fixed costs (rent, subscriptions) this equals the true monthly total; it does NOT triple a lump sum that posted early. NEVER linearly project raw logged/cash amounts or the booked_full_month figure (Mark's repeated feedback). booked_full_month is the income-statement full-month accrual, shown only for reference.",
+      hint: "projected_month_end is ALREADY correct — report it as-is; do NOT recompute it. It = baseline_accrued_mtd (recurring spend, trips removed) extrapolated linearly PLUS trip_accrued_mtd added flat. For fixed costs (rent) the baseline projection equals the true monthly total, not a tripled lump sum. Trips are already netted out deterministically, so you do NOT need to run a query to separate them: when trip_accrued_mtd > 0, say so explicitly (e.g. 'restaurant projects to $X baseline; a further $Y this month was trip spend, not projected'). NEVER linearly project raw logged/cash amounts or booked_full_month (Mark's repeated feedback). booked_full_month is the income-statement full-month accrual, reference only.",
     },
     summary: `${overPace.length} over pace, ${underPace.length} under pace, day ${day}/${daysInMonth}`,
   };

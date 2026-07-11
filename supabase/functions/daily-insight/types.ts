@@ -130,6 +130,10 @@ export interface Features {
   // fixed costs reconstructs the true monthly total instead of tripling an
   // early-posting lump sum (Mark's repeated "don't linearly project" feedback).
   accruedMtdByCategory: Record<string, number>;
+  // The TRIP-tagged slice of accruedMtdByCategory (same keys/units). budget_pace
+  // subtracts this to get baseline recurring spend — trips are lumpy one-offs that
+  // must NOT be linearly projected — and reports the trip portion flat.
+  tripAccruedMtdByCategory: Record<string, number>;
   income: Record<string, number>;
   // income_breakdown: owner-scoped compensation breakdown (equity/cash/bonus/tax/
   // 401K) for the current year and prior 2 years, each through today's calendar

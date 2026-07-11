@@ -355,7 +355,8 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     monthKey,
     schema,
     expenses,
-    accruedMtdByCategory,
+    accruedMtdByCategory: accruedMtdByCategory.total,
+    tripAccruedMtdByCategory: accruedMtdByCategory.trip,
     income,
     incomeComposition,
     largeTxns: (largeTxns || []) as Transaction[],
@@ -970,28 +971,63 @@ async function fetchMonthlyBurnInputs(
 // tripling an already-full-month accrual; for variable costs it's a run-rate.
 // Own fetch (not reused from fetchMonthlyBurnInputs, which returns null with <3mo
 // history) so budget_pace stays robust and decoupled. Current-month rows only.
+//
+// Also splits out the TRIP-tagged slice per category (`trip`): spend on a
+// transaction whose `tag` is a trip-style tag overlapping this month. Trips are
+// lumpy one-offs — projecting them linearly is exactly the over-projection Mark
+// flags — so budget_pace projects only the baseline (total − trip) and reports
+// the trip portion flat.
 async function fetchAccruedMtdByCategory(
   supabase: SupabaseClient,
   today: string,
-): Promise<Record<string, number>> {
+): Promise<{ total: Record<string, number>; trip: Record<string, number> }> {
   const monthStart = `${today.slice(0, 7)}-01`;
-  const rows = await fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string }>(() =>
-    scopeToOwner(supabase
-      .from("transactions")
-      .select("daily_cost,service_start,service_end,category_id")
-      .lte("service_start", today)
-      .gte("service_end", monthStart)
-      .not("category_id", "in", "(income,investment,adjustment)")
-      .gt("daily_cost", 0))
-  );
-  const out: Record<string, number> = {};
+  const [rows, tagsRaw] = await Promise.all([
+    fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string; tag: string | null }>(() =>
+      scopeToOwner(supabase
+        .from("transactions")
+        .select("daily_cost,service_start,service_end,category_id,tag")
+        .lte("service_start", today)
+        .gte("service_end", monthStart)
+        .not("category_id", "in", "(income,investment,adjustment)")
+        .gt("daily_cost", 0))
+    ),
+    // Trip-style tags whose window overlaps [month_start, today].
+    fetchAllPages<TagRow>(() =>
+      scopeToOwner(supabase
+        .from("tags")
+        .select("name,start_date,end_date,tag_type")
+        .lte("start_date", today)
+        .or(`end_date.is.null,end_date.gte.${monthStart}`))
+    ),
+  ]);
+
+  // Names of BOUNDED trip-style tags. A trip must have an end_date and a 2-60 day
+  // duration — the upper bound is critical: some tags are mislabeled tag_type='trip'
+  // but run for years (e.g. `pets` 1107d, `bf2025` 738d) and are really ongoing
+  // life categories whose recurring spend SHOULD be projected, not netted out.
+  // Within that window, an explicit trip/vacation/travel type counts, and (matching
+  // fetchTripsByYear) an untyped tag counts too; other tag_types do not.
+  const tripNames = new Set<string>();
+  for (const t of tagsRaw) {
+    if (!t.end_date) continue;
+    const duration = Math.round((Date.parse(t.end_date) - Date.parse(t.start_date)) / 86_400_000) + 1;
+    if (duration < 2 || duration > 60) continue;
+    const isTrip = t.tag_type ? TRIP_TAG_TYPES.has(t.tag_type) : true;
+    if (isTrip) tripNames.add(t.name);
+  }
+
+  const total: Record<string, number> = {};
+  const trip: Record<string, number> = {};
   for (const r of rows) {
     const dc = Number(r.daily_cost) || 0;
     if (dc <= 0) continue;
     const acc = dc * overlapDays(r.service_start, r.service_end, monthStart, today);
-    if (acc > 0) out[r.category_id] = (out[r.category_id] || 0) + acc;
+    if (acc <= 0) continue;
+    total[r.category_id] = (total[r.category_id] || 0) + acc;
+    if (r.tag && tripNames.has(r.tag)) trip[r.category_id] = (trip[r.category_id] || 0) + acc;
   }
-  return out;
+  return { total, trip };
 }
 
 // cashback_roi fetcher.

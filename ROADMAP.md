@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jul 10, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jul 11, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -10,7 +10,11 @@
 
 ### v2.10 — Jul 5, 2026
 
-#### v2.10.9
+#### v2.10.10
+<sub>Newsletter `budget_pace` nets trip spend out of its projection deterministically (no more trip-inflated month-end estimates)</sub>
+
+##### Fixes
+- **`budget_pace` no longer linearly projects lumpy trip spend (FEA-119)** — Even after v2.10.8 stopped tripling fixed costs, a trip month still inflated projections: a week of vacation restaurants/flights extrapolated at the daily run-rate implied a full month of trip-level spend. `fetchAccruedMtdByCategory` now splits the **trip-tagged** slice per category (spend on a transaction whose `tag` is a bounded trip tag), and `budget_pace` projects only the **baseline** (`accrued − trip`) linearly, adding the trip portion back **flat**. Facts expose `baseline_accrued_mtd` / `trip_accrued_mtd`, and the guidance now tells the writer trips are pre-separated — so it names them ("restaurant baseline projects to $120; +$210 was the rainier trip, not projected") **without** spending a `run_finance_query` call. Trip detection is bounded to 2–60 days so mislabeled multi-year `tag_type='trip'` tags (e.g. `pets` 1107d, `bf2025` 738d) aren't treated as trips and their recurring spend is still projected. Validated on live day-10 data: rainier's $839 transport / $211 restaurant are netted to flat; rent still projects $1,127→~$3,495 (its true monthly total). (~5,500 tokens)
 <sub>Newsletter: `financial` transfers no longer counted as spending in forecasts/pace; `monthly_burn_forecast` disabled (repeatedly rated 1-2)</sub>
 
 ##### Fixes
