@@ -1232,17 +1232,17 @@ ${JSON.stringify(selected.facts, null, 2)}
     : "ACCRUAL basis — figures spread each transaction's cost as daily_cost across its [service_start, service_end] period. Describe spend as accrued over its service period, NOT as a one-day event on the logged date."}
 
 ${INSIGHT_TOOLS_ENABLED ? `## DATA TOOL AVAILABLE:
-You may call run_finance_query up to a few times to fetch numbers the facts above don't contain — e.g. split spend by trip tag, verify a net-accrual figure, compute a YTD run-rate, or break a parent into its children. It runs a single read-only SELECT over the recipient's OWN data. Query the views UNQUALIFIED (no schema prefix):
+You may call run_finance_query only when the facts above genuinely lack a number needed for the final answer. The TOTAL hard budget for main insight + follow-up is 4 SQL calls; the main insight should usually use 0-1 calls, and many archetypes (e.g. large_transactions, tag_recap, service_expiry, budget_pace) should use 0 because their facts are already pre-computed. It runs a single read-only SELECT over the recipient's OWN data. Query the views UNQUALIFIED (no schema prefix):
   transactions(id, date, description, category_id, amount_usd, daily_cost, service_start, service_end, service_days, payment_type, credit, tag, transaction_group_id, is_subscription)
   tags(name, start_date, end_date, tag_type, notes)
   categories(id, label, parent_id, is_expense, default_accrual_days)
   accounts(id, label, account_type, institution, currency, is_active)
   balance_snapshots(id, account_id, snapshot_date, balance_usd, notes)
   cashback_redemptions(id, date, item, payment_type, cashback_type, dollar_value, redemption_rate)
-Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. EFFICIENCY: make each query count — NEVER query for a number already present in the facts above, and fold everything you need into as few queries as possible (typically 0-2 for the main insight). Derive simple arithmetic (projections, ratios, sums of provided figures) yourself instead of querying. (Follow-up questions below get their own query budget — spend there first.)
+Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. EFFICIENCY: make each query count — NEVER query for a number already present in the facts above, and fold everything you need into one aggregate query whenever possible. Return only aggregate/top-N rows (LIMIT 5-10), not raw ledgers. Derive simple arithmetic (projections, ratios, sums of provided figures) yourself instead of querying. Follow-up questions below share the same strict budget, so spend there first and skip optional main-insight drill-downs.
 
 ` : ""}${followups.length ? `## MARK'S FOLLOW-UP QUESTIONS (answer these — highest priority):
-Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${INSIGHT_TOOLS_ENABLED ? "Use run_finance_query to pull the exact numbers each question needs — don't guess or defer. IMPORTANT: run the follow-up's queries FIRST, before any optional drill-down for today's main insight, so the follow-up never runs out of query budget (the past failure mode). You have ample budget; a follow-up should essentially always be answered with real numbers this send, not deferred to 'tomorrow'." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
+Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${INSIGHT_TOOLS_ENABLED ? "Use run_finance_query only when exact numbers are needed and unavailable from the facts/history; combine all follow-up needs into one aggregate query if possible. IMPORTANT: run the follow-up's query FIRST and skip optional drill-down for today's main insight if budget is tight. Do not defer to 'tomorrow' unless even one compact aggregate query cannot answer it." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
 ${followupBlock}
 
 ` : ""}## WRITING INSTRUCTIONS:
@@ -1250,7 +1250,7 @@ ${followupBlock}
 2. Don't be dramatic about absolute deltas under $200. Don't editorialise small swings.
 3. Use parent categories (food, home, personal, etc.) for summaries; when you name a parent, include ALL its children (never present a bare "(other)" bucket as the parent). Drill into children when it explains the "why".
 4. Explain WHY a number moved using the facts (or a run_finance_query) — cite the specific driver (a merchant, a trip tag, a subcategory). Do not hand-wave or guess.
-5. Produce a Chart.js 4.x config (max 24 data points per dataset). Colors: #81B29A (positive/green), #E07A5F (over-budget/red), #4A6FA5 (neutral/blue), #F2CC8F (income/yellow). Background transparent.
+5. Produce a compact Chart.js 4.x config (max 12 data points per dataset unless the archetype explicitly needs more). Keep chart JSON minimal: labels, datasets, type, and only essential options; omit decorative plugins/annotations/long labels. Colors: #81B29A (positive/green), #E07A5F (over-budget/red), #4A6FA5 (neutral/blue), #F2CC8F (income/yellow). Background transparent.
 
 ## ARCHETYPE-SPECIFIC GUIDANCE (operator-tuned; edit in the AI portal to change this):
 ${strategy?.prompt_guidance?.trim() || "(no specific guidance set — follow the general principles above)"}
@@ -1446,12 +1446,13 @@ async function generateInsightText(
   prompt: string,
 ): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; toolCalls: number }> {
   const useTools = INSIGHT_TOOLS_ENABLED && INSIGHT_OWNER != null;
-  // Budget raised (was 6 turns / 4 calls) so a tool-heavy main insight can't
-  // starve follow-up questions of query budget — the "follow-ups cap out"
-  // complaint (2026-07-08). Prompt caching (below) makes the extra turns cheap:
-  // each turn re-reads the cached prefix at 0.1x instead of re-billing it in full.
-  const MAX_TURNS = 10;
-  const MAX_TOOL_CALLS = 8;
+  // Keep the SQL loop intentionally small. Prompt caching makes repeated turns
+  // cheaper, but every tool call still adds non-cached tool-use/result context and
+  // output tokens. A 2026-07-11 large_transactions send used all 8 old calls and
+  // still cost ~$0.11 despite caching. Follow-ups get first claim on this budget;
+  // main insights should usually use 0-1 calls because facts are pre-computed.
+  const MAX_TURNS = 6;
+  const MAX_TOOL_CALLS = 4;
   // Prompt caching: the entire static prefix (tool definition + this prompt with
   // the day's facts/guidance) is marked cache_control ephemeral, so every tool-
   // loop round-trip re-reads it at 0.1x instead of re-billing the full context at
@@ -1519,7 +1520,7 @@ async function generateInsightText(
             resultText = `query error: ${error.message}`;
           } else {
             let s = JSON.stringify(qData ?? []);
-            if (s.length > 6000) s = s.slice(0, 6000) + " …(truncated; add LIMIT or aggregate)";
+            if (s.length > 2000) s = s.slice(0, 2000) + " …(truncated; use one aggregate/top-N query)";
             resultText = s;
           }
         } catch (e) {

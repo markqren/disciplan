@@ -10,6 +10,12 @@
 
 ### v2.10 — Jul 5, 2026
 
+#### v2.10.11
+<sub>Newsletter cost guardrails: tighter SQL tool budget, smaller tool results, compact chart JSON</sub>
+
+##### Fixes
+- **Newsletter SQL loops capped back down after a cached send still cost ~$0.11 (FEA-120)** — The 2026-07-11 `large_transactions` newsletter was useful (7/10) and did use Anthropic prompt caching (`cache_write_tokens=3,922`, `cache_read_tokens=19,610`), but still cost **$0.109** because it exhausted the SQL tool budget (`tool_calls=8`) while answering the prior forecast follow-up, adding non-cached tool-use/result context and 3,164 output tokens. The hard loop is now **4 SQL calls / 6 turns** (was 8/10), tool result payloads truncate at **2k chars** (was 6k), and the prompt no longer says the model has "ample budget." It now treats SQL as scarce: follow-ups first, main insight usually 0-1 calls, aggregate/top-N only, and archetypes with precomputed facts (`large_transactions`, `tag_recap`, `service_expiry`, `budget_pace`) should usually use zero custom queries. Chart instructions now require compact Chart.js JSON (max 12 points by default, omit decorative plugins/options) to reduce expensive output tokens. (~3,000 tokens)
+
 #### v2.10.10
 <sub>Newsletter `budget_pace` nets trip spend out of its projection deterministically (no more trip-inflated month-end estimates)</sub>
 
