@@ -134,6 +134,11 @@ export interface Features {
   // subtracts this to get baseline recurring spend — trips are lumpy one-offs that
   // must NOT be linearly projected — and reports the trip portion flat.
   tripAccruedMtdByCategory: Record<string, number>;
+  // Exact bounded-trip tag names contributing to tripAccruedMtdByCategory, keyed
+  // by raw category_id. This prevents the writer from guessing/querying by logged
+  // date to name the trip; the names come from the same service-period-overlap
+  // accrual path as the dollar amounts.
+  tripTagsByCategory: Record<string, string[]>;
   income: Record<string, number>;
   // income_breakdown: owner-scoped compensation breakdown (equity/cash/bonus/tax/
   // 401K) for the current year and prior 2 years, each through today's calendar
@@ -201,6 +206,9 @@ export interface FlashbackContributor {
   service_end: string;
   amount_usd: number;       // for context — "this $1,200 annual sub contributed $3.29 to today"
   tag: string | null;
+  transaction_group_id?: number | null;
+  net_group_amount_usd?: number | null;
+  linked_reimbursement?: { date: string; description: string; amount_usd: number } | null;
 }
 
 export interface FlashbackDayBreakdown {
@@ -216,6 +224,7 @@ export interface StreakStats {
   parent: string;
   current_gap_days: number;       // consecutive days ending today with no qualifying spend day
   last_spend_date: string | null; // most recent qualifying day; null = no spend in lookback window
+  last_spend_events: Array<{ date: string; category_id: string; description: string; amount_usd: number }>;
   ytd_longest_gap_days: number;
   trailing12_top3_gaps: Array<{ gap_days: number; ended_on: string | null }>;
   rank_in_trailing12: number;     // 1 = current gap is the longest in trailing 12mo

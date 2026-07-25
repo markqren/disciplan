@@ -131,8 +131,10 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
   const rollup = features.schema.parentRollup;
   const accruedByCat = features.accruedMtdByCategory || {};
   const tripByCat = features.tripAccruedMtdByCategory || {};
+  const tripTagsByCat = features.tripTagsByCategory || {};
   const accruedParents: Record<string, number> = {};
   const tripParents: Record<string, number> = {};
+  const tripTagParents: Record<string, string[]> = {};
   for (const [parent, children] of Object.entries(rollup)) {
     // Skip financial/other: they carry transfers (CC bill payments, loans, cash
     // withdrawals, Splitwise settlements) not consumption, so a $100 "budget" vs
@@ -143,6 +145,7 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
     if (s > 0) {
       accruedParents[parent] = s;
       tripParents[parent] = children.reduce((acc, c) => acc + (tripByCat[c] || 0), 0);
+      tripTagParents[parent] = [...new Set(children.flatMap(c => tripTagsByCat[c] || []))].sort();
     }
   }
   if (Object.keys(accruedParents).length === 0) return ineligible("budget_pace", "no_accrued_mtd_data");
@@ -167,17 +170,20 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
     const baselineProjected = baseline / Math.max(fractionElapsed, 0.05);
     const projected = baselineProjected + trip;
     const expected = budget * fractionElapsed;
+    const contextOnly = BUDGET_PACE_CONTEXT_ONLY_PARENTS.has(parent);
     return {
       parent,
       accrued_mtd: Math.round(accrued),
       trip_accrued_mtd: Math.round(trip),
+      trip_tags: tripTagParents[parent] || [],
       baseline_accrued_mtd: Math.round(baseline),
       booked_full_month: Math.round(bookedFullMonth[parent] || 0),
       budget,
       expected: Math.round(expected),
-      projected_month_end: budget > 0 ? Math.round(projected) : null,
+      context_only: contextOnly,
+      projected_month_end: budget > 0 && !contextOnly ? Math.round(projected) : null,
       // projected (baseline extrapolated + trip flat) vs budget.
-      pct_of_budget: budget > 0 ? Number((projected / budget).toFixed(2)) : null,
+      pct_of_budget: budget > 0 && !contextOnly ? Number((projected / budget).toFixed(2)) : null,
     };
   }).filter(r => r.budget > 0);
 
@@ -199,7 +205,7 @@ function buildBudgetPace(features: Features, strategy: Strategy): Candidate {
       categories: rows,
       over_pace: overPace,
       under_pace: underPace,
-      hint: "projected_month_end is ALREADY correct — report it as-is; do NOT recompute it. It = baseline_accrued_mtd (recurring spend, trips removed) extrapolated linearly PLUS trip_accrued_mtd added flat. For fixed costs (rent) the baseline projection equals the true monthly total, not a tripled lump sum. Trips are already netted out deterministically, so you do NOT need to run a query to separate them: when trip_accrued_mtd > 0, say so explicitly (e.g. 'restaurant projects to $X baseline; a further $Y this month was trip spend, not projected'). NEVER linearly project raw logged/cash amounts or booked_full_month (Mark's repeated feedback). booked_full_month is the income-statement full-month accrual, reference only.",
+      hint: "Use facts directly; do NOT query to name trips. trip_tags contains the exact bounded trip tags from the same service-period-overlap rows as trip_accrued_mtd (e.g. rainier), so never infer trip names from logged-date transactions. For context_only parents such as home, projected_month_end and pct_of_budget are null by design: DO NOT create or mention a month-end projection, and DO NOT flag them as over pace. For non-context parents, projected_month_end is already correct: baseline_accrued_mtd (trips removed) extrapolated linearly PLUS trip_accrued_mtd added flat. NEVER linearly project raw logged/cash amounts or booked_full_month.",
     },
     summary: `${overPace.length} over pace, ${underPace.length} under pace, day ${day}/${daysInMonth}`,
   };
@@ -663,6 +669,10 @@ function buildIncomeBreakdown(features: Features, strategy: Strategy): Candidate
 // Shared by category_trend and category_anomaly so neither surfaces a bogus
 // "Other Category Spike" or a financial-transfer wobble as if it were spending.
 const NON_CONSUMPTION_PARENTS = new Set(["financial", "other"]);
+// budget_pace should not manufacture month-end projections for fixed/contractual
+// parents. Mark has repeatedly flagged home/rent projection as misleading even
+// when mathematically accrual-correct; show accrued/full-month context only.
+const BUDGET_PACE_CONTEXT_ONLY_PARENTS = new Set(["home"]);
 
 function buildCategoryTrend(features: Features, strategy: Strategy): Candidate {
   const minMonths       = (strategy.requires?.min_months as number | undefined) ?? 6;
@@ -1063,6 +1073,10 @@ function buildOnThisDayFlashback(features: Features, strategy: Strategy): Candid
           service_window: `${c.service_start} → ${c.service_end}`,
           original_amount_usd: Number(c.amount_usd.toFixed(2)),
           tag: c.tag,
+          net_group_amount_usd: c.net_group_amount_usd != null ? Number(c.net_group_amount_usd.toFixed(2)) : null,
+          linked_reimbursement: c.linked_reimbursement
+            ? { date: c.linked_reimbursement.date, description: c.linked_reimbursement.description, amount_usd: Number(c.linked_reimbursement.amount_usd.toFixed(2)) }
+            : null,
         })),
         active_tag: anchor.active_tag,
       },
@@ -1071,17 +1085,17 @@ function buildOnThisDayFlashback(features: Features, strategy: Strategy): Candid
         .reverse()                           // chronological order on x-axis
         .map(b => ({ year: b.year, total_daily_cost: Number(b.total_daily_cost.toFixed(2)) })),
       today_total_daily_cost: todayBreakdown ? Number(todayBreakdown.total_daily_cost.toFixed(2)) : null,
-      hint: "ACCRUAL FLASHBACK — these numbers are *daily-cost slices*, not what cleared on this calendar day. A $1,200 annual sub contributes $3.29/day; an active trip contributes its daily-burn. Lead with what your life cost on this day in {anchor_year} and call out 1-2 specific top_contributors. If active_tag is set, mention you were on that trip. Tone: warm, observational, no budget critique.",
+      hint: "ACCRUAL FLASHBACK — these numbers are *daily-cost slices*, not what cleared on this calendar day. A $1,200 annual sub contributes $3.29/day; an active trip contributes its daily-burn. Lead with what your life cost on this day in {anchor_year} and call out 1-2 specific top_contributors. If linked_reimbursement is set on a contributor, mention the net effect (expense + reimbursement). If net_group_amount_usd is set, prefer the linked group net over the gross original_amount_usd. If active_tag is set, mention you were on that trip. Tone: warm, observational, no budget critique.",
     },
     summary: `flashback ${mmdd}: ${usable.length}y of data; anchor ${anchor.year} = $${anchor.total_daily_cost.toFixed(2)}/d`,
   };
 }
 
 // ── Archetype: streak_or_gap ────────────────────────────────────────────────
-// Surfaces the longest current spending gap among commitment-based parents
-// (restaurant, groceries, clothes, tech, short-window entertainment). A "spend
-// day" is one with at least one short-window txn (service_days ≤ 7) — this
-// excludes always-on subs that would silently reset the streak counter.
+// Surfaces the longest current spending gap among commitment-based parents.
+// A "spend day" is any logged date with a positive expense in ANY child category
+// under that parent (e.g. personal includes clothes + tech). Gap math is precomputed
+// in fetchStreakStats — do NOT re-derive with SQL on a different basis.
 
 function buildStreakOrGap(features: Features, strategy: Strategy): Candidate {
   const minGap         = (strategy.requires?.min_current_gap_days as number | undefined) ?? 7;
@@ -1116,6 +1130,7 @@ function buildStreakOrGap(features: Features, strategy: Strategy): Candidate {
       focus_parent: focus.parent,
       current_gap_days: focus.current_gap_days,
       last_spend_date: focus.last_spend_date,
+      last_spend_events: focus.last_spend_events,
       rank_in_trailing12: focus.rank_in_trailing12,
       ytd_longest_gap_days: focus.ytd_longest_gap_days,
       trailing12_top3_gaps: focus.trailing12_top3_gaps,
@@ -1124,7 +1139,7 @@ function buildStreakOrGap(features: Features, strategy: Strategy): Candidate {
         current_gap_days: p.current_gap_days,
         rank_in_trailing12: p.rank_in_trailing12,
       })),
-      hint: "Lead with the gap framing: 'X days without {focus_parent} spend' and the rank ('your 2nd-longest in trailing 12mo'). Mention last_spend_date as the anchor. If trailing12_top3_gaps shows a notably longer prior gap, name it for context (e.g. 'last gap this long was during the Japan trip'). NO budget critique — gaps aren't inherently good or bad. Keep it observational.",
+      hint: "Lead with the gap framing: 'X days without {focus_parent} spend' at the PARENT level (all child categories included). current_gap_days and last_spend_date are authoritative — do NOT contradict them with a SQL query on a different basis (e.g. service_start or a single child category). When last_spend_events is present, cite the most recent event(s) by logged date (category + description). If the gap is long but last_spend_events shows a recent clothes/tech purchase, that IS personal — the gap should already reflect it; do not claim a longer gap. NO budget critique — gaps aren't inherently good or bad.",
     },
     summary: `${focus.parent} ${focus.current_gap_days}d gap (#${focus.rank_in_trailing12} in trailing 12mo)`,
   };

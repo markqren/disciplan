@@ -1,4 +1,92 @@
+const IS_WEEK_PREF_KEY="dc_is_week_window";
+let _isChartModes={};
+let _isChartModeYear=null;
+
+function getISWeekPref(){
+  try{
+    const p=JSON.parse(localStorage.getItem(IS_WEEK_PREF_KEY)||"{}");
+    const before=Number.isFinite(+p.before)?+p.before:8,after=Number.isFinite(+p.after)?+p.after:8;
+    return{before:Math.max(0,Math.min(26,Math.round(before))),after:Math.max(0,Math.min(26,Math.round(after)))};
+  }catch(e){return{before:8,after:8}}
+}
+function saveISWeekPref(before,after){
+  const p={before:Math.max(0,Math.min(26,parseInt(before,10)||0)),after:Math.max(0,Math.min(26,parseInt(after,10)||0))};
+  try{localStorage.setItem(IS_WEEK_PREF_KEY,JSON.stringify(p))}catch(e){}
+  return p;
+}
+function getISWeekRange(year,monthIndex){
+  const pref=getISWeekPref();
+  const monthStart=`${year}-${String(monthIndex+1).padStart(2,"0")}-01`;
+  const monthEnd=endOfMonth(monthStart);
+  const firstMonthWeek=startOfWeek(monthStart),lastMonthWeek=startOfWeek(monthEnd);
+  const start=shiftDate(firstMonthWeek,-pref.before*7),end=shiftDate(lastMonthWeek,pref.after*7+6);
+  const weeks=[];
+  for(let d=start;d<=end;d=shiftDate(d,7))weeks.push({start:d,end:shiftDate(d,6),selected:overlapDays(d,shiftDate(d,6),monthStart,monthEnd)>0});
+  return{...pref,start,end,monthStart,monthEnd,weeks,monthIndex,year};
+}
+async function fetchISWeekly(range){
+  const key=`is_week_${range.start}_${range.end}_${state.view}`;
+  let rows=dcGet(key);
+  if(!rows){rows=await scopedRPC("get_income_statement_weekly",{p_start_date:range.start,p_end_date:range.end});dcSet(key,rows)}
+  const byWeek={};range.weeks.forEach(w=>byWeek[w.start]={});
+  for(const r of rows){
+    const wk=(r.week_start||"").slice(0,10);
+    if(byWeek[wk])byWeek[wk][r.category_id]=parseFloat(r.amount)||0;
+  }
+  for(const c of Object.values(byWeek))for(const[p,ch]of Object.entries(SUB_MAP)){
+    let v=c[p]||0;for(const child of ch)v+=c[child]||0;c["_p_"+p]=v;
+  }
+  return range.weeks.map(w=>{
+    const c=byWeek[w.start],totE=PARENT_CATS.reduce((s,cat)=>s+(c["_p_"+cat]??c[cat]??0),0),inc=Math.abs(c.income||0),inv=c.investment||0;
+    return{...w,c,totE,inc,inv,net:inc-totE};
+  });
+}
+function defaultISChartMonth(year){
+  const now=new Date();
+  return year===now.getFullYear()?now.getMonth():11;
+}
+function renderISTimeChart(card,opts){
+  const st=_isChartModes[opts.key]||(_isChartModes[opts.key]={mode:"monthly",month:defaultISChartMonth(state.year)});
+  const token=(card._isRenderToken||0)+1;card._isRenderToken=token;card.innerHTML="";
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",flexWrap:"wrap",marginBottom:"8px"}});
+  const title=h("h3",{style:{margin:0}},st.mode==="weekly"?`Weekly ${opts.title} · ${MONTH_NAMES[st.month]} ${state.year}`:`Monthly ${opts.title}`);
+  const controls=h("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}});
+  const rerender=()=>renderISTimeChart(card,opts);
+  const openWeekly=month=>{st.mode="weekly";st.month=month;rerender()};
+  if(st.mode==="monthly"){
+    controls.append(h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.28)"}},window.matchMedia("(pointer:fine)").matches?"Double-click a month":""));
+    const monthSel=h("select",{class:"inp",style:{width:"auto",padding:"5px 8px",fontSize:"11px"}});
+    ML.forEach((m,i)=>{const o=h("option",{value:i},m);o.selected=i===st.month;monthSel.append(o)});
+    controls.append(monthSel,h("button",{class:"pg-btn",onClick:()=>openWeekly(+monthSel.value)},"Weekly"));
+  }else{
+    const pref=getISWeekPref();
+    const before=h("input",{class:"inp",type:"number",min:"0",max:"26",value:pref.before,style:{width:"54px",padding:"5px",fontSize:"11px"},title:"Weeks before"});
+    const after=h("input",{class:"inp",type:"number",min:"0",max:"26",value:pref.after,style:{width:"54px",padding:"5px",fontSize:"11px"},title:"Weeks after"});
+    const apply=()=>{saveISWeekPref(before.value,after.value);rerender()};
+    before.addEventListener("change",apply);after.addEventListener("change",apply);
+    controls.append(h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)"}},"Weeks before"),before,h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)"}},"after"),after,h("button",{class:"pg-btn",onClick:()=>{st.mode="monthly";rerender()}},"Monthly"));
+  }
+  hdr.append(title,controls);card.append(hdr);
+  const chartWrap=h("div",{class:"chrt",style:{height:opts.height||"230px",position:"relative"}});
+  chartWrap.append(h("canvas",{id:opts.id}));card.append(chartWrap);
+  if(st.mode==="monthly"){
+    setTimeout(()=>{if(card._isRenderToken!==token)return;makeChart(opts.id,opts.monthlyConfig());bindChartDoubleClick(opts.id,i=>openWeekly(i))},50);
+    return;
+  }
+  chartWrap.insertAdjacentHTML("beforeend",'<div class="is-week-loading" style="position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,0.35);font-size:12px">Loading weekly view...</div>');
+  const range=getISWeekRange(state.year,st.month);
+  Promise.resolve(opts.weeklyData(range)).then(data=>{
+    if(card._isRenderToken!==token||!card.isConnected)return;
+    chartWrap.querySelector(".is-week-loading")?.remove();
+    makeChart(opts.id,opts.weeklyConfig(data,range));
+  }).catch(err=>{
+    if(card._isRenderToken!==token||!card.isConnected)return;
+    chartWrap.innerHTML=`<div style="display:grid;place-items:center;height:100%;color:var(--r);font-size:12px">Weekly view failed: ${err.message}</div>`;
+  });
+}
+
 async function renderIS(el){
+  if(_isChartModeYear!==state.year){_isChartModeYear=state.year;_isChartModes={}}
   el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px">
     <div><h2>Income Statement</h2><p class="sub">Accrual basis · USD · ${state.year} · Live from Supabase</p></div>
     <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
@@ -53,14 +141,14 @@ async function renderIS(el){
 
     // Cash flow chart
     const cfCard=h("div",{class:"cd"});
-    cfCard.innerHTML=`<h3>Monthly Cash Flow</h3><div class="chrt"><canvas id="cfChart"></canvas></div>`;
     body.append(cfCard);
-    setTimeout(()=>makeChart("cfChart",{type:"bar",data:{labels:mData.map(m=>m.month),datasets:[
-      {label:"Income",data:mData.map(m=>Math.round(m.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderRadius:4},
-      {label:"Expenses",data:mData.map(m=>[Math.round(m.net),Math.round(m.inc)]),backgroundColor:"rgba(224,122,95,0.75)",borderRadius:4},
-      {label:"Net Savings",data:mData.map(m=>Math.round(m.net)),backgroundColor:"rgba(129,178,154,0.7)",borderRadius:4},
-      {label:"Savings Rate",data:mData.map((m,i)=>i<completedMonths?(m.inc>0?Math.round(m.net/m.inc*100):0):null),type:"line",borderColor:"#F2CC8F",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:3,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
-    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11},usePointStyle:true,pointStyleWidth:16}},tooltip:{callbacks:{label:ctx=>{const d=ctx.dataset.label;if(d==="Savings Rate")return d+": "+(ctx.parsed.y==null?"\u2014":Math.round(ctx.parsed.y)+"%");if(d==="Expenses"){const r=ctx.raw;return d+": "+fmtT(Array.isArray(r)?r[1]-r[0]:r);}return d+": "+fmtT(ctx.parsed.y);}}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.6)",callback:v=>String(v).padStart(3)+"%",font:{size:10,family:"'JetBrains Mono',monospace"}},grid:{display:false}}}}}),50);
+    const cashFlowConfig=(rows,weekly)=>({type:"bar",data:{labels:rows.map(m=>weekly?weekLabel(m.start):m.month),datasets:[
+      {label:"Income",data:rows.map(m=>Math.round(m.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?2:0),borderRadius:4},
+      {label:"Expenses",data:rows.map(m=>[Math.round(m.net),Math.round(m.inc)]),backgroundColor:"rgba(224,122,95,0.75)",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?2:0),borderRadius:4},
+      {label:"Net Savings",data:rows.map(m=>Math.round(m.net)),backgroundColor:"rgba(129,178,154,0.7)",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?2:0),borderRadius:4},
+      {label:"Savings Rate",data:rows.map((m,i)=>(weekly?m.end<today():i<completedMonths)?(m.inc>0?Math.round(m.net/m.inc*100):0):null),type:"line",borderColor:"#F2CC8F",backgroundColor:"rgba(242,204,143,0.1)",borderWidth:2,pointRadius:weekly?1:3,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
+    ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11},usePointStyle:true,pointStyleWidth:16}},tooltip:{callbacks:{title:items=>weekly&&items.length?`${fmtD(rows[items[0].dataIndex].start)}–${fmtD(rows[items[0].dataIndex].end)}`:items[0]?.label,label:ctx=>{const d=ctx.dataset.label;if(d==="Savings Rate")return d+": "+(ctx.parsed.y==null?"\u2014":Math.round(ctx.parsed.y)+"%");if(d==="Expenses"){const r=ctx.raw;return d+": "+fmtT(Array.isArray(r)?r[1]-r[0]:r);}return d+": "+fmtT(ctx.parsed.y);}}}},scales:{x:{ticks:{color:ctx=>weekly&&rows[ctx.index]?.selected?"rgba(242,204,143,0.9)":"rgba(255,255,255,0.3)",maxTicksLimit:weekly?(window.innerWidth<=700?7:14):12},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.6)",callback:v=>String(v).padStart(3)+"%",font:{size:10,family:"'JetBrains Mono',monospace"}},grid:{display:false}}}}});
+    renderISTimeChart(cfCard,{key:"cashflow",title:"Cash Flow",id:"cfChart",height:"270px",monthlyConfig:()=>cashFlowConfig(mData,false),weeklyData:fetchISWeekly,weeklyConfig:rows=>cashFlowConfig(rows,true)});
 
     // Stacked expense chart + pie in 2-col
     const row2=h("div",{class:"g2"});
@@ -71,9 +159,13 @@ async function renderIS(el){
     row2.append(pieCard);
 
     const stackCard=h("div",{class:"cd"});
-    stackCard.innerHTML=`<h3>Monthly Expense Stack</h3><div class="chrt" style="height:230px"><canvas id="stackChart"></canvas></div>`;
     row2.append(stackCard);
     body.append(row2);
+    const stackConfig=(rows,weekly)=>{
+      const stackCats=expCats.filter(c=>rows.some(m=>(m.c["_p_"+c]??m.c[c]??0)>0));
+      return{type:"bar",data:{labels:rows.map(m=>weekly?weekLabel(m.start):m.month),datasets:stackCats.map(c=>({label:c,data:rows.map(m=>Math.round(m.c["_p_"+c]??m.c[c]??0)),backgroundColor:CC[c]||"#666",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?1:0)}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>weekly&&items.length?`${fmtD(rows[items[0].dataIndex].start)}–${fmtD(rows[items[0].dataIndex].end)}`:items[0]?.label}}},scales:{x:{stacked:true,ticks:{color:ctx=>weekly&&rows[ctx.index]?.selected?"rgba(242,204,143,0.9)":"rgba(255,255,255,0.3)",maxTicksLimit:weekly?(window.innerWidth<=700?7:14):12},grid:{color:"rgba(255,255,255,0.04)"}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}};
+    };
+    renderISTimeChart(stackCard,{key:"expenses",title:"Expense Stack",id:"stackChart",height:"230px",monthlyConfig:()=>stackConfig(mData,false),weeklyData:fetchISWeekly,weeklyConfig:rows=>stackConfig(rows,true)});
 
     // Budget vs Actual chart (single-year only)
     const bgt=state.year!=="all"?getBudgetTargets(state.year):null;
@@ -92,9 +184,6 @@ async function renderIS(el){
 
     setTimeout(()=>{
       makeChart("pieChart",{type:"doughnut",data:{labels:catTotals.map(c=>c.name),datasets:[{data:catTotals.map(c=>c.val),backgroundColor:catTotals.map(c=>CC[c.name]||"#666"),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:"50%",plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.4)",font:{size:10},padding:8}}}}});
-
-      const stackCats=expCats.filter(c=>mData.some(m=>(m.c["_p_"+c]??m.c[c]??0)>0));
-      makeChart("stackChart",{type:"bar",data:{labels:mData.map(m=>m.month),datasets:stackCats.map(c=>({label:c,data:mData.map(m=>Math.round(m.c["_p_"+c]??m.c[c]??0)),backgroundColor:CC[c]||"#666"}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{stacked:true,ticks:{color:"rgba(255,255,255,0.3)"},grid:{color:"rgba(255,255,255,0.04)"}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}});
     },100);
 
     // Detail table with subcategories
@@ -404,12 +493,18 @@ async function renderIS(el){
 
         // Chart: monthly bar + YTD running total line
         const chartWrap=h("div",{style:{marginBottom:"14px"}});
-        chartWrap.innerHTML=`<div class="chrt" style="height:200px"><canvas id="taxChart"></canvas></div>`;
         taxBody.append(chartWrap);
-        setTimeout(()=>makeChart("taxChart",{type:"bar",data:{labels:ML,datasets:[
-          {label:"Monthly",data:Object.values(moAmts).map(v=>Math.round(v)),backgroundColor:"rgba(224,122,95,0.65)",borderRadius:4},
-          {label:"YTD Total",data:ytdLine,type:"line",borderColor:"#F2CC8F",backgroundColor:"transparent",borderWidth:2,pointRadius:2,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
-        ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:10},usePointStyle:true,pointStyleWidth:12}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.5)",callback:v=>fmtN(v)},grid:{display:false}}}}}),100);
+        const taxConfig=(rows,weekly)=>({type:"bar",data:{labels:weekly?rows.map(w=>weekLabel(w.start)):ML,datasets:[
+          {label:weekly?"Weekly":"Monthly",data:weekly?rows.map(w=>Math.round(w.amount)):Object.values(moAmts).map(v=>Math.round(v)),backgroundColor:"rgba(224,122,95,0.65)",borderColor:weekly?rows.map(w=>w.selected?"rgba(242,204,143,0.9)":"transparent"):"transparent",borderWidth:weekly?rows.map(w=>w.selected?2:0):0,borderRadius:4},
+          {label:"YTD Total",data:weekly?rows.map(w=>Math.round(w.ytd)):ytdLine,type:"line",borderColor:"#F2CC8F",backgroundColor:"transparent",borderWidth:2,pointRadius:weekly?1:2,pointBackgroundColor:"#F2CC8F",fill:false,yAxisID:"y1"}
+        ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:10},usePointStyle:true,pointStyleWidth:12}},tooltip:{callbacks:{title:items=>weekly&&items.length?`${fmtD(rows[items[0].dataIndex].start)}–${fmtD(rows[items[0].dataIndex].end)}`:items[0]?.label}}},scales:{x:{ticks:{color:ctx=>weekly&&rows[ctx.index]?.selected?"rgba(242,204,143,0.9)":"rgba(255,255,255,0.3)",maxTicksLimit:weekly?(window.innerWidth<=700?7:14):12},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}},y1:{position:"right",ticks:{color:"rgba(242,204,143,0.5)",callback:v=>fmtN(v)},grid:{display:false}}}}});
+        const taxWeeklyData=range=>range.weeks.map(w=>{
+          const amount=allTax.reduce((s,t)=>s+(t.date>=w.start&&t.date<=w.end?parseFloat(t.amount_usd)||0:0),0);
+          const y=+(w.end.slice(0,4)),yearStart=`${y}-01-01`;
+          const ytd=allTax.reduce((s,t)=>s+(t.date>=yearStart&&t.date<=w.end?parseFloat(t.amount_usd)||0:0),0);
+          return{...w,amount,ytd};
+        });
+        renderISTimeChart(chartWrap,{key:"tax",title:"Tax Payments",id:"taxChart",height:"200px",monthlyConfig:()=>taxConfig([],false),weeklyData:taxWeeklyData,weeklyConfig:rows=>taxConfig(rows,true)});
 
         // Drilldown table (date desc)
         const tWrap=h("div",{style:{overflowX:"auto"}});

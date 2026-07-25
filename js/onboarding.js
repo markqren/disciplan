@@ -178,6 +178,9 @@ async function renderOnboarding(el){
         for(const r of csv.rows)candidates.push(transformCSVRow(r,fp,pt,tag,candidates.length));
       }
       if(!candidates.length)throw new Error("No data rows found in the selected file(s).");
+      const checklistTask=profile.isCheckingAccount?"debit":"credit";
+      const checklistOwner=writeOwner();
+      candidates.forEach(c=>{c._monthlyChecklistTask=checklistTask;c._monthlyChecklistOwner=checklistOwner});
       // De-duplicate rows that repeat across overlapping file ranges before any
       // DB checks, so overlapping downloads do not double-import.
       let intraDupes=0;

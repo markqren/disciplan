@@ -7,6 +7,11 @@ function startOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.get
 function endOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth()+1,0).toISOString().slice(0,10)}
 function addDays(d,n){return new Date(new Date(d+"T00:00:00").getTime()+(n-1)*864e5).toISOString().slice(0,10)}
 function daysInclusive(start,end){const a=(start||"").split("-").map(Number),b=(end||"").split("-").map(Number);if(a.length!==3||b.length!==3||a.some(isNaN)||b.some(isNaN))return 1;return Math.max(1,Math.round((Date.UTC(b[0],b[1]-1,b[2])-Date.UTC(a[0],a[1]-1,a[2]))/864e5)+1)}
+function shiftDate(d,n){const p=(d||"").split("-").map(Number);if(p.length!==3||p.some(isNaN))return d;const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]+n));return dt.toISOString().slice(0,10)}
+function startOfWeek(d){const p=(d||"").split("-").map(Number);if(p.length!==3||p.some(isNaN))return d;const day=new Date(Date.UTC(p[0],p[1]-1,p[2])).getUTCDay();return shiftDate(d,-((day+6)%7))}
+function endOfWeek(d){return shiftDate(startOfWeek(d),6)}
+function overlapDays(aStart,aEnd,bStart,bEnd){const s=aStart>bStart?aStart:bStart,e=aEnd<bEnd?aEnd:bEnd;if(!s||!e||s>e)return 0;const a=s.split("-").map(Number),b=e.split("-").map(Number);return Math.round((Date.UTC(b[0],b[1]-1,b[2])-Date.UTC(a[0],a[1]-1,a[2]))/864e5)+1}
+function weekLabel(d){const p=(d||"").split("-").map(Number);return p.length===3&&!p.some(isNaN)?`${p[1]}/${p[2]}`:d}
 function getDefStart(cat,d){const r=ACCRUAL_D[cat];if(!r||!d)return d;if(r==="month")return startOfMonth(d);return d}
 function getDefEnd(cat,ss){const r=ACCRUAL_D[cat];if(!r||!ss)return ss;if(r==="month")return endOfMonth(ss);return addDays(ss,r)}
 function getQuarterlyVestingPeriod(d){const dt=new Date(d+"T00:00:00"),y=dt.getFullYear(),m=dt.getMonth();if(m<3)return{start:`${y}-01-01`,end:`${y}-03-31`};if(m<6)return{start:`${y}-04-01`,end:`${y}-06-30`};if(m<9)return{start:`${y}-07-01`,end:`${y}-09-30`};return{start:`${y}-10-01`,end:`${y}-12-31`}}
@@ -222,12 +227,13 @@ async function showSubHistory(merchantKey, sampleDesc){
 // Tax transaction detection (FEA-73)
 const TAX_RE=/\btax\b|\birs\b|\bftb\b/i;
 async function fetchAllTaxTxns(){
-  let rows=dcGet('tax_all');
+  const key='tax_all_'+state.view;
+  let rows=dcGet(key);
   if(!rows){
     // Fetch all financial-category transactions; filter client-side by description
-    rows=await sb("transactions?category_id=eq.financial&order=date.asc&select=id,date,description,amount_usd,payment_type");
+    rows=await sb("transactions?category_id=eq.financial&order=date.asc&select=id,date,description,amount_usd,payment_type"+ownerQS());
     rows=rows.filter(t=>TAX_RE.test(t.description));
-    dcSet('tax_all',rows);
+    dcSet(key,rows);
   }
   return rows;
 }
@@ -350,6 +356,7 @@ function showUndo(label,undoFn){
 
 // Chart instances to destroy before recreating
 let charts={};
-function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=document.getElementById(id);if(!ctx)return;charts[id]=new Chart(ctx,cfg)}
+function makeChart(id,cfg){if(charts[id]){charts[id].destroy()}const ctx=document.getElementById(id);if(!ctx)return null;charts[id]=new Chart(ctx,cfg);return charts[id]}
+function bindChartDoubleClick(id,onIndex){const canvas=document.getElementById(id);if(!canvas)return;canvas.ondblclick=e=>{const chart=charts[id];if(!chart)return;const pts=chart.getElementsAtEventForMode(e,"index",{intersect:false},true);if(pts.length)onIndex(pts[0].index,e)}}
 
 // Payslip PDF parsing (FEA-45)

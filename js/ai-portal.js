@@ -57,7 +57,7 @@ async function renderAIPortal(el){
 
 async function renderNewsletter(el){
   const[allLogs,ctxRows,strategies,pending,selections,followups]=await Promise.all([
-    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,tool_calls,cost_usd,feedback_rating,feedback_comment,feedback_received_at,parse_fallback,dry_run"),
+    sb("insight_log?order=created_at.desc&limit=100&select=id,created_at,insight_type,subject,model_used,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,tool_calls,tool_query_summaries,parse_failure_snippet,cost_usd,feedback_rating,feedback_comment,feedback_received_at,parse_fallback,dry_run"),
     sb("insight_context?select=id,content,updated_at"),
     sb("insight_strategy?order=priority_weight.desc&select=*"),
     sb("principles_pending?status=eq.pending&order=created_at.desc&select=*"),
@@ -237,6 +237,9 @@ async function renderNewsletter(el){
       if(hasComment){
         const comment=h("div",{style:{marginTop:"6px",paddingLeft:"225px",fontSize:"12px",color:"rgba(255,255,255,0.55)",fontStyle:"italic",lineHeight:"1.5"}},"\u201C"+l.feedback_comment.trim()+"\u201D");
         row.append(comment);
+      }
+      if(l.parse_fallback&&l.parse_failure_snippet){
+        row.append(h("div",{style:{marginTop:"6px",paddingLeft:"225px",fontSize:"11px",color:"rgba(224,122,95,0.85)",fontFamily:"var(--mono)",lineHeight:"1.4"}}, "parse fail: "+l.parse_failure_snippet));
       }
       logTbl.append(row);
     }

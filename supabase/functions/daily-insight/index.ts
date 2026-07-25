@@ -90,6 +90,16 @@ const INSIGHT_HOUSEHOLD_ID = Deno.env.get("INSIGHT_HOUSEHOLD_ID")
   : null;
 // Ad-hoc query tool (Anthropic tool use). On by default; set INSIGHT_TOOLS=0 to disable.
 const INSIGHT_TOOLS_ENABLED = ((Deno.env.get("INSIGHT_TOOLS") ?? "1").trim()) !== "0";
+// Archetypes with fully precomputed facts: disable SQL tools for the main insight
+// unless Mark has pending follow-up questions that need queries.
+const ZERO_TOOL_MAIN_ARCHETYPES = new Set([
+  "budget_pace",
+  "tag_recap",
+  "service_expiry",
+  "on_this_day_flashback",
+  "large_transactions",
+  "accrual_quality_alert",
+]);
 
 // Apply the recipient owner/household filter to any PostgREST query builder.
 // Kept generic so it can wrap a query at any point in the chain (eq returns the
@@ -357,6 +367,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     expenses,
     accruedMtdByCategory: accruedMtdByCategory.total,
     tripAccruedMtdByCategory: accruedMtdByCategory.trip,
+    tripTagsByCategory: accruedMtdByCategory.tripTags,
     income,
     incomeComposition,
     largeTxns: (largeTxns || []) as Transaction[],
@@ -645,14 +656,74 @@ async function fetchAllPages<T>(
 // single calendar day — every txn whose service period overlaps that day
 // contributes its `daily_cost` (already DB-computed). This is the Disciplan
 // answer to "what did your life cost on date D".
+type ReimbursementCredit = { date: string; description: string; amount_usd: number };
+
+const REIMBURSEMENT_STOP_WORDS = new Set(["restaurant", "reimbursed", "payment", "transfer", "splitwise"]);
+
+function reimbursementMatchTokens(expenseDescription: string): string[] {
+  return expenseDescription
+    .replace(/[^a-zA-Z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 4 && !REIMBURSEMENT_STOP_WORDS.has(t.toLowerCase()));
+}
+
+function findLinkedReimbursement(
+  expenseDescription: string,
+  credits: ReimbursementCredit[],
+): ReimbursementCredit | null {
+  const tokens = reimbursementMatchTokens(expenseDescription);
+  for (const token of tokens) {
+    const hit = credits.find(c => c.description.toLowerCase().includes(token.toLowerCase()));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function fetchReimbursementCredits(supabase: SupabaseClient): Promise<ReimbursementCredit[]> {
+  const rows = await fetchAllPages<{ date: string; description: string | null; amount_usd: number }>(() =>
+    scopeToOwner(supabase
+      .from("transactions")
+      .select("date,description,amount_usd")
+      .lt("amount_usd", 0)
+      .ilike("description", "Reimbursed%"))
+  );
+  return rows.map(r => ({
+    date: r.date,
+    description: r.description || "",
+    amount_usd: Number(r.amount_usd) || 0,
+  }));
+}
+
+async function fetchGroupNetAmounts(
+  supabase: SupabaseClient,
+  groupIds: number[],
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  if (groupIds.length === 0) return out;
+  const rows = await fetchAllPages<{ transaction_group_id: number; amount_usd: number }>(() =>
+    scopeToOwner(supabase
+      .from("transactions")
+      .select("transaction_group_id,amount_usd")
+      .in("transaction_group_id", groupIds))
+  );
+  for (const r of rows) {
+    const gid = Number(r.transaction_group_id);
+    if (!gid) continue;
+    out.set(gid, (out.get(gid) || 0) + (Number(r.amount_usd) || 0));
+  }
+  return out;
+}
+
 async function computeDailyAccrualForDate(
   supabase: SupabaseClient,
   dateIso: string,
+  reimbursementCredits: ReimbursementCredit[],
 ): Promise<FlashbackDayBreakdown | null> {
   // service_start <= date AND service_end >= date.
   const { data, error } = await scopeToOwner(supabase
     .from("transactions")
-    .select("description,category_id,daily_cost,amount_usd,service_start,service_end,tag"))
+    .select("description,category_id,daily_cost,amount_usd,service_start,service_end,tag,transaction_group_id"))
     .lte("service_start", dateIso)
     .gte("service_end", dateIso)
     .not("category_id", "in", "(income,investment,adjustment)")
@@ -663,7 +734,7 @@ async function computeDailyAccrualForDate(
     console.error(`computeDailyAccrualForDate ${dateIso} error:`, error);
     return null;
   }
-  const rows = (data || []) as Array<{ description: string | null; category_id: string; daily_cost: number; amount_usd: number; service_start: string; service_end: string; tag: string | null }>;
+  const rows = (data || []) as Array<{ description: string | null; category_id: string; daily_cost: number; amount_usd: number; service_start: string; service_end: string; tag: string | null; transaction_group_id: number | null }>;
   if (rows.length === 0) {
     return {
       year: parseInt(dateIso.slice(0, 4), 10),
@@ -674,6 +745,8 @@ async function computeDailyAccrualForDate(
       active_tag: null,
     };
   }
+  const groupIds = [...new Set(rows.map(r => r.transaction_group_id).filter((id): id is number => id != null))];
+  const groupNets = await fetchGroupNetAmounts(supabase, groupIds);
   const total_daily_cost = rows.reduce((s, r) => s + (Number(r.daily_cost) || 0), 0);
   // Parent breakdown is computed in archetype builder (it has the schema). Here
   // we ship raw category_id totals; archetypes.ts rolls them up.
@@ -681,15 +754,22 @@ async function computeDailyAccrualForDate(
   for (const r of rows) {
     cat_breakdown[r.category_id] = (cat_breakdown[r.category_id] || 0) + (Number(r.daily_cost) || 0);
   }
-  const top_contributors: FlashbackContributor[] = rows.slice(0, 5).map(r => ({
-    description: r.description || "",
-    category_id: r.category_id,
-    daily_cost: Number(r.daily_cost) || 0,
-    service_start: r.service_start,
-    service_end: r.service_end,
-    amount_usd: Number(r.amount_usd) || 0,
-    tag: r.tag,
-  }));
+  const top_contributors: FlashbackContributor[] = rows.slice(0, 5).map(r => {
+    const gid = r.transaction_group_id;
+    const linked = findLinkedReimbursement(r.description || "", reimbursementCredits);
+    return {
+      description: r.description || "",
+      category_id: r.category_id,
+      daily_cost: Number(r.daily_cost) || 0,
+      service_start: r.service_start,
+      service_end: r.service_end,
+      amount_usd: Number(r.amount_usd) || 0,
+      tag: r.tag,
+      transaction_group_id: gid,
+      net_group_amount_usd: gid != null ? groupNets.get(gid) ?? null : null,
+      linked_reimbursement: linked,
+    };
+  });
   const active_tag = rows.find(r => r.tag)?.tag ?? null;
   return {
     year: parseInt(dateIso.slice(0, 4), 10),
@@ -705,12 +785,13 @@ async function fetchFlashbackByYear(supabase: SupabaseClient, today: string): Pr
   const [yyyy, mm, dd] = today.split("-");
   const cy = parseInt(yyyy, 10);
   const out: Record<string, FlashbackDayBreakdown> = {};
+  const reimbursementCredits = await fetchReimbursementCredits(supabase);
   // Up to 9 prior years + today (current year). The archetype reads today's
   // bucket separately to drive the "today's daily cost vs same day in prior
   // years" comparison; eligibility checks only look at prior years.
   const years: number[] = [cy];
   for (let i = 1; i <= 9; i++) years.push(cy - i);
-  const results = await Promise.all(years.map(y => computeDailyAccrualForDate(supabase, `${y}-${mm}-${dd}`)));
+  const results = await Promise.all(years.map(y => computeDailyAccrualForDate(supabase, `${y}-${mm}-${dd}`, reimbursementCredits)));
   for (let i = 0; i < years.length; i++) {
     const r = results[i];
     if (r && r.total_daily_cost > 0) {
@@ -721,10 +802,11 @@ async function fetchFlashbackByYear(supabase: SupabaseClient, today: string): Pr
 }
 
 // streak_or_gap fetcher.
-// Restricted to commitment-based parents where streaks are narratively meaningful
-// (no always-on subscriptions). For each parent: pull all txn dates in trailing
-// 12mo where service_days <= 7 (i.e. a "spend event", not an always-on accrual);
-// compute current gap (today − last_spend_date) and rank against historical gaps.
+// For each parent: distinct LOGGED spend dates across ALL child categories
+// (personal includes clothes/tech). Do NOT filter on service_days — a one-off
+// purchase with a long accrual window (e.g. clothing spread over 365 days) still
+// counts as a spend event on its logged date; distinct dates already prevent
+// rent-style multi-day double counting.
 const STREAK_PARENTS = ["food", "personal", "entertainment", "transportation"];
 
 async function fetchStreakStats(
@@ -739,17 +821,13 @@ async function fetchStreakStats(
     const childIds = schema.parentRollup[parent];
     if (!childIds || childIds.length === 0) continue;
 
-    // Pull DISTINCT dates only — keeps the row count small even for high-frequency
-    // parents. We coerce service_days <= 7 OR null to exclude always-on subs that
-    // would mark every day as a "spend day" and drown the streak signal.
-    const rows = await fetchAllPages<{ date: string }>(() =>
+    const rows = await fetchAllPages<{ date: string; category_id: string; description: string | null; amount_usd: number }>(() =>
       scopeToOwner(supabase
         .from("transactions")
-        .select("date")
+        .select("date,category_id,description,amount_usd")
         .gte("date", trailingStart)
         .lte("date", today)
         .in("category_id", childIds)
-        .or("service_days.is.null,service_days.lte.7")
         .gt("amount_usd", 0))
         .order("date", { ascending: false })
     );
@@ -757,29 +835,41 @@ async function fetchStreakStats(
     const dateSet = new Set(rows.map(r => r.date));
     const sortedDates = Array.from(dateSet).sort();   // ascending
 
-    // Current gap: days from most-recent spend date to today, exclusive of that date.
     const lastSpendDate = sortedDates.length > 0 ? sortedDates[sortedDates.length - 1] : null;
     const todayMs = Date.parse(today);
     const current_gap_days = lastSpendDate
       ? Math.round((todayMs - Date.parse(lastSpendDate)) / 86_400_000)
       : Math.round((todayMs - Date.parse(trailingStart)) / 86_400_000);
 
-    // Historical gaps in the trailing-12mo window. Walk consecutive dates.
+    const byDate = new Map<string, { date: string; category_id: string; description: string; amount_usd: number }>();
+    for (const r of rows) {
+      const cur = byDate.get(r.date);
+      const amt = Number(r.amount_usd) || 0;
+      if (!cur || amt > cur.amount_usd) {
+        byDate.set(r.date, {
+          date: r.date,
+          category_id: r.category_id,
+          description: r.description || "",
+          amount_usd: amt,
+        });
+      }
+    }
+    const last_spend_events = Array.from(byDate.values())
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 3);
+
     const gaps: Array<{ gap_days: number; ended_on: string | null }> = [];
     if (sortedDates.length === 0) {
       gaps.push({ gap_days: current_gap_days, ended_on: null });
     } else {
-      // Leading gap from window start to first spend date.
       const firstMs = Date.parse(sortedDates[0]);
       const leading = Math.round((firstMs - Date.parse(trailingStart)) / 86_400_000);
       if (leading > 0) gaps.push({ gap_days: leading, ended_on: sortedDates[0] });
-      // Internal gaps.
       for (let i = 1; i < sortedDates.length; i++) {
         const g = Math.round((Date.parse(sortedDates[i]) - Date.parse(sortedDates[i - 1])) / 86_400_000);
-        if (g > 1) gaps.push({ gap_days: g - 1, ended_on: sortedDates[i] });   // -1 because consecutive days have gap=0
+        if (g > 1) gaps.push({ gap_days: g - 1, ended_on: sortedDates[i] });
       }
     }
-    // Add the in-flight current gap at the head, marked as "ongoing" via ended_on=null.
     const allGaps = [...gaps, { gap_days: current_gap_days, ended_on: null as string | null }];
     allGaps.sort((a, b) => b.gap_days - a.gap_days);
     const trailing12_top3_gaps = allGaps.slice(0, 3);
@@ -790,6 +880,7 @@ async function fetchStreakStats(
       parent,
       current_gap_days,
       last_spend_date: lastSpendDate,
+      last_spend_events,
       ytd_longest_gap_days,
       trailing12_top3_gaps,
       rank_in_trailing12: rank_in_trailing12 || allGaps.length,
@@ -980,7 +1071,7 @@ async function fetchMonthlyBurnInputs(
 async function fetchAccruedMtdByCategory(
   supabase: SupabaseClient,
   today: string,
-): Promise<{ total: Record<string, number>; trip: Record<string, number> }> {
+): Promise<{ total: Record<string, number>; trip: Record<string, number>; tripTags: Record<string, string[]> }> {
   const monthStart = `${today.slice(0, 7)}-01`;
   const [rows, tagsRaw] = await Promise.all([
     fetchAllPages<{ daily_cost: number; service_start: string; service_end: string; category_id: string; tag: string | null }>(() =>
@@ -1019,15 +1110,22 @@ async function fetchAccruedMtdByCategory(
 
   const total: Record<string, number> = {};
   const trip: Record<string, number> = {};
+  const tripTagSets: Record<string, Set<string>> = {};
   for (const r of rows) {
     const dc = Number(r.daily_cost) || 0;
     if (dc <= 0) continue;
     const acc = dc * overlapDays(r.service_start, r.service_end, monthStart, today);
     if (acc <= 0) continue;
     total[r.category_id] = (total[r.category_id] || 0) + acc;
-    if (r.tag && tripNames.has(r.tag)) trip[r.category_id] = (trip[r.category_id] || 0) + acc;
+    if (r.tag && tripNames.has(r.tag)) {
+      trip[r.category_id] = (trip[r.category_id] || 0) + acc;
+      (tripTagSets[r.category_id] ||= new Set()).add(r.tag);
+    }
   }
-  return { total, trip };
+  const tripTags = Object.fromEntries(
+    Object.entries(tripTagSets).map(([cat, names]) => [cat, [...names].sort()]),
+  );
+  return { total, trip, tripTags };
 }
 
 // cashback_roi fetcher.
@@ -1199,7 +1297,7 @@ async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, St
 }
 
 // ── LLM prompt: the LLM only writes the narrative + chart for the chosen archetype.
-function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, strategy?: Strategy, followups: FollowupRow[] = []): string {
+function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, strategy?: Strategy, followups: FollowupRow[] = [], offerTools = true): string {
   const recentTypes = history.slice(0, 7).map(h => `${h.created_at.slice(0, 10)}: ${h.insight_type}${h.feedback_rating != null ? ` (rated ${h.feedback_rating}/10)` : ""}`).join("\n");
   const recentFeedback = history
     .filter(h => h.feedback_rating != null && h.feedback_comment)
@@ -1209,6 +1307,7 @@ function buildArchetypePrompt(today: string, principles: string, history: Insigh
   const followupBlock = followups
     .map((f, i) => `${i + 1}. [asked ${f.created_at.slice(0, 10)} re: "${f.source_insight_type ?? "an insight"}"] ${f.question}`)
     .join("\n");
+  const toolsInPrompt = INSIGHT_TOOLS_ENABLED && offerTools;
 
   return `You are writing a daily personal-finance newsletter for Mark, who tracks 12,000+ transactions on an accrual basis since 2017 (now in 2026).
 
@@ -1231,7 +1330,7 @@ ${JSON.stringify(selected.facts, null, 2)}
     ? "CASH / EVENT basis — these figures are single-day events keyed to the transaction (logged) date. Describe them as events on their date."
     : "ACCRUAL basis — figures spread each transaction's cost as daily_cost across its [service_start, service_end] period. Describe spend as accrued over its service period, NOT as a one-day event on the logged date."}
 
-${INSIGHT_TOOLS_ENABLED ? `## DATA TOOL AVAILABLE:
+${toolsInPrompt ? `## DATA TOOL AVAILABLE:
 You may call run_finance_query only when the facts above genuinely lack a number needed for the final answer. The TOTAL hard budget for main insight + follow-up is 4 SQL calls; the main insight should usually use 0-1 calls, and many archetypes (e.g. large_transactions, tag_recap, service_expiry, budget_pace) should use 0 because their facts are already pre-computed. It runs a single read-only SELECT over the recipient's OWN data. Query the views UNQUALIFIED (no schema prefix):
   transactions(id, date, description, category_id, amount_usd, daily_cost, service_start, service_end, service_days, payment_type, credit, tag, transaction_group_id, is_subscription)
   tags(name, start_date, end_date, tag_type, notes)
@@ -1240,9 +1339,10 @@ You may call run_finance_query only when the facts above genuinely lack a number
   balance_snapshots(id, account_id, snapshot_date, balance_usd, notes)
   cashback_redemptions(id, date, item, payment_type, cashback_type, dollar_value, redemption_rate)
 Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. EFFICIENCY: make each query count — NEVER query for a number already present in the facts above, and fold everything you need into one aggregate query whenever possible. Return only aggregate/top-N rows (LIMIT 5-10), not raw ledgers. Derive simple arithmetic (projections, ratios, sums of provided figures) yourself instead of querying. Follow-up questions below share the same strict budget, so spend there first and skip optional main-insight drill-downs.
+SQL DISCIPLINE: decide the basis BEFORE writing SQL. For ACCRUAL insights, filter by service-period overlap (service_start <= range_end AND service_end >= range_start) and compute overlap with daily_cost; do NOT use logged date to decide whether something belongs in a month. Logged date is only for CASH / EVENT-basis insights. Ask the narrow direct question you need. Example: if you need the tag behind an already-provided $875 transportation trip accrual, query the service-overlapping transportation rows ordered by accrued overlap and select tag/description; do NOT scan all July-logged trip transactions and infer a tag. If a fact provides trip_tags, use it and do not query at all.
 
 ` : ""}${followups.length ? `## MARK'S FOLLOW-UP QUESTIONS (answer these — highest priority):
-Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${INSIGHT_TOOLS_ENABLED ? "Use run_finance_query only when exact numbers are needed and unavailable from the facts/history; combine all follow-up needs into one aggregate query if possible. IMPORTANT: run the follow-up's query FIRST and skip optional drill-down for today's main insight if budget is tight. Do not defer to 'tomorrow' unless even one compact aggregate query cannot answer it." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
+Mark replied to a recent newsletter asking the question(s) below. Answer them directly in the "followup_response" field, separate from today's main insight. ${toolsInPrompt ? "Use run_finance_query only when exact numbers are needed and unavailable from the facts/history; combine all follow-up needs into one aggregate query if possible. IMPORTANT: run the follow-up's query FIRST and skip optional drill-down for today's main insight if budget is tight. Do not defer to 'tomorrow' unless even one compact aggregate query cannot answer it." : "Use the facts above; if you genuinely can't answer from them, say what you'd need."} Be specific and concise (1-2 sentences per question, lead with the number). Respect the accrual conventions above. If an item is really just a comment with nothing to answer, acknowledge it in one short line. Questions:
 ${followupBlock}
 
 ` : ""}## WRITING INSTRUCTIONS:
@@ -1441,11 +1541,27 @@ const RUN_QUERY_TOOL = {
 // in a bounded loop. Returns the final text plus token + tool-call accounting.
 // Tools are only offered when enabled AND an owner is pinned (the query function
 // requires an owner); otherwise this is a single plain call.
+type ToolQuerySummary = {
+  n: number;
+  status: "ok" | "error" | "budget_exhausted";
+  sql: string;
+  rows?: number;
+  result_chars?: number;
+  truncated?: boolean;
+  error?: string;
+};
+
+function compactSqlForLog(sql: string): string {
+  return sql.replace(/\s+/g, " ").trim().slice(0, 700);
+}
+
 async function generateInsightText(
   supabase: SupabaseClient,
   prompt: string,
-): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; toolCalls: number }> {
-  const useTools = INSIGHT_TOOLS_ENABLED && INSIGHT_OWNER != null;
+  opts?: { enableTools?: boolean },
+): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number; toolCalls: number; toolQuerySummaries: ToolQuerySummary[] }> {
+  const enableTools = opts?.enableTools !== false;
+  const useTools = INSIGHT_TOOLS_ENABLED && INSIGHT_OWNER != null && enableTools;
   // Keep the SQL loop intentionally small. Prompt caching makes repeated turns
   // cheaper, but every tool call still adds non-cached tool-use/result context and
   // output tokens. A 2026-07-11 large_transactions send used all 8 old calls and
@@ -1466,6 +1582,7 @@ async function generateInsightText(
     content: [{ type: "text", text: prompt, cache_control: { type: "ephemeral" } }],
   }];
   let inputTokens = 0, outputTokens = 0, cacheWriteTokens = 0, cacheReadTokens = 0, toolCalls = 0, lastText = "";
+  const toolQuerySummaries: ToolQuerySummary[] = [];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
     // deno-lint-ignore no-explicit-any
@@ -1510,21 +1627,34 @@ async function generateInsightText(
       }
       toolCalls++;
       let resultText: string;
+      const sql = String(block.input?.sql ?? "");
+      const summaryBase = { n: toolCalls, sql: compactSqlForLog(sql) };
       if (toolCalls > MAX_TOOL_CALLS) {
         resultText = "Query budget exhausted — write the final insight JSON now using the data you already have.";
+        toolQuerySummaries.push({ ...summaryBase, status: "budget_exhausted" });
       } else {
-        const sql = String(block.input?.sql ?? "");
         try {
           const { data: qData, error } = await supabase.rpc("insight_run_query", { p_sql: sql, p_owner: INSIGHT_OWNER });
           if (error) {
             resultText = `query error: ${error.message}`;
+            toolQuerySummaries.push({ ...summaryBase, status: "error", error: error.message.slice(0, 500) });
           } else {
             let s = JSON.stringify(qData ?? []);
-            if (s.length > 2000) s = s.slice(0, 2000) + " …(truncated; use one aggregate/top-N query)";
+            const resultChars = s.length;
+            const truncated = s.length > 2000;
+            if (truncated) s = s.slice(0, 2000) + " …(truncated; use one aggregate/top-N query)";
             resultText = s;
+            toolQuerySummaries.push({
+              ...summaryBase,
+              status: "ok",
+              rows: Array.isArray(qData) ? qData.length : undefined,
+              result_chars: resultChars,
+              truncated,
+            });
           }
         } catch (e) {
           resultText = `query error: ${(e as Error).message}`;
+          toolQuerySummaries.push({ ...summaryBase, status: "error", error: (e as Error).message.slice(0, 500) });
         }
       }
       toolResults.push({ type: "tool_result", tool_use_id: block.id, content: resultText });
@@ -1532,7 +1662,7 @@ async function generateInsightText(
     messages.push({ role: "user", content: toolResults });
   }
 
-  return { text: lastText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, toolCalls };
+  return { text: lastText, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens, toolCalls, toolQuerySummaries };
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -1659,6 +1789,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
   let cacheWriteTokens = 0;
   let cacheReadTokens = 0;
   let toolCalls = 0;
+  let toolQuerySummaries: ToolQuerySummary[] = [];
+  let parseFailureSnippet: string | null = null;
   let insight: InsightResponse | null = null;
 
   if (chosen) {
@@ -1666,16 +1798,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // The DB-driven per-archetype guidance and (optionally) the read-only query
     // tool are handed to the writer here.
     const chosenStrategy = strategies.get(chosen.insight_type);
-    const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy, pendingFollowups);
-    const gen = await generateInsightText(supabase, prompt);
+    const offerTools = pendingFollowups.length > 0 || !ZERO_TOOL_MAIN_ARCHETYPES.has(chosen.insight_type);
+    const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy, pendingFollowups, offerTools);
+    const gen = await generateInsightText(supabase, prompt, { enableTools: offerTools });
     inputTokens      += gen.inputTokens;
     outputTokens     += gen.outputTokens;
     cacheWriteTokens += gen.cacheWriteTokens;
     cacheReadTokens  += gen.cacheReadTokens;
     toolCalls         = gen.toolCalls;
+    toolQuerySummaries = gen.toolQuerySummaries;
     insight = tryParseInsight(gen.text);
 
     if (!insight) {
+      parseFailureSnippet = (gen.text || "").replace(/\s+/g, " ").trim().slice(0, 800);
       // One strict JSON-only retry (no tools) — mirrors the prior fallback path.
       console.warn("First parse failed; retrying with stricter JSON-only reminder.");
       const retryRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -1704,6 +1839,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
         cacheWriteTokens += retryData.usage?.cache_creation_input_tokens || 0;
         cacheReadTokens  += retryData.usage?.cache_read_input_tokens     || 0;
         insight = tryParseInsight(retryData.content?.[0]?.text || "");
+        if (!insight) {
+          const retryText = retryData.content?.[0]?.text || "";
+          parseFailureSnippet = (retryText || parseFailureSnippet || "").replace(/\s+/g, " ").trim().slice(0, 800);
+        }
       } else {
         console.error("Retry HTTP error:", retryRes.status, await retryRes.text());
       }
@@ -1842,6 +1981,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       cache_read_tokens:   cacheReadTokens,
       cache_write_tokens:  cacheWriteTokens,
       tool_calls:          toolCalls,
+      tool_query_summaries: toolQuerySummaries,
+      parse_failure_snippet: parseFallback ? parseFailureSnippet : null,
       cost_usd:            costUsd,
       parse_fallback:      parseFallback,
       dry_run:             dryRun,

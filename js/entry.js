@@ -254,6 +254,9 @@ function renderEntry(el){
 
       // Transform rows
       const candidates=csv.rows.map((r,i)=>transformCSVRow(r,profile,pt,tag,i));
+      const checklistTask=profile.isCheckingAccount?"debit":"credit";
+      const checklistOwner=writeOwner();
+      candidates.forEach(c=>{c._monthlyChecklistTask=checklistTask;c._monthlyChecklistOwner=checklistOwner});
       impCandidates=candidates;
 
       // AI categorization
@@ -408,6 +411,7 @@ function renderEntry(el){
       txns.forEach(c=>{
         c._status="pending";
         c._isDuplicate=false;
+        c._monthlyChecklistOwner=writeOwner();
         c._rawDescription=c.description;
         c.currency="USD";c.fx_rate=1;
         c.original_amount=c.amount_usd;

@@ -567,6 +567,10 @@ async function commitImport(candidates){
     }catch(e){console.error("AT&T connectivity auto-link:",e)}
   }
   valid.forEach(c=>c._status="committed");
+  const checklistCandidate=valid.find(c=>c._monthlyChecklistTask&&c._monthlyChecklistOwner);
+  if(checklistCandidate&&typeof completeMonthlyChecklistFromImport==="function"){
+    await completeMonthlyChecklistFromImport(checklistCandidate._monthlyChecklistTask,checklistCandidate._monthlyChecklistOwner);
+  }
   return{
     count:valid.length+splitCount,
     imported:valid,
@@ -1243,6 +1247,10 @@ async function commitPayslipImport(candidates){
         console.log(`Connectivity: no AT&T charge found for ${monthStart}–${monthEnd}, left unlinked`);
       }
     }catch(e){console.error("Connectivity auto-link:",e)}
+  }
+  const checklistOwner=valid.find(c=>c._monthlyChecklistOwner)?._monthlyChecklistOwner;
+  if(checklistOwner&&typeof completeMonthlyChecklistFromImport==="function"){
+    await completeMonthlyChecklistFromImport("paychecks",checklistOwner);
   }
   return{
     count:valid.length,
