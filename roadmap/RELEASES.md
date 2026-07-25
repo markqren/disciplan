@@ -11,6 +11,12 @@
 
 ### v2.11 — Jul 24, 2026
 
+#### v2.11.1
+<sub>Shilpa monthly finance checklist with service-period-aware paycheck gaps</sub>
+
+##### Features
+- **Shilpa monthly finance checklist (FEA-124)** — Shilpa's person-view now carries a cross-device monthly checklist on every tab for paychecks, account balances, credit-card imports, and debit/checking imports. The paycheck task derives expected semi-monthly Pronto service periods (1–15 and 16–month-end), shows each matured missing period as a nested subtask, and stays incomplete until every expected salary period exists; a period only becomes due seven days after its service end, so Jul 16–31 does not appear before Aug 7. Successful classified CSV commits auto-complete their matching item, while the balance item opens a resumable account-by-account flow where each active account can be updated or skipped: updates upsert the day's net-worth snapshot and create an idempotent `adjustment` transaction only when the live ledger differs. Progress is stored per owner/month in the existing `preferences` table, so each new month starts clean without a migration. The fixed module collapses when complete and moves above bottom action overlays on mobile. (~15,000 tokens)
+
 #### v2.11.0
 <sub>Owner-scoped card-payment funding and accurate household Splitwise shares</sub>
 
@@ -27,9 +33,6 @@
 - **`budget_pace` encodes Jul 17 feedback (FEA-121)** — Facts now include exact **`trip_tags`** from the same service-period-overlap accrual path as `trip_accrued_mtd` (so July shows `rainier`, never log-date Portugal ’26). **`home` is `context_only`**: no `projected_month_end` / over-pace flag. SQL tools are **off** for precomputed archetypes unless a follow-up needs a query. `insight_log` gains **`tool_query_summaries`** (compact SQL audit) and **`parse_failure_snippet`** on parse-fallback days. (~8,000 tokens)
 - **`streak_or_gap` parent-level gaps fixed (FEA-122)** — Removed the `service_days ≤ 7` filter that dropped long-accrual clothing purchases (e.g. FIFA shirt, 365-day service → false 59-day personal gap). Gaps now use distinct **logged dates** across all child categories; facts include **`last_spend_events`**. (~3,500 tokens)
 - **`on_this_day_flashback` reimbursement context (FEA-123)** — Top contributors carry **`linked_reimbursement`** (token match against owner `Reimbursed%` credits) and **`net_group_amount_usd`** when `transaction_group_id` is set. (~3,000 tokens)
-
-##### Features
-- **Shilpa monthly finance checklist (FEA-124)** — Shilpa's person-view now carries a cross-device monthly checklist on every tab for paychecks, account balances, credit-card imports, and debit/checking imports. Successful payslip and classified CSV commits auto-complete their item with a brief highlight; every item also supports a manual override. The balance item opens a resumable account-by-account flow where each active account can be updated or skipped: updates upsert the day's net-worth snapshot and create an idempotent `adjustment` transaction only when the live ledger differs. Progress is stored per owner/month in the existing `preferences` table, so each new month starts clean without a migration. The fixed module collapses when complete and moves above bottom action overlays on mobile. (~12,000 tokens)
 
 #### v2.10.11
 <sub>Newsletter cost guardrails: tighter SQL tool budget, smaller tool results, compact chart JSON</sub>

@@ -5,6 +5,7 @@ const MONTHLY_CHECKLIST_TASKS=[
   {id:"credit",label:"Update credit card transactions"},
   {id:"debit",label:"Update debit card transactions"}
 ];
+const PAYCHECK_GRACE_DAYS=7;
 
 let monthlyChecklistData=null;
 let monthlyChecklistExists=false;
@@ -84,6 +85,54 @@ function monthlyChecklistProgress(){
   return{done,total:MONTHLY_CHECKLIST_TASKS.length};
 }
 
+function expectedPaycheckPeriods(firstServiceStart,asOf=today()){
+  if(!firstServiceStart)return[];
+  const periods=[];
+  let cursor=firstServiceStart.slice(0,7)+"-01";
+  while(cursor<=asOf){
+    const monthEnd=endOfMonth(cursor);
+    const candidates=[
+      {start:cursor,end:cursor.slice(0,8)+"15"},
+      {start:cursor.slice(0,8)+"16",end:monthEnd}
+    ];
+    candidates.forEach(p=>{
+      if(p.start>=firstServiceStart&&shiftDate(p.end,PAYCHECK_GRACE_DAYS)<=asOf)periods.push(p);
+    });
+    cursor=shiftDate(monthEnd,1);
+  }
+  return periods;
+}
+
+function paycheckPeriodLabel(period){
+  const monthNames=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const startParts=period.start.split("-").map(Number);
+  const endDay=Number(period.end.slice(8,10));
+  return `${monthNames[startParts[1]-1]} ${startParts[2]}\u2013${endDay}`;
+}
+
+async function fetchMissingPaycheckPeriods(){
+  const rows=await sb(`transactions?owner=eq.${MONTHLY_CHECKLIST_OWNER}&category_id=eq.income&description=eq.${encodeURIComponent("Pronto Income")}&select=service_start,service_end&order=service_start.asc${householdQS()}`);
+  const valid=(rows||[]).filter(r=>r.service_start&&r.service_end);
+  if(!valid.length)return{known:false,missing:[],expected:[]};
+  const expected=expectedPaycheckPeriods(valid[0].service_start);
+  const present=new Set(valid.map(r=>`${r.service_start}|${r.service_end}`));
+  return{known:true,expected,missing:expected.filter(p=>!present.has(`${p.start}|${p.end}`))};
+}
+
+async function syncMonthlyPaycheckTask(status){
+  if(!status.known)return false;
+  const done=status.missing.length===0;
+  let changed=false;
+  await withMonthlyChecklistLock(MONTHLY_CHECKLIST_OWNER,async()=>{
+    await loadMonthlyChecklist();
+    if(monthlyChecklistData.tasks.paychecks===done)return;
+    monthlyChecklistData.tasks.paychecks=done;
+    await saveMonthlyChecklist();
+    changed=true;
+  });
+  return changed;
+}
+
 async function setMonthlyChecklistTask(taskId,done,{owner=MONTHLY_CHECKLIST_OWNER,automatic=false}={}){
   if(owner!==MONTHLY_CHECKLIST_OWNER||!MONTHLY_CHECKLIST_TASKS.some(t=>t.id===taskId))return;
   let changed=false;
@@ -110,6 +159,15 @@ async function setMonthlyChecklistTask(taskId,done,{owner=MONTHLY_CHECKLIST_OWNE
 async function completeMonthlyChecklistFromImport(taskId,owner){
   if(owner!==MONTHLY_CHECKLIST_OWNER)return;
   try{
+    if(taskId==="paychecks"){
+      const status=await fetchMissingPaycheckPeriods();
+      const changed=await syncMonthlyPaycheckTask(status);
+      if(monthlyChecklistVisible()){
+        await renderMonthlyChecklist();
+        if(changed&&status.known&&!status.missing.length)celebrateMonthlyChecklistTask(taskId);
+      }
+      return;
+    }
     await setMonthlyChecklistTask(taskId,true,{owner,automatic:true});
   }catch(e){
     console.warn("Monthly checklist update failed:",e);
@@ -140,6 +198,14 @@ async function renderMonthlyChecklist(){
     return;
   }
   if(token!==monthlyChecklistRenderToken||!monthlyChecklistVisible())return;
+  let paycheckStatus={known:false,missing:[],expected:[]};
+  try{
+    paycheckStatus=await fetchMissingPaycheckPeriods();
+    await syncMonthlyPaycheckTask(paycheckStatus);
+  }catch(e){
+    console.warn("Paycheck period check failed:",e);
+  }
+  if(token!==monthlyChecklistRenderToken||!monthlyChecklistVisible())return;
 
   const progress=monthlyChecklistProgress();
   monthlyChecklistCollapsed=progress.done===progress.total;
@@ -163,7 +229,8 @@ async function renderMonthlyChecklist(){
     const label=h("label",{class:"monthly-checklist-label"});
     const cb=h("input",{type:"checkbox",class:"monthly-checklist-checkbox"});
     cb.checked=!!monthlyChecklistData.tasks[task.id];
-    cb.disabled=!canWriteOwner(MONTHLY_CHECKLIST_OWNER);
+    cb.disabled=!canWriteOwner(MONTHLY_CHECKLIST_OWNER)||(task.id==="paychecks"&&paycheckStatus.known);
+    if(task.id==="paychecks"&&paycheckStatus.known)cb.title="Completed automatically from imported Pronto income periods";
     cb.addEventListener("change",async()=>{
       cb.disabled=true;
       try{await setMonthlyChecklistTask(task.id,cb.checked)}
@@ -171,6 +238,16 @@ async function renderMonthlyChecklist(){
     });
     label.append(cb,h("span",{},task.label));
     row.append(label);
+    if(task.id==="paychecks"&&paycheckStatus.missing.length){
+      row.classList.add("has-subtasks");
+      const subtasks=h("div",{class:"monthly-checklist-subtasks"});
+      paycheckStatus.missing.forEach(period=>{
+        const sub=h("div",{class:"monthly-checklist-subtask"});
+        sub.append(h("span",{class:"monthly-checklist-subtask-dot"}),h("span",{},`${paycheckPeriodLabel(period)} missing`));
+        subtasks.append(sub);
+      });
+      row.append(subtasks);
+    }
     if(task.id==="balances"&&!monthlyChecklistData.tasks.balances){
       const accountCount=Object.keys(monthlyChecklistData.balance_accounts||{}).length;
       const btn=h("button",{class:"monthly-checklist-action",type:"button",onClick:()=>openMonthlyBalanceWizard()},accountCount?"Continue":"Update");

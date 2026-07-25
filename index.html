@@ -138,10 +138,14 @@ select.inp{cursor:pointer;appearance:auto}
 .monthly-checklist-body{padding:6px 10px 9px}
 .monthly-checklist.collapsed .monthly-checklist-body{display:none}
 .monthly-checklist-row{min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 4px;border-bottom:1px solid rgba(255,255,255,0.04);border-radius:7px;transition:background 0.3s ease,opacity 0.3s ease}
+.monthly-checklist-row.has-subtasks{flex-wrap:wrap;align-items:flex-start}
 .monthly-checklist-row:last-child{border-bottom:0}
 .monthly-checklist-row.just-completed{background:color-mix(in srgb,var(--accent) 18%,transparent);animation:checklistFade 2.4s ease-out}
 .monthly-checklist-label{display:flex;align-items:center;gap:8px;font-size:11px;color:rgba(255,255,255,0.72);cursor:pointer;line-height:1.3}
 .monthly-checklist-checkbox{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;flex:0 0 auto}
+.monthly-checklist-subtasks{width:100%;display:flex;flex-direction:column;gap:4px;margin:-1px 0 3px 23px}
+.monthly-checklist-subtask{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--y);line-height:1.35}
+.monthly-checklist-subtask-dot{width:7px;height:7px;border:1px solid color-mix(in srgb,var(--y) 65%,transparent);border-radius:50%;flex:0 0 auto}
 .monthly-checklist-action{padding:3px 7px;border-radius:5px;border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--accent);font:600 9px var(--sans);cursor:pointer}
 .monthly-checklist-action:disabled,.monthly-checklist-checkbox:disabled{opacity:0.35;cursor:default}
 @keyframes checklistFade{0%{background:color-mix(in srgb,var(--accent) 35%,transparent);transform:scale(1.015)}100%{background:transparent;transform:scale(1)}}
@@ -169,7 +173,7 @@ select.inp{cursor:pointer;appearance:auto}
 <div class="hdr">
   <div style="display:flex;align-items:baseline;gap:10px">
     <span class="logo">the disciplan</span>
-    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.11.0</span>
+    <span style="font-size:10px;color:rgba(255,255,255,0.2);font-family:var(--mono);letter-spacing:0.02em">v2.11.1</span>
     <span class="dbst" id="dbStatus" style="color:var(--y)">● connecting...</span>
     <button class="ref-btn" id="refreshBtn" title="Refresh data">↻</button>
     <button class="ref-btn" id="historyBtn" title="History &amp; undo" onclick="openHistoryPanel()">↺</button>
