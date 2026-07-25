@@ -9,6 +9,15 @@
 
 ## 🚀 Releases
 
+### v2.11 — Jul 24, 2026
+
+#### v2.11.0
+<sub>Owner-scoped card-payment funding and accurate household Splitwise shares</sub>
+
+##### Fixes
+- **Credit-card imports require the actual funding account** — Detected card payments no longer synthesize their cash-side leg on Mark's Chase Chequing account. Each payment requires an owner-scoped checking/savings selection before save, and duplicate detection now checks that selected account within the active owner's ledger. (~4,500 tokens)
+- **Multi-person Splitwise mirrors use the household member's share** — Group reimbursements still credit the payer for the aggregate amount owed by all participants, while the cross-household proposal now mirrors only the selected member's Splitwise row. The reimbursement preview surfaces that amount and blocks creation when the member cannot be matched, preventing aggregate trip reimbursements from being charged entirely to Shilpa. (~6,500 tokens)
+
 ### v2.10 — Jul 5, 2026
 
 #### v2.10.11

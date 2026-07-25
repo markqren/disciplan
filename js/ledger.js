@@ -192,10 +192,10 @@ function openLedgerEditModal(txn,onSaved){
     // Person selection
     const personWrap=h("div",{style:{marginBottom:"14px"}});
     personWrap.append(h("label",{class:"lbl"},"Person"));
-    const personSelect=h("select",{class:"inp",onChange:()=>{selectedPerson=personSelect.value;if(personSelect.value)personFree.value="";updateRPreview()}});
+    const personSelect=h("select",{class:"inp",onChange:()=>{selectedPerson=personSelect.value;swMappedPersonId=null;if(personSelect.value)personFree.value="";updateRPreview()}});
     personSelect.append(h("option",{value:""},"Loading..."));
     personSelect.disabled=true;
-    const personFree=h("input",{class:"inp",type:"text",placeholder:"or type a name",style:{marginTop:"6px"},onInput:()=>{selectedPerson=personFree.value.trim();if(selectedPerson)personSelect.value="";updateRPreview()}});
+    const personFree=h("input",{class:"inp",type:"text",placeholder:"or type a name",style:{marginTop:"6px"},onInput:()=>{selectedPerson=personFree.value.trim();swMappedPersonId=null;if(selectedPerson)personSelect.value="";updateRPreview()}});
     personWrap.append(personSelect,personFree);
     modal.append(personWrap);
 
@@ -216,7 +216,7 @@ function openLedgerEditModal(txn,onSaved){
     // the trip (equal by default, each share editable). "No group" falls back to a
     // single-friend direct split. An opt-in checkbox controls whether the matching
     // Splitwise expense is created.
-    let swFriends=[],swGroups=[],swMe=null,swLoaded=false,swLastLookup=null,swLookupTimer=null;
+    let swFriends=[],swGroups=[],swMe=null,swLoaded=false,swLastLookup=null,swLookupTimer=null,swMappedPersonId=null;
     let swMemberRows=[]; // [{member, cb, amt}] for the currently selected group
     let swYouLine=null;  // "you owe / others owe / total" summary in group mode
     const swWrap=h("div",{style:{marginBottom:"14px",padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:"8px",display:"none"}});
@@ -291,6 +291,21 @@ function openLedgerEditModal(txn,onSaved){
       if(swGroupActive())return computeGroupSplit().othersOwed;
       return manualMode?Math.round(manualAmt*100)/100:Math.round(txn.amount_usd*selectedRatio*100)/100;
     }
+    // A group reimbursement credits the payer for every participant's debt, but
+    // the household mirror must charge only the selected household member's row.
+    function currentHouseholdShareAmt(){
+      if(!swGroupActive())return currentReimbAmt();
+      const personKey=selectedPerson.trim().toLowerCase();
+      const personFirst=personKey.split(/\s+/)[0];
+      const row=swMemberRows.find(r=>{
+        if(swMappedPersonId&&Number(r.member.id)===swMappedPersonId)return true;
+        const memberKey=(r.member.name||"").trim().toLowerCase();
+        return memberKey===personKey||memberKey.split(/\s+/)[0]===personFirst;
+      });
+      if(!row||!row.cb.checked)return null;
+      const amount=Math.round((parseFloat(row.amt.value)||0)*100)/100;
+      return amount>0?amount:null;
+    }
     function onSwGroupChange(){
       const g=selectedSwGroup();
       if(g){
@@ -330,13 +345,15 @@ function openLedgerEditModal(txn,onSaved){
     }
     function refreshSwSection(){
       const label=selectedPerson.trim();
-      if(!label){swWrap.style.display="none";swLastLookup=null;return}
+      if(!label){swWrap.style.display="none";swLastLookup=null;swMappedPersonId=null;return}
       swWrap.style.display="block";
       const key=label.toLowerCase();
       if(key===swLastLookup)return;
       swLastLookup=key;
+      swMappedPersonId=null;
       ensureSwLoaded().then(()=>getSwFriendMap(label)).then(m=>{
         if(selectedPerson.trim().toLowerCase()!==key)return;
+        swMappedPersonId=m&&m.sw_user_id?Number(m.sw_user_id):null;
         // A remembered group takes precedence and opens the member checklist.
         const rememberGroup=m&&m.sw_group_id&&swGroups.some(g=>g.id===m.sw_group_id);
         fillSwGroups(rememberGroup?m.sw_group_id:null);
@@ -425,6 +442,10 @@ function openLedgerEditModal(txn,onSaved){
         <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
         <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-amt)} \u00B7 ${rPt.value} \u00B7 ${txn.category_id}</div>
         <div style="font-size:11px;color:rgba(74,111,165,0.7);margin-top:4px">\uD83D\uDD17 Linked to: ${txn.description}</div>`;
+      if(swGroupActive()&&typeof resolveHouseholdOwner==="function"&&resolveHouseholdOwner(selectedPerson)){
+        const householdShare=currentHouseholdShareAmt();
+        rPreview.innerHTML+=`<div style="font-size:11px;color:rgba(129,178,154,0.8);margin-top:4px">\uD83E\uDD1D ${selectedPerson}'s ledger share: ${householdShare>0?fmtF(householdShare):"select their group row"}</div>`;
+      }
       if(swGroupActive()&&swYouLine){
         const g=computeGroupSplit();
         const total=Math.round(txn.amount_usd*100)/100;
@@ -443,11 +464,17 @@ function openLedgerEditModal(txn,onSaved){
       if(!person){errEl.textContent="Please select or type a person name.";return}
       const reimbAmt=currentReimbAmt();
       if(reimbAmt<=0){errEl.textContent="Reimbursement amount must be greater than $0.";return}
+      const householdShareAmt=currentHouseholdShareAmt();
+      const mirrorsToHousehold=typeof resolveHouseholdOwner==="function"&&!!resolveHouseholdOwner(person);
+      if(swGroupActive()&&mirrorsToHousehold&&!(householdShareAmt>0)){
+        errEl.textContent=`Select ${person}'s row in the Splitwise group before creating the reimbursement.`;
+        return;
+      }
       errEl.textContent="";
       rCreate.textContent="Creating...";rCreate.disabled=true;
       const effectiveRatio=reimbAmt/txn.amount_usd;
       try{
-        const r=await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"");
+        const r=await createReimbursement(txn,person,effectiveRatio,rPt.value,rNote.value,rPt.value==="Transfer"?rCredit.getValue():"",householdShareAmt);
         // Capture Splitwise intent before the modal (and its closures) go away.
         // Group mode fans the owed amount out across everyone on the trip;
         // no-group mode is a single-friend direct split.

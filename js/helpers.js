@@ -268,18 +268,22 @@ function buildCreditSelect(currentVal){
 // cached per active view so one render doesn't refetch. Falls back to the full
 // PTS list before accounts load, or for users/views with no accounts (legacy
 // single-user, Combined pre-migration). Mirrors the Ledger payment filter.
-let _acctLabels=[],_acctLabelsView="\u0000",_acctLabelsFetch=null;
+let _acctLabels=[],_cashAcctLabels=[],_acctLabelsView="\u0000",_acctLabelsFetch=null;
 function acctLabelsReady(){
   const view=(typeof state!=="undefined"&&state.view)||null;
   if(_acctLabelsFetch&&_acctLabelsView===view)return _acctLabelsFetch;
-  _acctLabelsView=view;_acctLabels=[]; // drop stale view's labels until refetch
-  _acctLabelsFetch=sb("accounts?select=label&order=display_order"+ownerQS())
-    .then(rows=>{_acctLabels=(rows||[]).map(r=>r.label).filter(Boolean);return _acctLabels})
-    .catch(()=>{_acctLabels=[];return _acctLabels});
+  _acctLabelsView=view;_acctLabels=[];_cashAcctLabels=[]; // drop stale view's labels until refetch
+  _acctLabelsFetch=sb("accounts?select=label,account_type&order=display_order"+ownerQS())
+    .then(rows=>{
+      _acctLabels=(rows||[]).map(r=>r.label).filter(Boolean);
+      _cashAcctLabels=(rows||[]).filter(r=>r.account_type==="checking"||r.account_type==="savings").map(r=>r.label).filter(Boolean);
+      return _acctLabels;
+    })
+    .catch(()=>{_acctLabels=[];_cashAcctLabels=[];return _acctLabels});
   return _acctLabelsFetch;
 }
 // Force a refetch next time (e.g. after an account is added in Onboarding).
-function invalidateAcctLabels(){_acctLabels=[];_acctLabelsView="\u0000";_acctLabelsFetch=null}
+function invalidateAcctLabels(){_acctLabels=[];_cashAcctLabels=[];_acctLabelsView="\u0000";_acctLabelsFetch=null}
 
 // Populate a <select> with the active view's payment-account options.
 // opts.selected  – a row's existing payment_type; always kept + preselected
@@ -305,6 +309,18 @@ function fillPtSelect(sel,opts){
   if(want==null)want=labels[0]||"";
   sel.value=want;
   return want;
+}
+
+// Populate a funding-account picker with only the active owner's cash accounts.
+// No legacy fallback is used: bill payments must name a configured checking or
+// savings account rather than silently assigning another household member's.
+function fillCashAcctSelect(sel,selected,exclude){
+  const labels=_cashAcctLabels.filter(l=>l!==exclude);
+  sel.innerHTML="";
+  sel.append(h("option",{value:""},"\u2014 pick checking account \u2014"));
+  labels.forEach(l=>sel.append(h("option",{value:l},l)));
+  sel.value=selected&&labels.includes(selected)?selected:"";
+  return sel.value;
 }
 
 function h(tag,attrs,children){

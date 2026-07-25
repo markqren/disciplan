@@ -51,7 +51,7 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
       _status:"approved",_isDuplicate:false,_isCCPayment:true,
       _rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",
       _rowIndex:index,_skipReason:null,
-      _ccPaymentPair:{description:names[1],payment_type:"Chase Chequing",amount:Math.abs(amt)}
+      _ccPaymentPair:{description:names[1],payment_type:"",amount:Math.abs(amt)}
     };
   }
   return{

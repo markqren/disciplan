@@ -302,7 +302,7 @@ async function fetchReimburseFriends(){
   return result.slice(0,15);
 }
 
-async function createReimbursement(originalTxn,person,splitRatio,paymentType,note,credit){
+async function createReimbursement(originalTxn,person,splitRatio,paymentType,note,credit,householdShareAmount){
   const reimbAmount=Math.round(-(originalTxn.amount_usd*splitRatio)*100)/100;
   const ss=originalTxn.service_start||originalTxn.date;
   const se=originalTxn.service_end||originalTxn.date;
@@ -336,7 +336,10 @@ async function createReimbursement(originalTxn,person,splitRatio,paymentType,not
   state.txnCount++;
   // Cross-person mirror: if the reimbursing party is a household member, queue
   // a pending expense in their ledger for approval (plan Phase 5).
-  try{await mirrorReimbursementToHousehold(originalTxn,person,reimbAmount,paymentType,ss,se,serviceDays)}
+  try{
+    const mirrorAmount=householdShareAmount==null?Math.abs(reimbAmount):householdShareAmount;
+    await mirrorReimbursementToHousehold(originalTxn,person,mirrorAmount,paymentType,ss,se,serviceDays);
+  }
   catch(e){console.warn("Household reimbursement mirror failed:",e)}
   // Return linkage so the caller can optionally push to Splitwise (FEA-29C).
   return{result,newId,groupId,originalId:originalTxn.id,reimbAmount};

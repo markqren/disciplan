@@ -27,11 +27,11 @@ function renderReviewTable(container,candidates){
 
   const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
   bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
-    candidates.forEach(c=>{if(c.ai_confidence==="high"&&c._status==="pending"&&!(c._isTransfer&&!c._transferTo))c._status="approved"});
+    candidates.forEach(c=>{if(c.ai_confidence==="high"&&c._status==="pending"&&!(c._isTransfer&&!c._transferTo)&&!(c._isCCPayment&&(!c._ccPaymentPair||!c._ccPaymentPair.payment_type)))c._status="approved"});
     renderReviewTable(container,candidates);
   }},"\u2713 Approve All High-Confidence"));
   bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3)",onClick:()=>{
-    candidates.forEach(c=>{if(c._status==="pending"&&!(c._isTransfer&&!c._transferTo))c._status="approved"});
+    candidates.forEach(c=>{if(c._status==="pending"&&!(c._isTransfer&&!c._transferTo)&&!(c._isCCPayment&&(!c._ccPaymentPair||!c._ccPaymentPair.payment_type)))c._status="approved"});
     renderReviewTable(container,candidates);
   }},"\u2713 Approve All"));
   let saving=false;
@@ -39,6 +39,9 @@ function renderReviewTable(container,candidates){
     if(saving)return;
     const approved=candidates.filter(c=>c._status==="approved");
     if(!approved.length)return alert("No approved transactions to save.");
+    if(approved.some(c=>c._isCCPayment&&(!c._ccPaymentPair||!c._ccPaymentPair.payment_type))){
+      return alert("Pick the checking account used for each approved credit-card payment.");
+    }
     saving=true;saveBtn.disabled=true;
     const proceed=await confirmRentSplits(candidates);
     if(!proceed){saving=false;saveBtn.disabled=false;saveBtn.textContent="Save Approved";return}
@@ -83,7 +86,11 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{style:{cursor:c._status==="committed"?"default":"pointer",textAlign:"center",fontSize:"14px",color:statusColor,userSelect:"none"},onClick:()=>{
       if(c._status==="committed")return;
       if(c._isDuplicate&&c._status==="skipped")c._status="pending";
-      else if(c._status==="pending"){if(c._isTransfer&&!c._transferTo){alert("Pick the account this transfer pairs to first.");return}c._status="approved"}
+      else if(c._status==="pending"){
+        if(c._isTransfer&&!c._transferTo){alert("Pick the account this transfer pairs to first.");return}
+        if(c._isCCPayment&&(!c._ccPaymentPair||!c._ccPaymentPair.payment_type)){alert("Pick the checking account used for this card payment first.");return}
+        c._status="approved";
+      }
       else if(c._status==="approved")c._status="skipped";
       else c._status="pending";
       renderReviewTable(container,candidates);
@@ -95,7 +102,11 @@ function renderReviewTable(container,candidates){
     const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c._isTransfer?"\u2194 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descMain.textContent=descText;
-    if(c._isCCPayment){const pairHint=h("span",{style:{color:"rgba(255,255,255,0.3)",fontSize:"11px"}}," \u2192 Chase Chequing");descMain.append(pairHint)}
+    if(c._isCCPayment){
+      const funding=c._ccPaymentPair&&c._ccPaymentPair.payment_type;
+      const pairHint=h("span",{style:{color:funding?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},funding?(" \u2192 "+funding):" \u2192 pick checking account");
+      descMain.append(pairHint);
+    }
     if(c._isTransfer){const pairHint=h("span",{style:{color:c._transferTo?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account");descMain.append(pairHint)}
     const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
@@ -106,7 +117,15 @@ function renderReviewTable(container,candidates){
 
     const catTd=h("td");
     const selStyle={background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",fontFamily:"var(--sans)",cursor:"pointer",outline:"none"};
-    if(c._isTransfer){
+    if(c._isCCPayment){
+      // Card-payment rows require the importing owner to choose the cash account
+      // that funded this bill; never infer a household member's default account.
+      const funding=c._ccPaymentPair&&c._ccPaymentPair.payment_type;
+      const fundingSel=h("select",{style:{...selStyle,border:funding?selStyle.border:"1px solid var(--y)"},onChange:e=>{c._ccPaymentPair.payment_type=e.target.value;renderReviewTable(container,candidates)}});
+      fillCashAcctSelect(fundingSel,funding||"",c.payment_type);
+      catTd.append(fundingSel);
+      tr.append(catTd);
+    }else if(c._isTransfer){
       // Transfer rows pick a counter-account (not a category — they stay financial).
       const xferSel=h("select",{style:{...selStyle,border:c._transferTo?selStyle.border:"1px solid var(--y)"},onChange:e=>{c._transferTo=e.target.value;renderReviewTable(container,candidates)}});
       fillPtSelect(xferSel,{selected:c._transferTo||null});
@@ -403,6 +422,9 @@ function confirmRentSplits(candidates){
 async function commitImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
   if(!approved.length)throw new Error("No approved transactions to save.");
+  if(approved.some(c=>c._isCCPayment&&(!c._ccPaymentPair||!c._ccPaymentPair.payment_type))){
+    throw new Error("A credit-card payment is missing its funding account.");
+  }
   const valid=approved.filter(c=>c.date&&c.service_start&&c.service_end);
   if(valid.length<approved.length)console.warn(`commitImport: dropped ${approved.length-valid.length} rows with missing dates`);
   if(!valid.length)throw new Error("All approved transactions have invalid dates.");
@@ -423,10 +445,14 @@ async function commitImport(candidates){
   const ccLinkPairs=[];// [{sideAIdx, sideBIdx}] — indices into rows array
   if(ccPairs.length){
     const ccDates=ccPairs.map(c=>c.date).sort();
-    const existingCQ=await sb(`transactions?payment_type=eq.${encodeURIComponent("Chase Chequing")}&date=gte.${ccDates[0]}&date=lte.${ccDates[ccDates.length-1]}&select=date,amount_usd`);
+    const fundingAccounts=[...new Set(ccPairs.map(c=>c._ccPaymentPair.payment_type))];
+    const existingByAccount={};
+    await Promise.all(fundingAccounts.map(async account=>{
+      existingByAccount[account]=await sb(`transactions?payment_type=eq.${encodeURIComponent(account)}&date=gte.${ccDates[0]}&date=lte.${ccDates[ccDates.length-1]}&select=date,amount_usd${ownerQS()}`);
+    }));
     for(const c of ccPairs){
       const p=c._ccPaymentPair;
-      const isDupe=existingCQ.some(e=>e.date===c.date&&Math.abs(Math.abs(e.amount_usd)-p.amount)<0.02);
+      const isDupe=(existingByAccount[p.payment_type]||[]).some(e=>e.date===c.date&&Math.abs(Math.abs(e.amount_usd)-p.amount)<0.02);
       if(!isDupe){
         const sideAIdx=valid.indexOf(c);
         const sideBIdx=rows.length;
