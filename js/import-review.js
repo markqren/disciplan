@@ -153,7 +153,7 @@ function renderReviewTable(container,candidates){
       c.service_start===c.service_end?fmtD(c.date):`${fmtD(c.service_start)}\u2013${fmtD(c.service_end)}`));
 
     const tagTd=h("td",{class:"hide-m"});
-    tagTd.append(h("input",{type:"text",value:c.tag||"",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",width:"70px",fontFamily:"var(--sans)",outline:"none"},onInput:e=>{c.tag=e.target.value}}));
+    tagTd.append(attachTagSuggestions(h("input",{type:"text",value:c.tag||"",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",width:"70px",fontFamily:"var(--sans)",outline:"none"},onInput:e=>{c.tag=e.target.value}})));
     tr.append(tagTd);
 
     tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.25)",fontSize:"11px"}},c._bankCategory));
@@ -215,7 +215,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
   const mPt=h("select",{class:"inp"});
   fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
   acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
-  const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
+  const mTag=attachTagSuggestions(h("input",{class:"inp",type:"text",value:c.tag||""}));
 
   // Accrual preview
   const previewEl=h("div",{class:"preview hidden"});
@@ -705,7 +705,7 @@ function renderEmailReviewTable(container,candidates){
     tr.append(h("td",{class:"hide-m",style:{color:"rgba(255,255,255,0.4)",fontSize:"11px"}},c.payment_type));
 
     const tagTd=h("td",{class:"hide-m"});
-    tagTd.append(h("input",{type:"text",value:c.tag||"",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",width:"70px",fontFamily:"var(--sans)",outline:"none"},onInput:e=>{c.tag=e.target.value}}));
+    tagTd.append(attachTagSuggestions(h("input",{type:"text",value:c.tag||"",style:{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"5px",padding:"3px 6px",color:"#e8e8e4",fontSize:"11px",width:"70px",fontFamily:"var(--sans)",outline:"none"},onInput:e=>{c.tag=e.target.value}})));
     tr.append(tagTd);
     tbody.append(tr);
   });
@@ -904,7 +904,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   const mPt=h("select",{class:"inp"});
   fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
   acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
-  const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
+  const mTag=attachTagSuggestions(h("input",{class:"inp",type:"text",value:c.tag||""}));
 
   const emPreviewEl=h("div",{class:"preview hidden"});
   function emUpdatePreview(){
@@ -1072,7 +1072,7 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
   const mPt=h("select",{class:"inp"});
   fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
   acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
-  const mTag=h("input",{class:"inp",type:"text",value:c.tag||""});
+  const mTag=attachTagSuggestions(h("input",{class:"inp",type:"text",value:c.tag||""}));
 
   const psPreviewEl=h("div",{class:"preview hidden"});
   function psUpdatePreview(){

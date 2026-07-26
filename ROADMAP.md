@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jul 25, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Jul 26, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v2.11 — Jul 24, 2026
+
+#### v2.11.2
+<sub>Recent-tag suggestions and type-ahead completion across transaction entry flows</sub>
+
+##### Features
+- **Tag autocomplete everywhere tags are editable** — Empty tag fields now show the six most recent tags, while typed text ranks prefix matches before other substring matches. The shared mobile-friendly picker supports touch, mouse, and Arrow/Enter keyboard selection across new transactions, CSV and onboarding bulk tags, import review rows and modals, Splitwise imports, ledger edits, batch edits, and linked-group overrides. Newly created tags invalidate the in-session catalog so they appear immediately. (~8,000 tokens)
 
 #### v2.11.1
 <sub>Shilpa monthly finance checklist with service-period-aware paycheck gaps</sub>

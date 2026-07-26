@@ -140,7 +140,7 @@ async function renderOnboarding(el){
 
   const impAcctSel=h("select",{class:"inp"});
   const fileInp=h("input",{class:"inp",type:"file",accept:".csv",multiple:true});
-  const tagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
+  const tagInp=attachTagSuggestions(h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"}));
   const modelSel=h("select",{class:"inp",style:{maxWidth:"200px"},onChange:()=>setAIModel(modelSel.value)});
   [["claude-haiku-4-5-20251001","Haiku 4.5 (fast)"],["claude-sonnet-4-20250514","Sonnet 4 (quality)"]].forEach(([v,l])=>{const o=h("option",{value:v},l);if(v===getAIModel())o.selected=true;modelSel.append(o)});
   const modelField=h("div");

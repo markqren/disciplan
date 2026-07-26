@@ -63,7 +63,7 @@ function openLedgerEditModal(txn,onSaved){
   const mPt=h("select",{class:"inp",onChange:()=>{mCreditRow.style.display=mPt.value==="Transfer"?"grid":"none"}});
   fillPtSelect(mPt,{selected:txn.payment_type,keep:["Transfer"]});
   acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:txn.payment_type,keep:["Transfer"]}));
-  const mTag=h("input",{class:"inp",type:"text",value:txn.tag||""});
+  const mTag=attachTagSuggestions(h("input",{class:"inp",type:"text",value:txn.tag||""}));
 
   // Accrual preview
   const previewEl=h("div",{class:"preview hidden"});
@@ -827,7 +827,7 @@ function openBatchEditModal(txns,onDone){
   fillBPt();
   acctLabelsReady().then(fillBPt);
 
-  const bTag=h("input",{class:"inp",type:"text",placeholder:"no change"});
+  const bTag=attachTagSuggestions(h("input",{class:"inp",type:"text",placeholder:"no change"}));
   const bTagClear=h("label",{style:{fontSize:"11px",color:"rgba(255,255,255,0.4)",display:"flex",alignItems:"center",gap:"4px",marginTop:"4px"}});
   const bTagClearChk=h("input",{type:"checkbox"});
   bTagClear.append(bTagClearChk,document.createTextNode("Clear tag"));
@@ -1416,7 +1416,7 @@ function openGroupEditModal(gid,members,summary,override,onSaved){
   function fillGPt(){fillPtSelect(gPt,{selected:gPtVal||null,keep:["Transfer"]});gPt.insertBefore(h("option",{value:""},"Auto (dominant)"),gPt.firstChild);gPt.value=gPtVal}
   fillGPt();
   acctLabelsReady().then(fillGPt);
-  const gTag=h("input",{class:"inp",type:"text",value:override?.tag||"",placeholder:summary.dominantTag||""});
+  const gTag=attachTagSuggestions(h("input",{class:"inp",type:"text",value:override?.tag||"",placeholder:summary.dominantTag||""}));
   modal.append(gRow(gField("Group Label",gLabel)));
   modal.append(gRow(gField("Category",gCat),gField("Payment Type",gPt)));
   modal.append(gRow(gField("Tag",gTag)));

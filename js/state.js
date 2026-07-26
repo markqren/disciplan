@@ -65,6 +65,7 @@ async function ensureTagExists(tagName){
       createBtn.textContent="Creating...";createBtn.disabled=true;
       try{
         await sb("tags",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({name:tagName,start_date:tStart.value,end_date:tEnd.value,tag_type:tType.value})});
+        invalidateTagCatalog();
         bg.remove();resolve();
       }catch(e){errEl.textContent="Failed: "+e.message;createBtn.textContent="Create Tag";createBtn.disabled=false}
     }},"Create Tag");

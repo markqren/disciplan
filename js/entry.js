@@ -55,7 +55,7 @@ function renderEntry(el){
   });
   const toRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
   toRow.append(field("To Account",toPtSel));
-  const tagInp=h("input",{class:"inp",type:"text",placeholder:"e.g., cozumel",onInput:e=>f.tag=e.target.value});
+  const tagInp=attachTagSuggestions(h("input",{class:"inp",type:"text",placeholder:"e.g., cozumel",onInput:e=>f.tag=e.target.value}));
 
   const previewEl=h("div",{class:"preview hidden",id:"entryPreview"});
   function updatePreview(){
@@ -196,7 +196,7 @@ function renderEntry(el){
   const impPtSel=h("select",{class:"inp",onChange:()=>{impPtManual=true}});
   fillPtSelect(impPtSel,{prefer:["Chase Sapphire"]});
   acctReady.then(()=>{if(!impPtManual)fillPtSelect(impPtSel,{prefer:["Chase Sapphire"]})});
-  const impTagInp=h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"});
+  const impTagInp=attachTagSuggestions(h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"}));
   const apiKeyInp=h("input",{class:"inp",type:"password",placeholder:"sk-ant-...",value:getApiKey()||""});
   const apiKeyHelp=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",marginTop:"2px"}},"Get one at console.anthropic.com \u00b7 Stored locally in your browser");
   const apiKeyField=h("div");
@@ -690,10 +690,6 @@ async function findSwCardMatches(cand){
   return rows.sort((a,b)=>Math.abs(new Date(a.date)-new Date(d+"T00:00:00"))-Math.abs(new Date(b.date)-new Date(d+"T00:00:00")));
 }
 
-// Lazily-cached list of existing tag names for the import tag datalist.
-let _swTagsCache=null;
-function swTagNames(){if(!_swTagsCache)_swTagsCache=sb("tags?select=name&order=name").then(r=>(r||[]).map(t=>t.name)).catch(()=>[]);return _swTagsCache;}
-
 function renderSwPendingCard(row,container){
   const snap=row.raw||{};
   const s=swExpenseSummary(snap);
@@ -732,11 +728,8 @@ function renderSwPendingCard(row,container){
   const linkWrap=h("div",{style:{marginTop:"8px"}});
   const catSel=swCatSelect(defaultCat);
 
-  // ── Tag input (datalist of existing tags) ──
-  const tagListId=`swtags-${row.expense_id}`;
-  const tagList=h("datalist",{id:tagListId});
-  swTagNames().then(names=>names.forEach(n=>tagList.append(h("option",{value:n}))));
-  const tagInp=h("input",{class:"inp",type:"text",placeholder:"tag (optional)",list:tagListId,style:{fontSize:"11px",padding:"4px 8px",maxWidth:"160px"}});
+  // ── Tag input ──
+  const tagInp=attachTagSuggestions(h("input",{class:"inp",type:"text",placeholder:"tag (optional)",style:{fontSize:"11px",padding:"4px 8px",maxWidth:"160px"}}));
 
   // ── Service period (estimated default by category, editable) ──
   let svcManual=false;
@@ -760,7 +753,7 @@ function renderSwPendingCard(row,container){
 
   const ctrlRow=h("div",{style:{display:"flex",gap:"8px",alignItems:"center",marginTop:"8px",flexWrap:"wrap"}});
   ctrlRow.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)"}},"Category"));
-  ctrlRow.append(catSel,tagInp,tagList);
+  ctrlRow.append(catSel,tagInp);
   const importBtn=h("button",{class:"pg-btn",style:{color:"var(--g)",borderColor:"rgba(129,178,154,0.3)"},onClick:async()=>{
     importBtn.disabled=true;importBtn.textContent="Importing\u2026";
     try{
