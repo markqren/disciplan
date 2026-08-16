@@ -42,6 +42,13 @@ self.addEventListener('activate',event=>{
   );
 });
 
+// Identity of a response's content, read from headers only (never the body).
+// Netlify sends ETag on every asset; Last-Modified/Content-Length cover other hosts.
+function versionTag(resp){
+  const h=resp.headers;
+  return h.get('etag')||h.get('last-modified')||h.get('content-length')||null;
+}
+
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(event.request.method!=='GET')return;
@@ -88,23 +95,22 @@ self.addEventListener('fetch',event=>{
     return;
   }
 
-  // App shell (index.html, /) — stale-while-revalidate with update notification
+  // App shell + modules — stale-while-revalidate with update notification.
+  // Freshness is compared via response headers, never bodies: the cached response
+  // is handed to the page, so reading its body here would consume it twice
+  // ("Response body is already used"). Headers are also ~700KB cheaper per load.
   if(url.origin===self.location.origin){
     event.respondWith(
       caches.open(CACHE_STATIC).then(cache=>
         cache.match(event.request).then(cached=>{
+          const cachedTag=cached?versionTag(cached):null;
           const fp=fetch(event.request).then(resp=>{
             if(resp.ok){
               cache.put(event.request,resp.clone());
-              if(cached){
-                resp.clone().text().then(newBody=>{
-                  cached.clone().text().then(oldBody=>{
-                    if(newBody!==oldBody){
-                      self.clients.matchAll().then(clients=>{
-                        clients.forEach(c=>c.postMessage({type:'SW_UPDATE_AVAILABLE'}));
-                      });
-                    }
-                  });
+              const freshTag=versionTag(resp);
+              if(cachedTag&&freshTag&&freshTag!==cachedTag){
+                self.clients.matchAll().then(clients=>{
+                  clients.forEach(c=>c.postMessage({type:'SW_UPDATE_AVAILABLE'}));
                 });
               }
             }

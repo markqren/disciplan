@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Jul 26, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Aug 16, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,18 @@
 ## 🚀 Releases
 
 ### v2.11 — Jul 24, 2026
+
+#### v2.11.4
+<sub>Service worker stops throwing on every page load and can finally detect deploys</sub>
+
+##### Fixes
+- **Service worker no longer double-reads cached responses (BUG)** — Every page load threw `TypeError: Failed to execute 'clone' on 'Response': Response body is already used` **25 times** (once for `index.html` plus each of the 24 JS modules), surfacing as app lag and intermittent breakage. Root cause: the same-origin stale-while-revalidate handler returned the cached `Response` to the page and *then* called `cached.clone().text()` to compare bodies for the update banner — but a body can only be read once, so the comparison always threw. Two consequences: 25 uncaught rejections per load, and the "New version available" banner **never fired**, so a browser could keep running stale modules indefinitely after a deploy. Fix: freshness is now determined from response **headers** (`ETag`, falling back to `Last-Modified` / `Content-Length`) instead of bodies, so nothing is read twice and roughly **1.4 MB of JavaScript text decoding per page load** disappears. Netlify serves a content-hash `etag` on every asset, so deploy detection is now actually reliable. (~15,000 tokens)
+
+#### v2.11.3
+<sub>Newsletter reliability: eliminate coverage-gap fallbacks with an always-eligible floor archetype</sub>
+
+##### Fixes
+- **Newsletter no longer ships the canned `parse_fallback` on coverage-gap days (BUG)** — Recent newsletters kept sending the deterministic fallback (7 of the last 16 days, clustered late-month) with **0 tokens / 0 tool calls / no `insight_selection_log` row**. Root cause was *not* a parse failure or API error: every archetype is data-gated **and** rate-limited (cooldown + `monthly_max`), so the eligible candidate pool could empty entirely (especially after the always-on archetypes hit cooldown/caps and `budget_pace` drops out past day 24). `selectCandidate` then returned `null` and the pipeline shipped the canned email **without ever calling the writer**. Fix: (1) new always-eligible **`spending_snapshot`** floor archetype — eligible whenever there is any current-month spend, no cooldown, no `monthly_max`, lowest `priority_weight` with novelty neutralised, so it only wins as a last resort but guarantees a real, LLM-written, chart-backed month-to-date pulse; (2) a **cooldown/monthly_max escape hatch** in `selectCandidate` (relax only the soft gates over data-eligible candidates before ever returning `null`); (3) **always write `insight_selection_log`** — even on the no-chosen path — so "why did it fall back?" is answerable from SQL without a replay; (4) config stopgap loosening `category_yoy` cooldown 5→4 and `large_transactions` monthly_max 4→5. Verified via a 2026-07-31 dry-run: pipeline now selects a real archetype (pool includes the eligible floor). (~12,000 tokens)
 
 #### v2.11.2
 <sub>Recent-tag suggestions and type-ahead completion across transaction entry flows</sub>
