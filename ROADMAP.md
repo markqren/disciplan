@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Aug 16, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Aug 17, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v2.11 — Jul 24, 2026
+
+#### v2.11.5
+<sub>Date helpers are timezone-independent, ending the infinite loop that froze Shilpa's view abroad</sub>
+
+##### Fixes
+- **`endOfMonth` off-by-one east of Greenwich hung Shilpa's monthly checklist (BUG)** — Switching to Shilpa's person-view became severely laggy while travelling in a UTC+8 timezone, and only in her view. Root cause: `startOfMonth` / `endOfMonth` / `addDays` built a **local**-midnight `Date` and then formatted it with `toISOString()` (**UTC**). At any positive UTC offset local midnight is still the previous day in UTC, so `endOfMonth('2026-01-31')` returned `2026-01-30`. `expectedPaycheckPeriods` advances its month cursor via `cursor=shiftDate(endOfMonth(cursor),1)`, so the cursor oscillated `01-31 → 01-30 → 01-31` and **never advanced** — an infinite `while` loop that also pushed periods without bound, pegging the main thread. It reproduced only in Shilpa's view because `renderMonthlyChecklist` is gated on `state.view==='shilpa'`, and only abroad because the app had always run at negative UTC offsets, where the old code happened to be correct. All three helpers now use the same pure-UTC string arithmetic as their neighbours (`shiftDate`, `daysInclusive`, `overlapDays`). Verified with `scripts/verify-date-helpers.js` across UTC−7 → UTC+14: the new helpers are **byte-identical to the old ones at UTC−7/UTC+0** (232/232 dates, so no historical accrual behaviour changes) while fixing 232/232 wrong results at every positive offset, and the paycheck loop terminates in 8 iterations everywhere. (~13,000 tokens)
 
 #### v2.11.4
 <sub>Service worker stops throwing on every page load and can finally detect deploys</sub>

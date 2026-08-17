@@ -3,9 +3,13 @@ function fmtT(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);const r=`$$
 function fmtF(n){if(n==null||isNaN(n))return"$0.00";const r=`$${Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;return n<0?`(${r})`:r}
 function fmtD(d){if(!d)return"";const p=d.split("-");return`${+p[1]}/${+p[2]}/${p[0].slice(2)}`}
 function today(){return new Date().toISOString().slice(0,10)}
-function startOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth(),1).toISOString().slice(0,10)}
-function endOfMonth(d){const dt=new Date(d+"T00:00:00");return new Date(dt.getFullYear(),dt.getMonth()+1,0).toISOString().slice(0,10)}
-function addDays(d,n){return new Date(new Date(d+"T00:00:00").getTime()+(n-1)*864e5).toISOString().slice(0,10)}
+// Date helpers below are pure UTC arithmetic on YYYY-MM-DD strings. Building a
+// LOCAL-midnight Date and formatting it with toISOString() (UTC) shifts the day
+// back by one at any positive UTC offset, which is how endOfMonth returned Jan 30
+// in Asia and hung expectedPaycheckPeriods' month cursor. Never mix the two.
+function startOfMonth(d){const p=(d||"").split("-");return p.length===3?`${p[0]}-${p[1]}-01`:d}
+function endOfMonth(d){const p=(d||"").split("-").map(Number);if(p.length!==3||p.some(isNaN))return d;return new Date(Date.UTC(p[0],p[1],0)).toISOString().slice(0,10)}
+function addDays(d,n){return shiftDate(d,n-1)}
 function daysInclusive(start,end){const a=(start||"").split("-").map(Number),b=(end||"").split("-").map(Number);if(a.length!==3||b.length!==3||a.some(isNaN)||b.some(isNaN))return 1;return Math.max(1,Math.round((Date.UTC(b[0],b[1]-1,b[2])-Date.UTC(a[0],a[1]-1,a[2]))/864e5)+1)}
 function shiftDate(d,n){const p=(d||"").split("-").map(Number);if(p.length!==3||p.some(isNaN))return d;const dt=new Date(Date.UTC(p[0],p[1]-1,p[2]+n));return dt.toISOString().slice(0,10)}
 function startOfWeek(d){const p=(d||"").split("-").map(Number);if(p.length!==3||p.some(isNaN))return d;const day=new Date(Date.UTC(p[0],p[1]-1,p[2])).getUTCDay();return shiftDate(d,-((day+6)%7))}
