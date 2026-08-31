@@ -1,12 +1,20 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Aug 17, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Aug 31, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 
 
 ## 🚀 Releases
+
+### v2.12 — Aug 31, 2026
+
+#### v2.12.0
+<sub>Tag posted ledger credits into the Cashback tab without a duplicate income line</sub>
+
+##### Features
+- **Tag a ledger credit as cashback (FEA-125)** — Opening a negative-amount ledger transaction now offers **Cashback** → **Add to Cashback**, which writes a linked `cashback_redemptions` row (card, dollar value, Dollar Value/Points) so the credit appears on the Cashback tab. The ledger row is unchanged — no extra income transaction. Already-tagged rows show an **In Cashback Ledger** banner with Unlink, a trophy on the ledger list, and undo. The existing purchase-side Cashback button still creates a linked income credit plus a cashback record. (~8,000 tokens)
 
 ### v2.11 — Jul 24, 2026
 
@@ -823,12 +831,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (168 items)</summary>
+<summary><strong>✅ Completed</strong> (169 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-125 | **Tag ledger credits as cashback** — Credits (negative-amount ledger rows) can be tagged into `cashback_redemptions` from the ledger edit modal without creating a second income transaction. Duplicate-guarded, undoable, unlinkable; tagged rows show a trophy in the ledger list. Purchase-side Cashback (new linked income txn + cashback row) is unchanged. | Feature → Done | Aug 31 |
 | FEA-124 | **Shilpa monthly finance checklist** — A floating, collapsible checklist follows Shilpa's person-view across every tab and resets by calendar month. The paycheck task infers expected semi-monthly Pronto service periods, lists matured gaps as nested subtasks, and waits seven days after each period ends before calling it missing. Credit-card and debit/checking items complete automatically after matching imports. Account balances use a resumable per-account workflow: enter a statement balance or skip, upsert the day's balance snapshot, and create an idempotent adjustment only when the live ledger differs; the parent item completes after all active accounts are handled. State persists cross-device in an owner/month `preferences` row, with no migration. | Feature → Done | Jul 25 |
 | FEA-116 | **Newsletter cost cut (prompt caching) + follow-up budget fix + cost observability** — Cost had doubled (avg $0.020→$0.045/send, spiking to $0.165 for a `budget_pace` that ran ~36k input tokens) because `generateInsightText`'s multi-turn `run_finance_query` loop re-sent the entire growing context uncached every turn. The static prefix (tool def + day's prompt/facts/guidance) is now marked Anthropic `cache_control: ephemeral` so each tool turn re-reads it at 0.1x instead of 1x; cost computed exactly from the cache_creation/cache_read/input/output split. Follow-ups that kept "capping out" (deferring to tomorrow because the main insight exhausted the shared 4-call budget) are fixed by raising the budget to 8 calls / 10 turns (cheap now that turns are cached) and instructing the writer to run follow-up queries first. Observability: `insight_log` gained `tool_calls` + `cache_read_tokens` + `cache_write_tokens` (migration `20260709222625`), surfaced in the AI portal as an "avg cost/send (last 10)" KPI + per-row query-count/`cached` badges. Edge-function + migration; committed, deploy pending. | Feature → Done | Jul 9 |
 | FEA-115 | **Income → compensation breakdown newsletter** — Reworked the `income_breakdown` archetype from a bare "YTD income up N%" line (5.5/10, and inflated — the old `fetchYtdIncome` summed `abs(amount_usd)` over all income rows, counting tax withholding, refunds, and Zelle self-transfers as income) into an owner-scoped compensation breakdown: equity (RSU vests) vs cash salary vs bonus/severance, effective tax rate, and 401K savings rate (employee deposits + employer match over gross), each YTD vs the same calendar day the prior 2 years. Classification is word-boundary safe by construction — "P·interest·Income"/"interest income" had inflated an ad-hoc bucket ~400×, so both the TS `classifyIncomeDescription` helper and the reference SQL use `~* '\yinterest\y'` + a deny-list, never bare substrings; 401K savings nets only deposit legs (rollovers excluded). Approach C: deterministic validated `facts` are ground truth, and the DB `prompt_guidance` flips "don't speculate" into "call `run_finance_query` once to NAME the driver" with two canonical reference queries, marks the archetype cash-basis, and raises the YoY gate 3%→6%. Validated live (2025 gross $454k, eff-tax 33%, savings 10%; 2026 YTD cash correctly populated). Edge-function + migration `20260707005139_income_comp_guidance.sql`; committed, deploy pending. | Feature → Done | Jul 6 |

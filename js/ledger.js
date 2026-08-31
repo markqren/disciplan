@@ -89,7 +89,11 @@ function openLedgerEditModal(txn,onSaved){
 
   // Action buttons
   const isReimbursable=txn.amount_usd>0&&!["income","investment","financial","adjustment"].includes(txn.category_id);
-  const isCashbackable=txn.amount_usd>0&&!["income","investment","adjustment"].includes(txn.category_id);
+  // Purchases: FEA-14 creates a linked income txn + cashback row.
+  // Credits (amount < 0): tag this existing txn into cashback_redemptions only.
+  const isCashbackPurchase=txn.amount_usd>0&&!["income","investment","adjustment"].includes(txn.category_id);
+  const isCashbackCredit=txn.amount_usd<0;
+  const isCashbackable=isCashbackPurchase||isCashbackCredit;
   const extraBtns=(isReimbursable?1:0)+(isCashbackable?1:0);
   const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr"+(" auto".repeat(extraBtns+2)),gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
@@ -525,8 +529,9 @@ function openLedgerEditModal(txn,onSaved){
     modal.append(rBtnRow);
   }
 
-  // Cashback form (FEA-14)
+  // Cashback form (FEA-14 create-from-purchase, plus tag-existing-credit)
   function showCashbackForm(){
+    const taggingExisting=txn.amount_usd<0;
     const editContent=Array.from(modal.children);
     modal.innerHTML="";
     let cbType="Dollar Value";
@@ -536,7 +541,10 @@ function openLedgerEditModal(txn,onSaved){
     const cHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
     const cHdrLeft=h("div");
     cHdrLeft.append(h("h3",{style:{margin:"0"}},"\uD83C\uDFC6 Cashback"));
-    cHdrLeft.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginTop:"4px"}},`${txn.description} \u00B7 ${fmtF(txn.amount_usd)}`));
+    cHdrLeft.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginTop:"4px"}},
+      taggingExisting
+        ?`Tag this credit in the Cashback tab \u00B7 ${txn.description} \u00B7 ${fmtF(txn.amount_usd)}`
+        :`${txn.description} \u00B7 ${fmtF(txn.amount_usd)}`));
     cHdr.append(cHdrLeft,h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
     modal.append(cHdr);
 
@@ -553,6 +561,7 @@ function openLedgerEditModal(txn,onSaved){
     const dvWrap=h("div",{style:{marginBottom:"14px"}});
     dvWrap.append(h("label",{class:"lbl"},"Dollar Value"));
     const dvInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"e.g. 10.00",onInput:updateCPreview});
+    if(taggingExisting)dvInp.value=String(Math.abs(parseFloat(txn.amount_usd)||0));
     dvWrap.append(dvInp);
     modal.append(dvWrap);
 
@@ -577,17 +586,21 @@ function openLedgerEditModal(txn,onSaved){
     // Description
     const descWrap=h("div",{style:{marginBottom:"14px"}});
     descWrap.append(h("label",{class:"lbl"},"Description"));
-    const cDesc=h("input",{class:"inp",type:"text",value:"Cashback - "+txn.description});
+    const cDesc=h("input",{class:"inp",type:"text",value:taggingExisting?(txn.description||""):("Cashback - "+txn.description)});
     descWrap.append(cDesc);
     modal.append(descWrap);
 
-    // Payment type + category (defaults to parent, can be changed)
+    // Payment type (always) + category (create-from-purchase only)
     const cbPtSel=h("select",{class:"inp",onChange:()=>{cbPaymentType=cbPtSel.value;updateCPreview()}});
     cbPaymentType=fillPtSelect(cbPtSel,{selected:cbPaymentType||null,keep:["Transfer"]});
     acctLabelsReady().then(()=>{cbPaymentType=fillPtSelect(cbPtSel,{selected:cbPaymentType||null,keep:["Transfer"]});updateCPreview()});
-    const cbCatSel=h("select",{class:"inp",onChange:()=>{cbCategory=cbCatSel.value;updateCPreview()}});
-    CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===cbCategory)o.selected=true;cbCatSel.append(o)});
-    modal.append(mRow(mField("Payment Type",cbPtSel),mField("Category",cbCatSel)));
+    if(taggingExisting){
+      modal.append(mRow(mField("Card / Payment Type",cbPtSel)));
+    }else{
+      const cbCatSel=h("select",{class:"inp",onChange:()=>{cbCategory=cbCatSel.value;updateCPreview()}});
+      CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===cbCategory)o.selected=true;cbCatSel.append(o)});
+      modal.append(mRow(mField("Payment Type",cbPtSel),mField("Category",cbCatSel)));
+    }
 
     // Preview
     const cPreview=h("div",{class:"preview",style:{marginBottom:"14px"}});
@@ -598,11 +611,19 @@ function openLedgerEditModal(txn,onSaved){
 
     function updateCPreview(){
       const dv=parseFloat(dvInp.value)||0;
-      const desc=cDesc.value||"Cashback";
+      const desc=cDesc.value||(taggingExisting?(txn.description||"Cashback"):"Cashback");
+      const ptsNote=cbType==="Points"?"("+((parseFloat(ptsAmtInp.value)||0).toLocaleString())+" pts)":"";
+      if(taggingExisting){
+        cPreview.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Preview</div>
+          <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
+          <div style="font-size:11px;color:rgba(242,204,143,0.7);margin-top:4px">\uD83C\uDFC6 Cashback record: ${fmtF(dv)} ${ptsNote} \u00B7 ${cbPaymentType}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px">Ledger transaction is unchanged \u2014 no extra income line is created.</div>`;
+        return;
+      }
       cPreview.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Preview</div>
         <div style="margin-bottom:4px;color:#fff;font-weight:600">${desc}</div>
         <div style="font-size:11px;color:rgba(255,255,255,0.5)">${fmtF(-dv)} \u00B7 ${cbPaymentType} \u00B7 ${cbCategory}</div>
-        <div style="font-size:11px;color:rgba(242,204,143,0.7);margin-top:4px">\uD83C\uDFC6 Cashback record: ${fmtF(dv)} ${cbType==="Points"?"("+((parseFloat(ptsAmtInp.value)||0).toLocaleString())+" pts)":""}</div>`;
+        <div style="font-size:11px;color:rgba(242,204,143,0.7);margin-top:4px">\uD83C\uDFC6 Cashback record: ${fmtF(dv)} ${ptsNote}</div>`;
     }
     updateCPreview();
 
@@ -611,9 +632,32 @@ function openLedgerEditModal(txn,onSaved){
       const dv=parseFloat(dvInp.value);
       if(!dv||dv<=0){errEl.textContent="Dollar value must be greater than $0.";return}
       errEl.textContent="";
-      cCreate.textContent="Creating...";cCreate.disabled=true;
+      const createLabel=taggingExisting?"Add to Cashback":"Create Cashback";
+      cCreate.textContent=taggingExisting?"Adding...":"Creating...";cCreate.disabled=true;
 
       try{
+        const redemptionAmount=cbType==="Points"?(parseFloat(ptsAmtInp.value)||dv):dv;
+        const rate=cbType==="Points"?(parseFloat(ptsRateInp.value)||1)/100:1;
+        const item=cDesc.value||(taggingExisting?(txn.description||"Cashback"):("Cashback - "+txn.description));
+
+        if(taggingExisting){
+          const already=await sb(`cashback_redemptions?transaction_id=eq.${txn.id}&select=id&limit=1`+ownerQS());
+          if(already.length){errEl.textContent="Already in the cashback ledger.";cCreate.textContent=createLabel;cCreate.disabled=false;return}
+          const created=await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({
+            date:txn.date,item,payment_type:cbPaymentType,
+            cashback_type:cbType,redemption_amount:redemptionAmount,redemption_rate:rate,
+            dollar_value:dv,transaction_id:txn.id
+          })});
+          const cbId=created[0]?.id;
+          bg.remove();
+          showUndo("\u2713 Tagged as cashback: "+fmtF(dv),async()=>{
+            if(cbId)await sb(`cashback_redemptions?id=eq.${cbId}`,{method:"DELETE"});
+            onSaved();
+          });
+          onSaved();
+          return;
+        }
+
         // 1. Create negative income transaction (same pattern as reimbursement)
         const ss=txn.service_start||txn.date;
         const se=txn.service_end||txn.date;
@@ -622,7 +666,7 @@ function openLedgerEditModal(txn,onSaved){
         const dc=Math.round(amt/serviceDays*1e6)/1e6;
         const newTxn={
           date:txn.date,service_start:ss,service_end:se,
-          description:cDesc.value||"Cashback - "+txn.description,
+          description:item,
           category_id:cbCategory,original_amount:amt,currency:"USD",fx_rate:1,
           amount_usd:amt,payment_type:cbPaymentType,
           tag:(txn.tag||"").toLowerCase().trim(),
@@ -639,10 +683,8 @@ function openLedgerEditModal(txn,onSaved){
         state.txnCount++;
 
         // 2. Create cashback_redemptions record
-        const redemptionAmount=cbType==="Points"?(parseFloat(ptsAmtInp.value)||dv):dv;
-        const rate=cbType==="Points"?(parseFloat(ptsRateInp.value)||1)/100:1;
         await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({
-          date:txn.date,item:cDesc.value||"Cashback - "+txn.description,
+          date:txn.date,item,
           redemption_amount:redemptionAmount,payment_type:cbPaymentType,
           cashback_type:cbType,redemption_rate:rate,dollar_value:dv,
           transaction_id:newId||null
@@ -660,8 +702,8 @@ function openLedgerEditModal(txn,onSaved){
         });
         document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
         onSaved();
-      }catch(e){alert("Failed: "+e.message);cCreate.textContent="Create Cashback";cCreate.disabled=false}
-    }},"Create Cashback");
+      }catch(e){alert("Failed: "+e.message);cCreate.textContent=taggingExisting?"Add to Cashback":"Create Cashback";cCreate.disabled=false}
+    }},taggingExisting?"Add to Cashback":"Create Cashback");
     const cBack=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{
       modal.innerHTML="";editContent.forEach(c=>modal.append(c));
     }},"Back");
@@ -795,6 +837,41 @@ function openLedgerEditModal(txn,onSaved){
   }
   renderLinkGroup();
   modal.append(linkSection);
+
+  const cbBanner=h("div",{style:{display:"none",background:"rgba(242,204,143,0.08)",border:"1px solid rgba(242,204,143,0.22)",borderRadius:"8px",padding:"10px 14px",marginBottom:"14px",fontSize:"11px"}});
+  modal.append(cbBanner);
+  sb(`cashback_redemptions?transaction_id=eq.${txn.id}&select=id,date,item,payment_type,cashback_type,redemption_amount,redemption_rate,dollar_value,transaction_id&limit=1`+ownerQS()).then(rows=>{
+    const r=rows&&rows[0];if(!r)return;
+    if(mCashback)mCashback.style.display="none";
+    cbBanner.style.display="block";
+    const line=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px"}});
+    const left=h("div");
+    left.append(h("div",{style:{color:"#F2CC8F",fontSize:"10px",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:"4px"}},"\uD83C\uDFC6 In Cashback Ledger"));
+    left.append(h("div",{style:{color:"rgba(255,255,255,0.75)"}},r.item||"Cashback"));
+    left.append(h("div",{style:{color:"rgba(255,255,255,0.4)",fontSize:"10px",marginTop:"2px"}},`${fmtF(parseFloat(r.dollar_value)||0)} \u00B7 ${r.payment_type||""} \u00B7 ${r.cashback_type||""}`));
+    line.append(left);
+    if(canWrite){
+      const ub=h("button",{class:"pg-btn",style:{fontSize:"10px",color:"rgba(224,122,95,0.8)",padding:"4px 8px",flexShrink:"0"},onClick:async()=>{
+        ub.textContent="...";ub.disabled=true;
+        try{
+          await sb(`cashback_redemptions?id=eq.${r.id}`,{method:"DELETE"});
+          cbBanner.style.display="none";
+          if(mCashback)mCashback.style.display="";
+          showUndo("Removed from cashback ledger",async()=>{
+            await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+              date:r.date,item:r.item,payment_type:r.payment_type,
+              cashback_type:r.cashback_type,redemption_amount:r.redemption_amount,
+              redemption_rate:r.redemption_rate,dollar_value:r.dollar_value,
+              transaction_id:txn.id
+            })});
+            onSaved();
+          });
+        }catch(e){alert("Failed: "+e.message);ub.textContent="Unlink";ub.disabled=false}
+      }},"Unlink");
+      line.append(ub);
+    }
+    cbBanner.append(line);
+  }).catch(()=>{});
 
   if(!canWrite){
     hdrLeft.append(h("div",{style:{marginTop:"6px",fontSize:"11px",color:"var(--y)"}},`Read-only \u2014 owned by ${ownerName}`));
@@ -1260,6 +1337,13 @@ async function renderLedger(el){
     if(grpsForAI.length)aiGroupLabels(grpsForAI).then(labels=>{for(const[gid,label]of Object.entries(labels)){if(label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=label}}});
     // Subscription filter (client-side)
     if(f.subsOnly&&subMerchants.size){const before=txns.length;for(let i=txns.length-1;i>=0;i--){if(!subMerchants.has(normalizeMerchant(txns[i].description)))txns.splice(i,1)}}
+    const cbTagged=new Set();
+    if(txns.length){
+      try{
+        const cbRows=await sb(`cashback_redemptions?transaction_id=in.(${txns.map(t=>t.id).join(",")})&select=transaction_id`+ownerQS());
+        (cbRows||[]).forEach(r=>{if(r.transaction_id)cbTagged.add(r.transaction_id)});
+      }catch(e){}
+    }
     const nav=document.getElementById("pgNav");
     nav.innerHTML="";
     const prev=h("button",{class:"pg-btn",onClick:()=>{if(state.page>0){state.page--;loadPage()}}},"\u2190 Prev");
@@ -1300,6 +1384,7 @@ async function renderLedger(el){
       const descTd=h("td",{style:{color:indent?"rgba(255,255,255,0.65)":"rgba(255,255,255,0.8)",maxWidth:"240px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",...(indent?{paddingLeft:"20px"}:{})}});
       if(showOwner&&t.owner)descTd.append(ownerBadge(t.owner));
       if(!indent&&isLinked)descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:`Linked group of ${gSize}`},gSize>2?`\uD83D\uDD17${gSize}`:"\uD83D\uDD17"));
+      if(cbTagged.has(t.id))descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px"},title:"In cashback ledger"},"\uD83C\uDFC6"));
       if(subMerchants.size&&subMerchants.has(normalizeMerchant(t.description)))descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"rgba(129,178,154,0.6)",cursor:"pointer"},title:"View subscription history",onClick:e=>{e.stopPropagation();showSubHistory(normalizeMerchant(t.description),t.description)}},"\uD83D\uDD04"));
       hilite(t.description,descTd);
       tr.append(descTd);

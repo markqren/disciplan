@@ -9,6 +9,14 @@
 
 ## 🚀 Releases
 
+### v2.12 — Aug 31, 2026
+
+#### v2.12.0
+<sub>Tag posted ledger credits into the Cashback tab without a duplicate income line</sub>
+
+##### Features
+- **Tag a ledger credit as cashback (FEA-125)** — Opening a negative-amount ledger transaction now offers **Cashback** → **Add to Cashback**, which writes a linked `cashback_redemptions` row (card, dollar value, Dollar Value/Points) so the credit appears on the Cashback tab. The ledger row is unchanged — no extra income transaction. Already-tagged rows show an **In Cashback Ledger** banner with Unlink, a trophy on the ledger list, and undo. The existing purchase-side Cashback button still creates a linked income credit plus a cashback record. (~8,000 tokens)
+
 ### v2.11 — Jul 24, 2026
 
 #### v2.11.5
