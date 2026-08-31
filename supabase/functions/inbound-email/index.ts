@@ -229,12 +229,15 @@ interface EmailParser {
 
 const EMAIL_PARSERS: Record<string, EmailParser> = {
   venmo: {
-    detect: (from, subject, _text, _html) =>
-      from.toLowerCase().includes("venmo.com") ||
-      /You paid .+\$[\d,.]+/.test(subject) ||
-      /paid your \$[\d,.]+/.test(subject) ||
-      /You received .+\$[\d,.]+/.test(subject) ||
-      /.+ paid you \$[\d,.]+/.test(subject),
+    detect: (from, subject, text, html) => {
+      const blob = `${from}\n${text}\n${html}`.toLowerCase();
+      return blob.includes("venmo.com") ||
+        /You paid .+\$[\d,.]+/.test(subject) ||
+        /paid your \$[\d,.]+/.test(subject) ||
+        /You received .+\$[\d,.]+/.test(subject) ||
+        /.+ paid you \$[\d,.]+/.test(subject) ||
+        /paid \$[\d,.]+ to your Venmo account/i.test(subject);
+    },
     parse: parseVenmoEmail,
   },
   rakuten: {
@@ -269,8 +272,10 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   // Strip "Fwd: " prefix from forwarded emails
   const subject = rawSubject.replace(/^Fwd:\s*/i, "").trim();
   const isPaid = subject.includes("You paid");
-  const isPaidRequest = subject.includes("paid your");
-  const isReceived = subject.includes("You received") || subject.includes("paid you") || isPaidRequest;
+  // "X paid your $Y" (request fulfilled) — not "paid $Y to your Venmo account"
+  const isPaidRequest = /paid your \$/.test(subject);
+  const isPaidToAccount = /paid \$[\d,.]+ to your Venmo account/i.test(subject);
+  const isReceived = subject.includes("You received") || subject.includes("paid you") || isPaidRequest || isPaidToAccount;
 
   let counterparty = "";
   let amount = 0;
@@ -284,22 +289,28 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   } else if (isReceived) {
     const m1 = subject.match(/received \$([0-9,.]+) from (.+)/);
     const m2 = subject.match(/(.+?) paid you \$([0-9,.]+)/);
+    const m3 = subject.match(/(.+?) paid \$([0-9,.]+) to your Venmo account/i);
     if (m1) { amount = parseFloat(m1[1].replace(/,/g, "")); counterparty = m1[2]; }
     else if (m2) { counterparty = m2[1]; amount = parseFloat(m2[2].replace(/,/g, "")); }
+    else if (m3) { counterparty = m3[1]; amount = parseFloat(m3[2].replace(/,/g, "")); }
   }
 
+  // Apple Mail / Gmail quote the forwarded Venmo body with "> " prefixes, which
+  // break anchored dividers and Date / Transaction ID line matches.
+  const unquoted = (text || "").replace(/^[ \t]*>[ \t]?/gm, "");
+
   // Strip everything before the forwarding divider to get just the Venmo email body
-  let venmoBody = text || "";
-  if (text) {
+  let venmoBody = unquoted;
+  if (unquoted) {
     const fwdDividers = [
       /^-{5,}\s*Forwarded message\s*-{5,}/m,
       /^Begin forwarded message:/m,
       /^From:.*\nSent:.*\nTo:.*\nSubject:/m,
     ];
     for (const pat of fwdDividers) {
-      const match = text.search(pat);
+      const match = unquoted.search(pat);
       if (match >= 0) {
-        venmoBody = text.slice(match);
+        venmoBody = unquoted.slice(match);
         break;
       }
     }
@@ -313,19 +324,33 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
       const noteMatch2 = venmoBody.match(/\$[\d,.]+\s*\n\s*\n\s*(.+?)\s*\n/);
       if (noteMatch2) note = noteMatch2[1].trim();
     }
+    // New Venmo layout splits "$90.00" across lines, so the memo sits
+    // immediately above "See transaction" with only a single newline before it.
+    if (!note) {
+      const noteMatch3 = venmoBody.match(/\n([^\n]+)\n+See transaction/);
+      if (noteMatch3) note = noteMatch3[1].trim();
+    }
   }
 
   let txnDate: string | null = null;
   if (venmoBody) {
     const dateMatch = venmoBody.match(/Date\s*\n\s*(\w+ \d{1,2}, \d{4})/);
     if (dateMatch) {
-      txnDate = new Date(dateMatch[1]).toISOString().slice(0, 10);
+      // Parse calendar date as UTC-naive YYYY-MM-DD. `new Date("Aug 23, 2026")`
+      // is local midnight and `toISOString()` shifts it back a day east of GMT.
+      const MONTHS: Record<string, string> = {
+        Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+        Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+      };
+      const dm = dateMatch[1].match(/^([A-Za-z]{3})\w* (\d{1,2}), (\d{4})$/);
+      const mm = dm ? MONTHS[dm[1][0].toUpperCase() + dm[1].slice(1, 3).toLowerCase()] : null;
+      if (dm && mm) txnDate = `${dm[3]}-${mm}-${dm[2].padStart(2, "0")}`;
     }
   }
 
   let txnId: string | null = null;
   if (venmoBody) {
-    const idMatch = venmoBody.match(/Transaction ID\s*\n\s*(\d+)/);
+    const idMatch = venmoBody.match(/Transaction ID\s*\n\s*([A-Za-z0-9]+)/);
     if (idMatch) txnId = idMatch[1];
   }
 
@@ -336,7 +361,13 @@ function parseVenmoEmail({ subject: rawSubject, text, forwardingNote }: { from: 
   let description: string;
   const fwdCat = forwardingNote?.category;
   const fwdHint = forwardingNote?.descriptionHint;
-  const displayNote = note ? titleCase(note) : "";
+  // Venmo memos are often emoji-wrapped ("🎉 amarin thai 🎉"); keep the words for
+  // the ledger description and the raw memo in parsed_data.
+  const noteForDisplay = note
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}\uFE0F\u200D]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const displayNote = noteForDisplay ? titleCase(noteForDisplay) : "";
 
   if (isPaid) {
     if (fwdCat) {
