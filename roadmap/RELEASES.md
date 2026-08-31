@@ -11,6 +11,12 @@
 
 ### v2.12 — Aug 31, 2026
 
+#### v2.12.1
+<sub>Electing a credit as cashback is a checkbox, not a button</sub>
+
+##### Fixes
+- **Cashback checkbox separates "this IS a cashback" from "create a cashback" (FEA-125)** — v2.12.0 overloaded the **🏆 Cashback** button: on a credit it tagged the existing row, on a purchase it minted a new one. Those are different actions, and the tagging one belonged next to **Subscription** as a property of the row. Credits now carry a **🏆 Cashback** checkbox beside Subscription; ticking it on Save writes a `cashback_redemptions` row inferred entirely from the transaction (date, description, payment account, `|amount|` as Dollar Value), unticking deletes it, and both directions ride the existing edit-undo. The button reverts to its original FEA-14 job — create a **new** cashback credit linked to a purchase — and no longer appears on credits. Points and cents-per-point remain editable from the Cashback tab, which a checkbox can't express. (~5,000 tokens)
+
 #### v2.12.0
 <sub>Tag posted ledger credits into the Cashback tab without a duplicate income line</sub>
 
