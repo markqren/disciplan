@@ -11,6 +11,12 @@
 
 ### v2.12 — Aug 31, 2026
 
+#### v2.12.2
+<sub>Elect cashback on CSV, email, and payslip import edits</sub>
+
+##### Features
+- **Import edit modals gain the Cashback checkbox (FEA-125)** — The ledger-only election from v2.12.1 now lives on CSV, email, and payslip **Edit Transaction** as well: a credit (negative amount) can be ticked **🏆 Cashback** beside Tag, then **Save & Approve**. Commit writes a `cashback_redemptions` row inferred from the imported transaction (date, description, payment account, `|amount|` as Dollar Value) so it appears on the Cashback tab without a second income line. Review tables show a trophy on elected rows; import undo deletes the linked cashback records. Rakuten `cashback_earned` emails stay checked by default (existing auto-record) and can be unchecked to skip. (~4,500 tokens)
+
 #### v2.12.1
 <sub>Electing a credit as cashback is a checkbox, not a button</sub>
 

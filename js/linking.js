@@ -87,13 +87,15 @@ async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
         }
         if(Object.keys(patch).length)await sb(`transactions?id=eq.${newTxn.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify(patch)});
       }
-      // Always record the cashback in the rewards ledger.
-      const dv=Math.abs(c.amount_usd);
-      await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
-        date:c.date,item:c.description,payment_type:"Rakuten",
-        cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
-        dollar_value:dv,transaction_id:newTxn.id
-      })});
+      // Record in the rewards ledger unless the reviewer unchecked Cashback.
+      if(c._isCashback!==false){
+        const dv=Math.abs(c.amount_usd);
+        await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify({
+          date:c.date,item:c.description,payment_type:"Rakuten",
+          cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
+          dollar_value:dv,transaction_id:newTxn.id
+        })});
+      }
       console.log(parent
         ?`Rakuten: linked "${c.description}" to "${parent.description}" (cat: ${parent.category_id}) + cashback record`
         :`Rakuten: no parent found for "${store}" around ${searchDate} \u2014 cashback record only`);

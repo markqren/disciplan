@@ -10,6 +10,55 @@ function normalizeCandidateServicePeriod(c){
   }
 }
 
+function importIsCashbackElected(c){
+  if(c._isCashback===false)return false;
+  if(c._isCashback===true)return true;
+  return c._parsedData?.type==="cashback_earned";
+}
+
+function importCashbackField(c,amtInp){
+  const wrap=h("div",{style:{display:"flex",alignItems:"flex-end",paddingBottom:"4px"}});
+  const chk=h("input",{type:"checkbox",style:{accentColor:"#F2CC8F",cursor:"pointer"}});
+  chk.checked=importIsCashbackElected(c);
+  const label=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"rgba(255,255,255,0.6)",cursor:"pointer"},title:"Show this credit in the Cashback tab"});
+  label.append(chk,document.createTextNode("\uD83C\uDFC6 Cashback"));
+  wrap.append(label);
+  function syncVis(){
+    const show=parseFloat(amtInp.value)<0;
+    wrap.style.visibility=show?"visible":"hidden";
+    if(!show)chk.checked=false;
+  }
+  amtInp.addEventListener("input",syncVis);
+  syncVis();
+  wrap.read=()=>parseFloat(amtInp.value)<0&&chk.checked;
+  return wrap;
+}
+
+async function commitElectedCashback(valid,inserted){
+  const posts=[];
+  for(let i=0;i<valid.length;i++){
+    const c=valid[i];
+    if(!importIsCashbackElected(c)||!(c.amount_usd<0))continue;
+    if(c._parsedData?.type==="cashback_earned")continue;
+    const ins=inserted[i];if(!ins?.id)continue;
+    const dv=Math.abs(parseFloat(c.amount_usd)||0);
+    if(!(dv>0))continue;
+    posts.push({date:c.date,item:c.description,payment_type:c.payment_type,
+      cashback_type:"Dollar Value",redemption_amount:dv,redemption_rate:1,
+      dollar_value:dv,transaction_id:ins.id});
+  }
+  if(posts.length)await sb("cashback_redemptions",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify(posts)});
+}
+
+async function undoImportBatchTxns(batchId){
+  const txns=await sb(`transactions?import_batch=eq.${encodeURIComponent(batchId)}&select=id`);
+  const ids=(txns||[]).map(t=>t.id);
+  if(ids.length){
+    try{await sb(`cashback_redemptions?transaction_id=in.(${ids.join(",")})`,{method:"DELETE"});}catch(e){}
+  }
+  await sb(`transactions?import_batch=eq.${encodeURIComponent(batchId)}`,{method:"DELETE"});
+}
+
 function renderReviewTable(container,candidates){
   container.innerHTML="";
   // Load the active view's account labels for payment/transfer pickers; re-render
@@ -50,7 +99,7 @@ function renderReviewTable(container,candidates){
       const summary=await commitImport(candidates);
       renderReviewTable(container,candidates);
       showUndo(`\u2713 Imported ${summary.count} transactions`,async()=>{
-        await sb(`transactions?import_batch=eq.${encodeURIComponent(summary.batchId)}`,{method:"DELETE"});
+        await undoImportBatchTxns(summary.batchId);
         state.txnCount-=summary.count;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
       });
       const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
@@ -99,7 +148,7 @@ function renderReviewTable(container,candidates){
     tr.append(h("td",{class:"m",style:{color:"rgba(255,255,255,0.55)",whiteSpace:"nowrap",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}},fmtD(c.date)));
 
     const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openImportEditModal(candidates,idx,container)}});
-    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c._isTransfer?"\u2194 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
+    const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c._isTransfer?"\u2194 ":"")+(importIsCashbackElected(c)?"\uD83C\uDFC6 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descMain.textContent=descText;
     if(c._isCCPayment){
@@ -325,6 +374,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
+    c._isCashback=cbField.read();
     c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     c._status="approved";
@@ -341,7 +391,8 @@ function openImportEditModal(candidates,idx,reviewContainer){
   modal.append(mRow(mField("Date",mDate),descField));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
   modal.append(mRow(mField("Service Start",mSs),seField));
-  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  const cbField=importCashbackField(c,mAmt);
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag),cbField));
   modal.append(previewEl);
   modal.append(linkSection);
   modal.append(btnRow);
@@ -566,6 +617,7 @@ async function commitImport(candidates){
       }
     }catch(e){console.error("AT&T connectivity auto-link:",e)}
   }
+  await commitElectedCashback(valid,inserted);
   valid.forEach(c=>c._status="committed");
   const checklistCandidate=valid.find(c=>c._monthlyChecklistTask&&c._monthlyChecklistOwner);
   if(checklistCandidate&&typeof completeMonthlyChecklistFromImport==="function"){
@@ -610,7 +662,7 @@ function renderEmailReviewTable(container,candidates){
       const summary=await commitEmailImports(candidates);
       renderEmailReviewTable(container,candidates);
       showUndo(`\u2713 Imported ${summary.count} transactions`,async()=>{
-        await sb(`transactions?import_batch=eq.${encodeURIComponent(summary.batchId)}`,{method:"DELETE"});
+        await undoImportBatchTxns(summary.batchId);
         for(const pid of summary.pendingIds)await sb(`pending_imports?id=eq.${pid}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"approved",committed_at:null})});
         state.txnCount-=summary.count;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
       });
@@ -676,7 +728,7 @@ function renderEmailReviewTable(container,candidates){
 
     const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openEmailEditModal(candidates,idx,container)}});
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
-    descMain.textContent=c.description+(c._linkToTransactionId?" \uD83D\uDD17":"");
+    descMain.textContent=(importIsCashbackElected(c)?"\uD83C\uDFC6 ":"")+c.description+(c._linkToTransactionId?" \uD83D\uDD17":"");
     const descSub=h("div",{style:{fontSize:"10px",color:c._linkToTransactionId?"rgba(74,111,165,0.85)":"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     if(c._linkToTransactionId&&c._linkDisplay){
       descSub.textContent=`\u2192 ${c._linkDisplay.description||"transaction"} ${fmtF(c._linkDisplay.amount_usd)}${c._linkDisplay.date?" \u00b7 "+fmtD(c._linkDisplay.date):""}${c._linkConfidence?" \u00b7 "+c._linkConfidence+" match":""}`;
@@ -742,7 +794,7 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
       const summary=await commitPayslipImport(candidates);
       renderPayslipReviewTable(container,candidates,skippedPages);
       showUndo(`\u2713 Imported ${summary.count} transactions`,async()=>{
-        await sb(`transactions?import_batch=eq.${encodeURIComponent(summary.batchId)}`,{method:"DELETE"});
+        await undoImportBatchTxns(summary.batchId);
         state.txnCount-=summary.count;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
       });
       const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
@@ -813,7 +865,7 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
 
       const descTd=h("td",{style:{maxWidth:"220px",cursor:"pointer"},onClick:()=>{if(c._status!=="committed")openPayslipEditModal(candidates,idx,container,skippedPages)}});
       const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
-      descMain.textContent=c.description;
+      descMain.textContent=(importIsCashbackElected(c)?"\uD83C\uDFC6 ":"")+c.description;
       const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
       descSub.textContent=c._skipReason||"";
       descTd.append(descMain,descSub);
@@ -1005,6 +1057,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
+    c._isCashback=emCbField.read();
     c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     c._status="approved";
@@ -1019,7 +1072,8 @@ function openEmailEditModal(candidates,idx,reviewContainer){
   modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
   modal.append(mRow(mField("Service Start",mSs),emSeField));
-  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  const emCbField=importCashbackField(c,mAmt);
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag),emCbField));
   modal.append(emPreviewEl);
   modal.append(refSection);
   modal.append(linkSection);
@@ -1111,6 +1165,7 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
+    c._isCashback=psCbField.read();
     c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     c._status="approved";
@@ -1125,7 +1180,8 @@ function openPayslipEditModal(candidates,idx,reviewContainer,skippedPages){
   modal.append(mRow(mField("Date",mDate),mField("Description",mDesc)));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
   modal.append(mRow(mField("Service Start",mSs),psSeField));
-  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag)));
+  const psCbField=importCashbackField(c,mAmt);
+  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag),psCbField));
   modal.append(psPreviewEl);
   modal.append(refSection);
   modal.append(btnRow);
@@ -1181,6 +1237,7 @@ async function commitEmailImports(candidates){
   // Auto-link Rakuten cashback to parent purchases and create cashback_redemptions
   const rakutenCB=valid.filter(c=>c._parsedData?.type==="cashback_earned");
   if(rakutenCB.length&&created?.length)setTimeout(()=>linkRakutenCashback(rakutenCB,valid,created).catch(e=>console.error("Rakuten cashback link:",e)),1000);
+  await commitElectedCashback(valid,created);
   return{
     count:valid.length,
     imported:valid,
@@ -1222,6 +1279,7 @@ async function commitPayslipImport(candidates){
   }
   state.txnCount+=rows.length;
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  await commitElectedCashback(valid,created);
   valid.forEach(c=>c._status="committed");
   // Auto-link Connectivity Reimbursement Fund to AT&T internet charge in same calendar month
   const connIndices=valid.map((c,i)=>c._source==="connectivity_reimb"?i:-1).filter(i=>i>=0);
