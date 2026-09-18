@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Sep 1, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Sep 18, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v2.12 — Aug 31, 2026
+
+#### v2.12.3
+<sub>Budget targets in the database for the app and newsletter agent</sub>
+
+##### Features
+- **Budget targets shared backend (FEA-126)** — Income Statement `%` targets (2019–2026 seeded) now live in `disciplan.budget_targets` (household-scoped); Tgt edits upsert to the table instead of `localStorage` (one-time local diffs migrate on load), so future newsletter runs automatically use frontend changes. The newsletter loads the same rows, derives monthly `$` ceilings as `% × trailing-12 income ÷ 12` and rounds them to a sensible `$50` for `budget_pace` / `spending_snapshot` (replacing the stale hardcoded dollar map), injects current targets into every writer prompt, and exposes `insight_ro.budget_targets` to `run_finance_query` so follow-ups like "what are my budget targets?" need no new code change. Migration `20260917120000_budget_targets.sql` applied and recorded in remote history via the Management API (the Supabase CLI is Santa-blocked on this machine — see CLAUDE.md). (~8,000 tokens)
 
 #### v2.12.2
 <sub>Elect cashback on CSV, email, and payslip import edits</sub>
@@ -843,12 +849,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (169 items)</summary>
+<summary><strong>✅ Completed</strong> (170 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-126 | **Budget targets shared backend** — `disciplan.budget_targets` stores household-scoped `% of income` targets (seeded 2019–2026 from `BUDGET_TARGETS`). The Income Statement loads/saves via PostgREST upsert (localStorage diffs migrate once). The `daily-insight` edge function reads the same rows, derives monthly dollar ceilings from trailing-12 income rounded to `$50` for pace archetypes, adds a `BUDGET TARGETS` block to every writer prompt, and registers `insight_ro.budget_targets` for `run_finance_query`. | Feature → Done | Sep 18 |
 | FEA-125 | **Elect a ledger or import credit as cashback** — Negative-amount rows carry a **🏆 Cashback** checkbox beside Subscription (ledger) or Tag (CSV/email/payslip import edit). Ticking it writes a `cashback_redemptions` row inferred from the transaction (date, description, payment account, `\|amount\|` as Dollar Value) so the credit shows on the Cashback tab with no second income transaction; unticking (ledger) or import undo removes it. Tagged rows show a trophy. The Cashback *button* keeps its original FEA-14 meaning — mint a new cashback credit linked to a purchase — and is hidden on credits. Rakuten email cashback stays auto-elected and can be unchecked. Points/rate stay editable from the Cashback tab. | Feature → Done | Sep 1 |
 | FEA-124 | **Shilpa monthly finance checklist** — A floating, collapsible checklist follows Shilpa's person-view across every tab and resets by calendar month. The paycheck task infers expected semi-monthly Pronto service periods, lists matured gaps as nested subtasks, and waits seven days after each period ends before calling it missing. Credit-card and debit/checking items complete automatically after matching imports. Account balances use a resumable per-account workflow: enter a statement balance or skip, upsert the day's balance snapshot, and create an idempotent adjustment only when the live ledger differs; the parent item completes after all active accounts are handled. State persists cross-device in an owner/month `preferences` row, with no migration. | Feature → Done | Jul 25 |
 | FEA-116 | **Newsletter cost cut (prompt caching) + follow-up budget fix + cost observability** — Cost had doubled (avg $0.020→$0.045/send, spiking to $0.165 for a `budget_pace` that ran ~36k input tokens) because `generateInsightText`'s multi-turn `run_finance_query` loop re-sent the entire growing context uncached every turn. The static prefix (tool def + day's prompt/facts/guidance) is now marked Anthropic `cache_control: ephemeral` so each tool turn re-reads it at 0.1x instead of 1x; cost computed exactly from the cache_creation/cache_read/input/output split. Follow-ups that kept "capping out" (deferring to tomorrow because the main insight exhausted the shared 4-call budget) are fixed by raising the budget to 8 calls / 10 turns (cheap now that turns are cached) and instructing the writer to run follow-up queries first. Observability: `insight_log` gained `tool_calls` + `cache_read_tokens` + `cache_write_tokens` (migration `20260709222625`), surfaced in the AI portal as an "avg cost/send (last 10)" KPI + per-row query-count/`cached` badges. Edge-function + migration; committed, deploy pending. | Feature → Done | Jul 9 |

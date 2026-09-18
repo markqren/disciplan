@@ -80,9 +80,13 @@ export interface CategorySchema {
   // parent_id (top-level expense parent, parent_id IS NULL) → ordered list of [parent, ...children].
   // The parent itself is always the first entry so direct charges to the parent are counted too.
   parentRollup: Record<string, string[]>;
-  // Mark's monthly budget targets, currently parent-level only. Sourced from a hardcoded map
-  // (no DB table for budgets yet) — populated by buildCategorySchema for convenience.
+  // Monthly budget ceilings in USD for budget_pace / spending_snapshot (derived from
+  // budgetTargetsPct × trailing-12 monthly income).
   budgetTargets: Record<string, number>;
+  // % of income targets from disciplan.budget_targets (same as Income Statement Tgt column).
+  budgetTargetsPct: Record<string, number>;
+  budgetYear: number;
+  monthlyIncomeBase: number;
 }
 
 // Owner-scoped compensation breakdown for one YTD window (through today's

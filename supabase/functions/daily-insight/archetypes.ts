@@ -21,20 +21,6 @@ import type {
   MonthlyMap,
 } from "./types.ts";
 
-// Mark's parent-level monthly budget targets. Sourced from a static map because there's
-// no DB table for budgets yet; if/when one is added, fold this into CategorySchema and
-// query it alongside the parent rollup.
-//
-// IMPORTANT: parent IDs here MUST match expense parents in the categories table
-// (parent_id IS NULL AND is_expense = true). Drift = silent miscount in budget_pace.
-export const DEFAULT_BUDGET_TARGETS: Record<string, number> = {
-  food: 800, groceries: 400, restaurant: 400,
-  home: 2500, rent: 2250, furniture: 250,
-  personal: 600, clothes: 300, tech: 300,
-  transportation: 300, utilities: 150, health: 200,
-  entertainment: 300, financial: 100, other: 200,
-};
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 // Compute parent-level totals for a given month using the runtime category schema.

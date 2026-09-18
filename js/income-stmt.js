@@ -168,7 +168,7 @@ async function renderIS(el){
     renderISTimeChart(stackCard,{key:"expenses",title:"Expense Stack",id:"stackChart",height:"230px",monthlyConfig:()=>stackConfig(mData,false),weeklyData:fetchISWeekly,weeklyConfig:rows=>stackConfig(rows,true)});
 
     // Budget vs Actual chart (single-year only)
-    const bgt=state.year!=="all"?getBudgetTargets(state.year):null;
+    const bgt=state.year!=="all"?await ensureBudgetTargets(state.year):null;
     if(bgt&&totI>0){
       const budgetCard=h("div",{class:"cd"});
       const bCats=expCats.filter(c=>(bgt[c]||0)>0);
@@ -340,7 +340,7 @@ async function renderIS(el){
             td.textContent=nv.toFixed(1)+"%";
             // Auto-recompute parent → _expenses → _savings
             recomputeAll(key);
-            saveBudgetTargets(state.year,bgt);
+            void saveBudgetTargets(state.year,bgt);
           };
           inp.addEventListener("blur",commit);
           inp.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();inp.blur()}else if(ev.key==="Escape"){td.textContent=origText}});

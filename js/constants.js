@@ -11,18 +11,66 @@ const BUDGET_TARGETS={
   2024:{entertainment:7,accommodation:0,games:0,food:6,groceries:1,restaurant:5,home:19,rent:18,furniture:1,health:4,personal:3,clothes:1.5,tech:1.5,transportation:5,utilities:2,financial:0,other:1,_expenses:47,_savings:53},
   2025:{entertainment:7,accommodation:0,games:0,food:6,groceries:1,restaurant:5,home:19,rent:18,furniture:1,health:4,personal:3,clothes:1.5,tech:1.5,transportation:5,utilities:2,financial:0,other:1,_expenses:47,_savings:53}
 };
-function getBudgetTargets(year){
-  const base=BUDGET_TARGETS[year]||BUDGET_TARGETS[2025];
-  const saved=localStorage.getItem("budgetTargets_"+year);
-  if(saved)try{return{...base,...JSON.parse(saved)}}catch(e){}
-  return{...base};
+const _budgetCache={};
+function budgetTargetsFallback(year){
+  const y=Number(year);
+  if(BUDGET_TARGETS[y])return{...BUDGET_TARGETS[y]};
+  const prior=Object.keys(BUDGET_TARGETS).map(Number).filter(k=>k<=y).sort((a,b)=>b-a);
+  return{...BUDGET_TARGETS[prior[0]||2025]};
 }
-function saveBudgetTargets(year,bgt){
-  const base=BUDGET_TARGETS[year]||BUDGET_TARGETS[2025];
+// Loads a year's targets from disciplan.budget_targets (the same rows the
+// newsletter reads), falling back to the seeded map above when the table is
+// empty. Any pre-existing localStorage overrides migrate into the table once.
+async function ensureBudgetTargets(year){
+  const y=Number(year);
+  if(_budgetCache[y])return _budgetCache[y];
+  let bgt=budgetTargetsFallback(y);
+  try{
+    const rows=await sb("budget_targets?year=eq."+y+"&select=category_id,pct_of_income"+householdQS());
+    if(rows&&rows.length){
+      bgt={...bgt};
+      for(const r of rows)bgt[r.category_id]=parseFloat(r.pct_of_income);
+    }
+    const lsKey="budgetTargets_"+y;
+    const saved=localStorage.getItem(lsKey);
+    if(saved){
+      try{
+        bgt={...bgt,...JSON.parse(saved)};
+        await saveBudgetTargets(year,bgt);
+      }catch(e){}
+    }
+  }catch(e){}
+  _budgetCache[y]=bgt;
+  return bgt;
+}
+// Device-local last resort: keeps only the diff vs the seeded map, exactly as
+// targets were stored before they moved to the database.
+function stashBudgetTargetsLocally(year,bgt){
+  const base=budgetTargetsFallback(year);
   const diff={};
   for(const k of Object.keys(bgt)){if(bgt[k]!==base[k])diff[k]=bgt[k]}
   if(Object.keys(diff).length)localStorage.setItem("budgetTargets_"+year,JSON.stringify(diff));
   else localStorage.removeItem("budgetTargets_"+year);
+}
+async function saveBudgetTargets(year,bgt){
+  const y=Number(year);
+  _budgetCache[y]={...bgt};
+  if(currentHousehold==null)return stashBudgetTargetsLocally(y,bgt);
+  const rows=Object.entries(bgt)
+    .filter(([,v])=>v!=null&&!isNaN(v))
+    .map(([k,v])=>({year:y,category_id:k,pct_of_income:v,household_id:currentHousehold}));
+  if(!rows.length)return;
+  try{
+    await sb("budget_targets?on_conflict=household_id,year,category_id",{
+      method:"POST",
+      headers:{"Prefer":"resolution=merge-duplicates,return=minimal"},
+      body:JSON.stringify(rows)
+    });
+    localStorage.removeItem("budgetTargets_"+y);
+  }catch(e){
+    console.warn("saveBudgetTargets",e);
+    stashBudgetTargetsLocally(y,bgt);
+  }
 }
 const ML=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TCOLS=["#4A6FA5","#E07A5F","#81B29A","#F2CC8F","#3D405B","#D4A373","#9B8EA0","#6B9AC4","#CB997E","#8B687F"];

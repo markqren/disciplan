@@ -1,0 +1,18 @@
+---
+description: Never use the Supabase CLI on this laptop (Santa SIGKILL 137). Apply schema via Management API and record schema_migrations in the same transaction.
+alwaysApply: true
+---
+
+# Supabase migrations on this computer
+
+Do **not** run `npx supabase`, `supabase db push`, `supabase migration new`, or `supabase migration list`. Santa (Pinterest allowlisting, `#santa`) SIGKILLs the unsigned `supabase` binary: **exit 137, no output**. That is not a network or auth failure. Do not retry, reinstall, or wait.
+
+Default apply path is the Management API. Project ref: `mjuannepfodstbsxweuc`.
+
+1. Hand-name the file `supabase/migrations/YYYYMMDDHHMMSS_<name>.sql` (unique 14-digit version). Qualify tables as `disciplan.` and include GRANT + RLS.
+2. PAT (never echo): `security find-generic-password -s "Supabase CLI" -w | sed 's/^go-keyring-base64://' | base64 -d`
+3. `POST https://api.supabase.com/v1/projects/mjuannepfodstbsxweuc/database/query` with `{"query":"..."}`
+4. One transaction: `BEGIN;` + migration SQL + `INSERT INTO supabase_migrations.schema_migrations (version, name, statements) VALUES (...) ON CONFLICT (version) DO NOTHING;` + `COMMIT;`
+5. Verify with a follow-up query. Anon key `42501 permission denied for schema disciplan` is expected; the app uses an authenticated JWT. Test writes with `BEGIN; SET LOCAL ROLE authenticated; ... ROLLBACK;`
+
+This **is** recorded history (same as `db push`), not an untracked dashboard hotfix. Full procedure: `CLAUDE.md` and `.cursor/skills/apply-supabase-migration/SKILL.md`.

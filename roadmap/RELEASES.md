@@ -11,6 +11,12 @@
 
 ### v2.12 — Aug 31, 2026
 
+#### v2.12.3
+<sub>Budget targets in the database for the app and newsletter agent</sub>
+
+##### Features
+- **Budget targets shared backend (FEA-126)** — Income Statement `%` targets (2019–2026 seeded) now live in `disciplan.budget_targets` (household-scoped); Tgt edits upsert to the table instead of `localStorage` (one-time local diffs migrate on load), so future newsletter runs automatically use frontend changes. The newsletter loads the same rows, derives monthly `$` ceilings as `% × trailing-12 income ÷ 12` and rounds them to a sensible `$50` for `budget_pace` / `spending_snapshot` (replacing the stale hardcoded dollar map), injects current targets into every writer prompt, and exposes `insight_ro.budget_targets` to `run_finance_query` so follow-ups like "what are my budget targets?" need no new code change. Migration `20260917120000_budget_targets.sql` applied and recorded in remote history via the Management API (the Supabase CLI is Santa-blocked on this machine — see CLAUDE.md). (~8,000 tokens)
+
 #### v2.12.2
 <sub>Elect cashback on CSV, email, and payslip import edits</sub>
 

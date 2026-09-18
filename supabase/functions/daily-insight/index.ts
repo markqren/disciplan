@@ -57,7 +57,7 @@ import type {
   TripYearEntry,
   TxnDetail,
 } from "./types.ts";
-import { DEFAULT_BUDGET_TARGETS, buildCandidates } from "./archetypes.ts";
+import { buildCandidates } from "./archetypes.ts";
 import {
   DEFAULT_POLICY_PARAMS,
   POLICY_NAME,
@@ -141,13 +141,24 @@ interface CategoryRow {
 
 const NON_EXPENSE_IDS = new Set(["income", "investment", "adjustment"]);
 
+// Mirrors js/constants.js 2025 fallback when budget_targets has no rows yet.
+const FALLBACK_BUDGET_PCT: Record<string, number> = {
+  entertainment: 7, accommodation: 0, games: 0, food: 6, groceries: 1, restaurant: 5,
+  home: 19, rent: 18, furniture: 1, health: 4, personal: 3, clothes: 1.5, tech: 1.5,
+  transportation: 5, utilities: 2, financial: 0, other: 1, _expenses: 47, _savings: 53,
+};
+
+function emptyBudgetFields(): Pick<CategorySchema, "budgetTargets" | "budgetTargetsPct" | "budgetYear" | "monthlyIncomeBase"> {
+  return { budgetTargets: {}, budgetTargetsPct: {}, budgetYear: 0, monthlyIncomeBase: 0 };
+}
+
 async function fetchCategorySchema(supabase: SupabaseClient): Promise<CategorySchema> {
   const { data, error } = await supabase
     .from("categories")
     .select("id, parent_id, is_expense");
   if (error) {
     console.error("fetchCategorySchema error — falling back to empty schema:", error);
-    return { expenseCategoryIds: new Set(), parentRollup: {}, budgetTargets: { ...DEFAULT_BUDGET_TARGETS } };
+    return { expenseCategoryIds: new Set(), parentRollup: {}, ...emptyBudgetFields() };
   }
 
   const rows = (data || []) as CategoryRow[];
@@ -173,7 +184,110 @@ async function fetchCategorySchema(supabase: SupabaseClient): Promise<CategorySc
     }
   }
 
-  return { expenseCategoryIds, parentRollup, budgetTargets: { ...DEFAULT_BUDGET_TARGETS } };
+  return { expenseCategoryIds, parentRollup, ...emptyBudgetFields() };
+}
+
+async function fetchBudgetTargetsPct(
+  supabase: SupabaseClient,
+  year: number,
+): Promise<{ year: number; pct: Record<string, number> }> {
+  for (const tryYear of [year, year - 1]) {
+    let q = supabase
+      .from("budget_targets")
+      .select("category_id, pct_of_income")
+      .eq("year", tryYear);
+    if (INSIGHT_HOUSEHOLD_ID != null) q = q.eq("household_id", INSIGHT_HOUSEHOLD_ID);
+    const { data, error } = await q;
+    if (error) {
+      console.warn("fetchBudgetTargetsPct error:", error);
+      break;
+    }
+    if (data && data.length > 0) {
+      const pct: Record<string, number> = {};
+      for (const row of data) {
+        pct[row.category_id as string] = Number(row.pct_of_income) || 0;
+      }
+      return { year: tryYear, pct };
+    }
+  }
+  return { year, pct: { ...FALLBACK_BUDGET_PCT } };
+}
+
+function computeMonthlyIncomeBase(income: Record<string, number>, today: string): number {
+  const [y, m] = today.slice(0, 7).split("-").map(Number);
+  let sum = 0;
+  // Skip the current (usually incomplete) month so a mid-month paycheck or
+  // bonus cannot inflate every category's dollar ceiling.
+  for (let i = 1; i <= 12; i++) {
+    let mo = m - i;
+    let yr = y;
+    while (mo <= 0) {
+      mo += 12;
+      yr -= 1;
+    }
+    const mk = `${yr}-${String(mo).padStart(2, "0")}`;
+    sum += income[mk] || 0;
+  }
+  if (sum > 0) return sum / 12;
+  const cy = today.slice(0, 4);
+  let ySum = 0;
+  let count = 0;
+  for (const [mk, val] of Object.entries(income)) {
+    if (mk.startsWith(cy)) {
+      ySum += val;
+      count++;
+    }
+  }
+  return count > 0 ? ySum / count : 0;
+}
+
+function deriveDollarBudgetTargets(
+  pct: Record<string, number>,
+  monthlyBase: number,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [cat, p] of Object.entries(pct)) {
+    if (cat === "_expenses" || cat === "_savings") continue;
+    // Targets are guidance, not accounting outputs. Round to a human-friendly
+    // $50 so the writer says "$1,550 budget", not an arbitrary "$1,549".
+    out[cat] = Math.round(((p / 100) * monthlyBase) / 50) * 50;
+  }
+  return out;
+}
+
+async function applyBudgetTargetsToSchema(
+  supabase: SupabaseClient,
+  schema: CategorySchema,
+  income: Record<string, number>,
+  today: string,
+): Promise<CategorySchema> {
+  const budgetYear = parseInt(today.slice(0, 4), 10);
+  const { year, pct } = await fetchBudgetTargetsPct(supabase, budgetYear);
+  const monthlyIncomeBase = computeMonthlyIncomeBase(income, today);
+  return {
+    ...schema,
+    budgetYear: year,
+    budgetTargetsPct: pct,
+    monthlyIncomeBase,
+    budgetTargets: deriveDollarBudgetTargets(pct, monthlyIncomeBase),
+  };
+}
+
+function formatBudgetTargetsPromptBlock(schema: CategorySchema): string {
+  const year = schema.budgetYear || new Date().getUTCFullYear();
+  const base = Math.round(schema.monthlyIncomeBase || 0);
+  const parents = Object.keys(schema.parentRollup || {});
+  const rows = parents
+    .map(p => ({
+      category: p,
+      pct_of_income: schema.budgetTargetsPct[p] ?? 0,
+      monthly_usd: schema.budgetTargets[p] ?? 0,
+    }))
+    .filter(r => r.pct_of_income > 0 || r.monthly_usd > 0);
+  return `## BUDGET TARGETS (${year}, % of income; monthly $ derived from trailing-12 income ÷ 12 ≈ $${base.toLocaleString()}/mo):
+Parent targets include subcategories — do not double-count food + groceries.
+${JSON.stringify(rows, null, 2)}
+For other years or full line-item detail, query budget_targets(year, category_id, pct_of_income).`;
 }
 
 // ── Build monthly maps from IS RPC rows ─────────────────────────────────────
@@ -251,6 +365,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
   );
   const allISRows: ISRow[] = isResults.flatMap(r => (r.data || []) as ISRow[]);
   const { expenses, income, unknownCategoryIds } = buildMonthlyMaps(allISRows, schema);
+  const schemaWithBudget = await applyBudgetTargetsToSchema(supabase, schema, income, today);
   if (unknownCategoryIds.size > 0) {
     // Surface drift between transactions and the categories table loudly so we catch
     // future schema additions before they silently drop spend out of aggregates.
@@ -363,7 +478,7 @@ async function buildFeatures(supabase: SupabaseClient, today: string): Promise<{
     today,
     monthDay,
     monthKey,
-    schema,
+    schema: schemaWithBudget,
     expenses,
     accruedMtdByCategory: accruedMtdByCategory.total,
     tripAccruedMtdByCategory: accruedMtdByCategory.trip,
@@ -1297,7 +1412,7 @@ async function fetchStrategies(supabase: SupabaseClient): Promise<Map<string, St
 }
 
 // ── LLM prompt: the LLM only writes the narrative + chart for the chosen archetype.
-function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, strategy?: Strategy, followups: FollowupRow[] = [], offerTools = true): string {
+function buildArchetypePrompt(today: string, principles: string, history: InsightLogRow[], selected: ScoredCandidate, schema: CategorySchema, strategy?: Strategy, followups: FollowupRow[] = [], offerTools = true): string {
   const recentTypes = history.slice(0, 7).map(h => `${h.created_at.slice(0, 10)}: ${h.insight_type}${h.feedback_rating != null ? ` (rated ${h.feedback_rating}/10)` : ""}`).join("\n");
   const recentFeedback = history
     .filter(h => h.feedback_rating != null && h.feedback_comment)
@@ -1323,6 +1438,8 @@ ${recentTypes || "none"}
 ## RECENT FEEDBACK COMMENTS:
 ${recentFeedback || "none"}
 
+${formatBudgetTargetsPromptBlock(schema)}
+
 ## STRUCTURED FACTS (pre-computed baseline — do not invent numbers; if you need a figure that isn't here, fetch it with run_finance_query):
 ${JSON.stringify(selected.facts, null, 2)}
 
@@ -1338,6 +1455,7 @@ You may call run_finance_query only when the facts above genuinely lack a number
   accounts(id, label, account_type, institution, currency, is_active)
   balance_snapshots(id, account_id, snapshot_date, balance_usd, notes)
   cashback_redemptions(id, date, item, payment_type, cashback_type, dollar_value, redemption_rate)
+  budget_targets(year, category_id, pct_of_income)
 Accrual figures = SUM(daily_cost * overlap_days) for the date range; a single day's cost = SUM(daily_cost) over rows whose [service_start, service_end] contains that day. EFFICIENCY: make each query count — NEVER query for a number already present in the facts above, and fold everything you need into one aggregate query whenever possible. Return only aggregate/top-N rows (LIMIT 5-10), not raw ledgers. Derive simple arithmetic (projections, ratios, sums of provided figures) yourself instead of querying. Follow-up questions below share the same strict budget, so spend there first and skip optional main-insight drill-downs.
 SQL DISCIPLINE: decide the basis BEFORE writing SQL. For ACCRUAL insights, filter by service-period overlap (service_start <= range_end AND service_end >= range_start) and compute overlap with daily_cost; do NOT use logged date to decide whether something belongs in a month. Logged date is only for CASH / EVENT-basis insights. Ask the narrow direct question you need. Example: if you need the tag behind an already-provided $875 transportation trip accrual, query the service-overlapping transportation rows ordered by accrued overlap and select tag/description; do NOT scan all July-logged trip transactions and infer a tag. If a fact provides trip_tags, use it and do not query at all.
 
@@ -1525,7 +1643,7 @@ const RUN_QUERY_TOOL = {
   name: "run_finance_query",
   description:
     "Run ONE read-only SQL SELECT over the recipient's own finance data to fetch a number the provided facts don't already contain (e.g. split spend by tag, verify a net-accrual figure, compute a YTD run-rate, break a parent into children). " +
-    "Query these views UNQUALIFIED (no schema prefix): transactions(id,date,description,category_id,amount_usd,daily_cost,service_start,service_end,service_days,payment_type,credit,tag,transaction_group_id,is_subscription), tags(name,start_date,end_date,tag_type,notes), categories(id,label,parent_id,is_expense,default_accrual_days), accounts(id,label,account_type,institution,currency,is_active), balance_snapshots(id,account_id,snapshot_date,balance_usd,notes), cashback_redemptions(id,date,item,payment_type,cashback_type,dollar_value,redemption_rate). " +
+    "Query these views UNQUALIFIED (no schema prefix): transactions(id,date,description,category_id,amount_usd,daily_cost,service_start,service_end,service_days,payment_type,credit,tag,transaction_group_id,is_subscription), tags(name,start_date,end_date,tag_type,notes), categories(id,label,parent_id,is_expense,default_accrual_days), accounts(id,label,account_type,institution,currency,is_active), balance_snapshots(id,account_id,snapshot_date,balance_usd,notes), cashback_redemptions(id,date,item,payment_type,cashback_type,dollar_value,redemption_rate), budget_targets(year,category_id,pct_of_income). " +
     "Only a single SELECT/WITH is allowed; no schema-qualified names, no comments, no writes. Results are capped at 500 rows. Accrual figures use daily_cost across [service_start, service_end].",
   input_schema: {
     type: "object",
@@ -1799,7 +1917,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // tool are handed to the writer here.
     const chosenStrategy = strategies.get(chosen.insight_type);
     const offerTools = pendingFollowups.length > 0 || !ZERO_TOOL_MAIN_ARCHETYPES.has(chosen.insight_type);
-    const prompt = buildArchetypePrompt(today, principles, history, chosen, chosenStrategy, pendingFollowups, offerTools);
+    const prompt = buildArchetypePrompt(today, principles, history, chosen, features.schema, chosenStrategy, pendingFollowups, offerTools);
     const gen = await generateInsightText(supabase, prompt, { enableTools: offerTools });
     inputTokens      += gen.inputTokens;
     outputTokens     += gen.outputTokens;
