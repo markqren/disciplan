@@ -419,6 +419,123 @@ function attachTagSuggestions(input){
   return input;
 }
 
+// Description autocomplete for New Transaction. Empty field shows recent unique
+// descriptions from the active view; typed text searches the ledger and ranks
+// prefix matches first. Each row shows category / date / payment so you can
+// copy how a similar item was entered.
+let _descRecentPromise=null,_descRecentKey="";
+function invalidateDescSuggestions(){_descRecentPromise=null;_descRecentKey=""}
+function descSuggestionScope(){return typeof ownerQS==="function"?ownerQS():""}
+function uniqDescriptions(rows,limit){
+  const seen=new Set(),out=[];
+  for(const r of rows||[]){
+    const description=(r.description||"").trim();
+    if(!description)continue;
+    const key=description.toLowerCase();
+    if(seen.has(key))continue;
+    seen.add(key);
+    out.push({description,category_id:r.category_id||"",date:r.date||"",payment_type:r.payment_type||""});
+    if(out.length>=limit)break;
+  }
+  return out;
+}
+async function fetchDescSuggestions(q){
+  const qs=descSuggestionScope();
+  const limit=q?80:150;
+  let path=`transactions?select=description,category_id,date,payment_type&order=date.desc&limit=${limit}${qs}`;
+  if(q)path+=`&description=ilike.*${encodeURIComponent(q)}*`;
+  else{
+    const key=qs+"|"+limit;
+    if(_descRecentPromise&&_descRecentKey===key)return _descRecentPromise;
+    _descRecentKey=key;
+    _descRecentPromise=sb(path).then(rows=>uniqDescriptions(rows,8)).catch(()=>[]);
+    return _descRecentPromise;
+  }
+  const rows=await sb(path);
+  const items=uniqDescriptions(rows,8);
+  const ql=q.toLowerCase();
+  items.sort((a,b)=>{
+    const as=a.description.toLowerCase().startsWith(ql)?0:1;
+    const bs=b.description.toLowerCase().startsWith(ql)?0:1;
+    if(as!==bs)return as-bs;
+    return 0;
+  });
+  return items;
+}
+function attachDescriptionSuggestions(input,opts){
+  if(!input||input.dataset.descSuggestions)return input;
+  input.dataset.descSuggestions="1";
+  input.setAttribute("autocomplete","off");
+  opts=opts||{};
+  let menu=null,renderSeq=0,active=-1,blurTimer=null,choosing=false,visible=[],timer=null;
+  function hide(){
+    if(menu){menu.remove();menu=null}
+    window.removeEventListener("resize",hide);
+    window.removeEventListener("scroll",hide,true);
+    active=-1;visible=[];
+  }
+  function place(){
+    if(!menu)return;
+    const r=input.getBoundingClientRect(),gap=4;
+    menu.style.left=Math.max(8,Math.min(r.left,window.innerWidth-menu.offsetWidth-8))+"px";
+    const below=window.innerHeight-r.bottom-gap;
+    menu.style.top=(below>=Math.min(menu.offsetHeight,260)?r.bottom+gap:Math.max(8,r.top-menu.offsetHeight-gap))+"px";
+  }
+  function choose(row){
+    choosing=true;
+    try{
+      input.value=row.description;
+      input.dispatchEvent(new Event("input",{bubbles:true}));
+      input.dispatchEvent(new Event("change",{bubbles:true}));
+      if(typeof opts.onChoose==="function")opts.onChoose(row);
+    }finally{choosing=false}
+    hide();input.focus();
+  }
+  function setActive(next){
+    if(!menu)return;
+    const options=[...menu.querySelectorAll("button")];
+    if(!options.length)return;
+    active=(next+options.length)%options.length;
+    options.forEach((el,i)=>el.style.background=i===active?"rgba(74,111,165,0.28)":"transparent");
+    options[active].scrollIntoView({block:"nearest"});
+  }
+  async function render(){
+    const seq=++renderSeq,q=(input.value||"").trim();
+    let items=[];
+    try{items=await fetchDescSuggestions(q)}catch(e){items=[]}
+    if(seq!==renderSeq||document.activeElement!==input)return;
+    hide();
+    if(!items.length)return;
+    visible=items;
+    menu=h("div",{style:{position:"fixed",zIndex:"10020",minWidth:Math.max(240,input.getBoundingClientRect().width)+"px",maxWidth:"min(420px, calc(100vw - 16px))",maxHeight:"260px",overflowY:"auto",background:"#17191d",border:"1px solid rgba(255,255,255,0.13)",borderRadius:"7px",boxShadow:"0 10px 28px rgba(0,0,0,0.45)",padding:"4px"}});
+    menu.append(h("div",{style:{padding:"4px 8px 3px",fontSize:"9px",textTransform:"uppercase",letterSpacing:"0.06em",color:"rgba(255,255,255,0.3)"}},q?"Matching descriptions":"Recent descriptions"));
+    items.forEach((row,idx)=>{
+      const meta=[row.category_id,row.date?fmtD(row.date):"",row.payment_type].filter(Boolean).join(" \u00b7 ");
+      const btn=h("button",{type:"button",style:{display:"block",width:"100%",border:"0",borderRadius:"5px",background:"transparent",color:"rgba(255,255,255,0.85)",fontFamily:"var(--sans)",fontSize:"12px",padding:"8px",textAlign:"left",cursor:"pointer"},onMouseenter:()=>setActive(idx),onMousedown:e=>{e.preventDefault();choose(row)}});
+      btn.append(h("div",{style:{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},row.description));
+      if(meta)btn.append(h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)",marginTop:"2px"}},meta));
+      menu.append(btn);
+    });
+    document.body.append(menu);place();
+    window.addEventListener("resize",hide);
+    window.addEventListener("scroll",hide,true);
+  }
+  function scheduleRender(){
+    clearTimeout(timer);
+    timer=setTimeout(render,(input.value||"").trim()?140:0);
+  }
+  input.addEventListener("focus",()=>{clearTimeout(blurTimer);scheduleRender()});
+  input.addEventListener("input",()=>{if(!choosing)scheduleRender()});
+  input.addEventListener("blur",()=>{blurTimer=setTimeout(hide,120)});
+  input.addEventListener("keydown",e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();if(!menu)render();else setActive(active+1)}
+    else if(e.key==="ArrowUp"){e.preventDefault();if(menu)setActive(active-1)}
+    else if(e.key==="Enter"&&menu&&active>=0){e.preventDefault();if(visible[active])choose(visible[active])}
+    else if(e.key==="Escape")hide();
+  });
+  return input;
+}
+
 function h(tag,attrs,children){
   const el=document.createElement(tag);
   if(attrs)for(const[k,v]of Object.entries(attrs)){if(k==="style"&&typeof v==="object")Object.assign(el.style,v);else if(k.startsWith("on"))el.addEventListener(k.slice(2).toLowerCase(),v);else el.setAttribute(k,v)}

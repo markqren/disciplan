@@ -9,6 +9,16 @@
 
 ## 🚀 Releases
 
+### v2.13 — Oct 11, 2026
+
+#### v2.13.0
+<sub>CSV Reimburse/Splitwise at import, description suggestions, Shilpa's own Splitwise key</sub>
+
+##### Features
+- **Reimburse from CSV import review (FEA-29C)** — Reimbursable CSV rows (and the import edit modal) now open the same Splitwise-aware Reimburse form as the ledger. Set Split stages the person, share, and optional Splitwise push on the candidate; Save Approved writes the charge, the reimbursement credit, the household approval, and the Splitwise expense. The form lives in `js/reimburse-form.js` so ledger and import share one UI. Rent still has its own confirm dialog unless that row already has a staged split. (~10,000 tokens)
+- **New-transaction description suggestions** — The Entry description field suggests recent unique ledger descriptions (active person view), with category · date · payment on each row. Typing searches the ledger (prefix first); picking a row fills the description and, when it still exists, the category plus service-period defaults. (~4,000 tokens)
+- **Shilpa connects her own Splitwise account (FEA-29D)** — `splitwise-sync` uses the shared `SPLITWISE_API_KEY` env secret only for owner `mark`. Anyone else without a `splitwise_accounts` row is disconnected until they paste their own key. Edge function already deployed (v8). (~1,500 tokens)
+
 ### v2.12 — Aug 31, 2026
 
 #### v2.12.3

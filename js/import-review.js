@@ -160,6 +160,17 @@ function renderReviewTable(container,candidates){
     const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
     descTd.append(descMain,descSub);
+    if(c._status!=="committed"&&!c._isTransfer&&!c._isCCPayment&&isReimbursableTxn(c)){
+      const splitRow=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginTop:"3px"},onClick:e=>e.stopPropagation()});
+      if(c._reimburse){
+        splitRow.append(h("span",{style:{fontSize:"10px",color:"var(--g)"}},reimburseHint(c._reimburse)));
+        splitRow.append(h("button",{class:"pg-btn",style:{fontSize:"9px",padding:"1px 6px",color:"var(--b)"},onClick:e=>{e.stopPropagation();openImportReimburse(c,()=>renderReviewTable(container,candidates))}},"Edit"));
+        splitRow.append(h("button",{class:"pg-btn",style:{fontSize:"9px",padding:"1px 6px",color:"rgba(224,122,95,0.8)"},onClick:e=>{e.stopPropagation();delete c._reimburse;renderReviewTable(container,candidates)}},"Clear"));
+      }else{
+        splitRow.append(h("button",{class:"pg-btn",style:{fontSize:"9px",padding:"1px 6px",color:"var(--b)"},onClick:e=>{e.stopPropagation();openImportReimburse(c,()=>renderReviewTable(container,candidates))}},"\uD83D\uDCB8 Reimburse"));
+      }
+      descTd.append(splitRow);
+    }
     tr.append(descTd);
 
     tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
@@ -368,7 +379,8 @@ function openImportEditModal(candidates,idx,reviewContainer){
   linkSection.append(linkBody);
 
   // Action buttons
-  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  const canReimb=isReimbursableTxn(c)&&!c._isTransfer&&!c._isCCPayment;
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:canReimb?"1fr auto auto auto":"1fr auto auto",gap:"8px",marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
     c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
@@ -386,7 +398,19 @@ function openImportEditModal(candidates,idx,reviewContainer){
     c._status="skipped";bg.remove();renderReviewTable(reviewContainer,candidates);
   }},"Skip");
   const mCancel=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel");
-  btnRow.append(mSave,mSkip,mCancel);
+  const mReimb=canReimb?h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",width:"auto",padding:"12px 20px"},onClick:()=>{
+    c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
+    c.original_amount=c.amount_usd;c.category_id=mCat.value;
+    c.service_start=mSs.value;c.service_end=mSe.value;
+    c.payment_type=mPt.value;c.tag=mTag.value;
+    c.service_days=daysInclusive(c.service_start,c.service_end);
+    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    bg.remove();
+    openImportReimburse(c,()=>renderReviewTable(reviewContainer,candidates));
+  }},c._reimburse?"Edit Split":"\uD83D\uDCB8 Reimburse"):null;
+  btnRow.append(mSave,mSkip);
+  if(mReimb)btnRow.append(mReimb);
+  btnRow.append(mCancel);
 
   modal.append(mRow(mField("Date",mDate),descField));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
@@ -398,6 +422,23 @@ function openImportEditModal(candidates,idx,reviewContainer){
   modal.append(btnRow);
   bg.append(modal);
   document.body.append(bg);
+}
+
+function openImportReimburse(c,onDone){
+  openReimburseForm({
+    description:c.description||c._rawDescription,
+    amount_usd:c.amount_usd,date:c.date,category_id:c.category_id,
+    service_start:c.service_start,service_end:c.service_end,tag:c.tag||""
+  },{
+    collectOnly:true,
+    defaultPerson:(c._reimburse&&c._reimburse.person)||defaultSplitPerson(),
+    submitLabel:"Set Split",
+    onCollect:spec=>{
+      c._reimburse=spec;
+      if(c._status!=="skipped"&&c._status!=="committed")c._status="approved";
+      if(typeof onDone==="function")onDone();
+    }
+  });
 }
 
 // Default split partner: the other household member's name, else "Shilpa".
@@ -417,7 +458,7 @@ function defaultSplitPerson(){
 // dismisses via the backdrop. No rent rows -> resolves true immediately.
 function confirmRentSplits(candidates){
   return new Promise(resolve=>{
-    const rents=candidates.filter(c=>c._isRent&&c._status==="approved"&&!c._splitDecided);
+    const rents=candidates.filter(c=>c._isRent&&c._status==="approved"&&!c._splitDecided&&!c._reimburse);
     if(!rents.length)return resolve(true);
     const person=defaultSplitPerson();
     const firstName=person.split(" ")[0];
@@ -593,13 +634,23 @@ async function commitImport(candidates){
       const payIns=inserted[valid.indexOf(pay)];
       if(payIns?.id){const g=await linkToGroup(payIns,{id:rentIns.id,transaction_group_id:rentIns.transaction_group_id||null});rentIns.transaction_group_id=g}
     }
-    if(rent._splitRent){
+    if(rent._splitRent&&!rent._reimburse){
       try{
         const rentTxn={id:rentIns.id,date:rent.date,description:rent.description,category_id:rent.category_id,amount_usd:Math.round(rent.amount_usd*100)/100,service_start:rent.service_start,service_end:rent.service_end,transaction_group_id:rentIns.transaction_group_id||null,tag:rent.tag||""};
         await createRentSplit(rentTxn,rent._splitRent,batchId);
         splitCount++;
       }catch(e){console.error("Rent split failed:",e)}
     }
+  }
+  for(let i=0;i<valid.length;i++){
+    const c=valid[i];
+    if(!c._reimburse)continue;
+    const ins=inserted[i];if(!ins?.id)continue;
+    try{
+      const txn={id:ins.id,date:c.date,description:c.description,category_id:c.category_id,amount_usd:Math.round(c.amount_usd*100)/100,service_start:c.service_start,service_end:c.service_end,transaction_group_id:ins.transaction_group_id||null,tag:c.tag||""};
+      await applyStagedReimbursement(txn,c._reimburse,batchId);
+      splitCount++;
+    }catch(e){console.error("Import reimbursement failed:",e)}
   }
   // Auto-link AT&T internet charges to existing Connectivity Reimbursement Fund in same month
   const attCharges=valid.filter(c=>c.description&&/AT&T/i.test(c.description)&&c.category_id==="utilities"&&c.amount_usd>0&&c.service_start&&c.service_end);

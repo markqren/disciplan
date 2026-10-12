@@ -29,6 +29,7 @@ index.html              366   ~1,500  HTML shell, CSS, TABS/routing/auth/init
 js/entry.js             344   ~1,400  Entry tab (new transaction form, import section shells)
 js/payslip-parser.js    279   ~1,100  Pinterest payslip PDF parsing via pdf.js
 js/linking.js           262   ~1,000  Transaction linking, reimbursement auto-scan, Rakuten cashback linking
+js/reimburse-form.js    385   ~1,500  Shared Reimburse/Splitwise form (ledger + CSV import)
 js/tags.js              248   ~1,000  Tags tab, tag detail modal
 js/cashback.js          231     ~925  Cashback & Rewards tab
 js/helpers.js           190     ~760  Formatters (fmtF, fmtD, etc.), date utils, parseCSV, h() DOM helper

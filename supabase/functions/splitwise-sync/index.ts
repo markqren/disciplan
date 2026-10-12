@@ -367,7 +367,8 @@ Deno.serve(async (req) => {
   }
 
   // 3. Resolve this owner's Splitwise key: personal account row, else the
-  //    shared env secret (the original default / Mark account).
+  //    shared env secret only for Mark (legacy default). Other household members
+  //    must connect their own key via set_key — never inherit Mark's.
   let swKey: string | null = null;
   let acctName: string | null = null;
   try {
@@ -375,7 +376,7 @@ Deno.serve(async (req) => {
     if (data?.length && data[0].api_key) { swKey = data[0].api_key; acctName = data[0].sw_name ?? null; }
   } catch (_) { /* no row */ }
   let keySource = "account";
-  if (!swKey && SPLITWISE_API_KEY) { swKey = SPLITWISE_API_KEY; keySource = "env"; }
+  if (!swKey && ownerKey === "mark" && SPLITWISE_API_KEY) { swKey = SPLITWISE_API_KEY; keySource = "env"; }
 
   // Report whether this owner has a usable Splitwise connection (gates UI).
   if (action === "account_status") {

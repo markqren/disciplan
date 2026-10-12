@@ -12,6 +12,14 @@ function renderEntry(el){
 
   const dateInp=h("input",{class:"inp",type:"date",value:f.date,onInput:e=>{f.date=e.target.value}});
   const descInp=h("input",{class:"inp",type:"text",placeholder:"e.g., Whole Foods groceries",onInput:e=>{f.desc=e.target.value}});
+  attachDescriptionSuggestions(descInp,{onChoose:row=>{
+    f.desc=row.description;
+    if(row.category_id&&[...catSel.options].some(o=>o.value===row.category_id)){
+      f.cat=row.category_id;catSel.value=row.category_id;
+      if(!f.seManual){f.ss=getDefStart(f.cat,f.date)||f.date;ssInp.value=f.ss;f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se;updateHint()}
+      updateXferVisibility();
+    }
+  }});
 
   const catSel=h("select",{class:"inp",onChange:e=>{f.cat=e.target.value;if(!f.seManual){f.ss=getDefStart(f.cat,f.date)||f.date;ssInp.value=f.ss;f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se;updateHint()}updateXferVisibility()}});
   CATS_LIST.forEach(c=>{const o=h("option",{value:c.id},c.l);if(c.id==="groceries")o.selected=true;catSel.append(o)});
@@ -120,6 +128,7 @@ function renderEntry(el){
         if(ids.length===2)await linkToGroup({id:ids[0],transaction_group_id:null},{id:ids[1],transaction_group_id:null});
         const savedDesc=f.desc;
         descInp.value="";amtInp.value="";tagInp.value="";f.desc="";f.amt="";f.tag="";
+        if(typeof invalidateDescSuggestions==="function")invalidateDescSuggestions();
         previewEl.classList.add("hidden");
         state.txnCount+=ids.length;
         document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
@@ -144,6 +153,7 @@ function renderEntry(el){
       const newId=Array.isArray(created)?created[0]?.id:created?.id;
       const savedDesc=f.desc;
       descInp.value="";amtInp.value="";tagInp.value="";fxInp.value="";subChk.checked=false;creditSel.reset();creditRow.style.display="none";
+      if(typeof invalidateDescSuggestions==="function")invalidateDescSuggestions();
       f.desc="";f.amt="";f.tag="";f.fx="";f.seManual=false;
       previewEl.classList.add("hidden");
       state.txnCount++;
