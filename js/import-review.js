@@ -160,16 +160,9 @@ function renderReviewTable(container,candidates){
     const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
     descTd.append(descMain,descSub);
-    if(c._status!=="committed"&&!c._isTransfer&&!c._isCCPayment&&isReimbursableTxn(c)){
-      const splitRow=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",marginTop:"3px"},onClick:e=>e.stopPropagation()});
-      if(c._reimburse){
-        splitRow.append(h("span",{style:{fontSize:"10px",color:"var(--g)"}},reimburseHint(c._reimburse)));
-        splitRow.append(h("button",{class:"pg-btn",style:{fontSize:"9px",padding:"1px 6px",color:"var(--b)"},onClick:e=>{e.stopPropagation();openImportReimburse(c,()=>renderReviewTable(container,candidates))}},"Edit"));
-        splitRow.append(h("button",{class:"pg-btn",style:{fontSize:"9px",padding:"1px 6px",color:"rgba(224,122,95,0.8)"},onClick:e=>{e.stopPropagation();delete c._reimburse;renderReviewTable(container,candidates)}},"Clear"));
-      }else{
-        splitRow.append(h("button",{class:"pg-btn",style:{fontSize:"9px",padding:"1px 6px",color:"var(--b)"},onClick:e=>{e.stopPropagation();openImportReimburse(c,()=>renderReviewTable(container,candidates))}},"\uD83D\uDCB8 Reimburse"));
-      }
-      descTd.append(splitRow);
+    if(c._reimburse){
+      const hint=h("div",{style:{fontSize:"10px",color:"var(--g)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},reimburseHint(c._reimburse));
+      descTd.append(hint);
     }
     tr.append(descTd);
 

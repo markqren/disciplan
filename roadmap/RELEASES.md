@@ -11,6 +11,12 @@
 
 ### v2.13 — Oct 11, 2026
 
+#### v2.13.1
+<sub>CSV review rows stay compact; Reimburse stays in the edit modal</sub>
+
+##### Fixes
+- **Drop the per-row Reimburse button on CSV import review** — The extra control doubled row height. Reimburse remains on **Edit Transaction**; a staged split still shows a one-line green hint under the description. (~1,000 tokens)
+
 #### v2.13.0
 <sub>CSV Reimburse/Splitwise at import, description suggestions, Shilpa's own Splitwise key</sub>
 
