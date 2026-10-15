@@ -26,15 +26,29 @@ async function applyStagedReimbursement(txn,spec,batchId){
   if(r&&r.newId&&batchId){
     try{await sb(`transactions?id=eq.${r.newId}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({import_batch:batchId})})}catch(e){}
   }
-  if(spec.swPayload){
-    const payload=Object.assign({},spec.swPayload,{
-      expense_txn_id:txn.id,
-      reimburse_txn_id:r&&r.newId,
-      transaction_group_id:r&&r.groupId
-    });
-    try{await pushSwPayload(payload)}catch(e){console.warn("Import Splitwise push failed:",e&&e.message)}
+  let swExpenseId=null,swError=null;
+  const shouldPush=!!(spec.swPayload||spec.pushSw);
+  if(shouldPush){
+    try{
+      let res=null;
+      if(spec.swPayload){
+        const payload=Object.assign({},spec.swPayload,{
+          expense_txn_id:txn.id,
+          reimburse_txn_id:r&&r.newId,
+          transaction_group_id:r&&r.groupId
+        });
+        res=await pushSwPayload(payload);
+      }else{
+        res=await pushRentSplitToSplitwise(txn,r,spec.person);
+      }
+      swExpenseId=res&&res.expense_id||null;
+      if(!swExpenseId)swError="Splitwise returned no expense id";
+    }catch(e){
+      swError=(e&&e.message)||String(e);
+      console.warn("Import Splitwise push failed:",swError);
+    }
   }
-  return r;
+  return{r,swExpenseId,swError,pushed:shouldPush};
 }
 
 function openReimburseForm(txn,opts){
@@ -65,10 +79,10 @@ function fillReimburseForm(modal,txn,opts){
 
   const personWrap=h("div",{style:{marginBottom:"14px"}});
   personWrap.append(h("label",{class:"lbl"},"Person"));
-  const personSelect=h("select",{class:"inp",onChange:()=>{selectedPerson=personSelect.value;swMappedPersonId=null;if(personSelect.value)personFree.value="";updateRPreview()}});
+  const personSelect=h("select",{class:"inp",onChange:()=>{selectedPerson=personSelect.value;swMappedPersonId=null;swLastLookup=null;if(personSelect.value)personFree.value="";updateRPreview()}});
   personSelect.append(h("option",{value:""},"Loading..."));
   personSelect.disabled=true;
-  const personFree=h("input",{class:"inp",type:"text",placeholder:"or type a name",style:{marginTop:"6px"},onInput:()=>{selectedPerson=personFree.value.trim();swMappedPersonId=null;if(selectedPerson)personSelect.value="";updateRPreview()}});
+  const personFree=h("input",{class:"inp",type:"text",placeholder:"or type a name",style:{marginTop:"6px"},onInput:()=>{selectedPerson=personFree.value.trim();swMappedPersonId=null;swLastLookup=null;if(selectedPerson)personSelect.value="";updateRPreview()}});
   if(selectedPerson)personFree.value=selectedPerson;
   personWrap.append(personSelect,personFree);
   modal.append(personWrap);
@@ -216,10 +230,15 @@ function fillReimburseForm(modal,txn,opts){
       const rememberGroup=m&&m.sw_group_id&&swGroups.some(g=>g.id===m.sw_group_id);
       fillSwGroups(rememberGroup?m.sw_group_id:null);
       fillSwFriends(m?m.sw_user_id:null);
-      if(rememberGroup){onSwGroupChange();if(m)swCheck.checked=true}
-      else{swMembersWrap.style.display="none";swFriendSel.style.display="block";if(m)swCheck.checked=true;syncSwControls()}
+      if(!m){
+        const hit=typeof matchSwFriend==="function"?matchSwFriend(swFriends,label):null;
+        if(hit){swFriendSel.value=String(hit.id);swMappedPersonId=hit.id;persistSwMap()}
+      }
+      const mapped=!!(m||selectedSwFriend());
+      if(rememberGroup){onSwGroupChange();if(mapped)swCheck.checked=true}
+      else{swMembersWrap.style.display="none";swFriendSel.style.display="block";if(mapped)swCheck.checked=true;syncSwControls()}
       if(swGroups.length&&!rememberGroup)swMsg.textContent="Pick a group to split with the whole trip \u2014 or a friend for a 1:1 split.";
-      else if(!swGroups.length&&swFriends.length&&!m)swMsg.textContent=`Pick ${label}'s Splitwise friend to push this split.`;
+      else if(!swGroups.length&&swFriends.length&&!mapped)swMsg.textContent=`Pick ${label}'s Splitwise friend to push this split.`;
       updateRPreview();
     }).catch(()=>{});
   }
@@ -322,6 +341,13 @@ function fillReimburseForm(modal,txn,opts){
       const total=Math.round(txn.amount_usd*100)/100;
       swYouLine.textContent=`You owe ${fmtF(g.yourShare)} \u00B7 others owe ${fmtF(g.othersOwed)} \u00B7 total ${fmtF(total)}`;
       swYouLine.style.color=(g.yourShare<-0.005)?"var(--r)":"rgba(255,255,255,0.5)";
+    }
+    const swPay=collectSwPayload(amt);
+    if(swPay){
+      const who=swGroupActive()?"group members":((selectedSwFriend()&&selectedSwFriend().name)||selectedPerson);
+      rPreview.innerHTML+=`<div style="font-size:11px;color:rgba(129,178,154,0.85);margin-top:4px">Will create a Splitwise expense with ${who}</div>`;
+    }else if(swWrap.style.display!=="none"&&swLoaded&&(swFriends.length||swGroups.length)){
+      rPreview.innerHTML+=`<div style="font-size:11px;color:var(--y);margin-top:4px">Ledger split only \u2014 pick a Splitwise friend or group to push</div>`;
     }
     scheduleSwRefresh();
   }

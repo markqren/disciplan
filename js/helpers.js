@@ -328,6 +328,7 @@ function fillCashAcctSelect(sel,selected,exclude){
   const labels=_cashAcctLabels.filter(l=>l!==exclude);
   sel.innerHTML="";
   sel.append(h("option",{value:""},"\u2014 pick checking account \u2014"));
+  if(!labels.length)sel.append(h("option",{value:"",disabled:"true"},"No checking/savings accounts in this view"));
   labels.forEach(l=>sel.append(h("option",{value:l},l)));
   sel.value=selected&&labels.includes(selected)?selected:"";
   return sel.value;

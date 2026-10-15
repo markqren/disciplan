@@ -202,6 +202,7 @@ async function renderOnboarding(el){
       const aiMsg=aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":aiAvailable()?"AI call failed \u2014 descriptions left raw. Check connection/credits and re-import.":"AI unavailable \u2014 descriptions left raw. Sign in and re-import.";
       impStatus.textContent=fileNote+(!pending?"All transactions are duplicates or skipped.":aiMsg);
       if(!aiResults){impStatus.style.color="var(--y)"}
+      await acctLabelsReady();
       renderReviewTable(impReview,candidates);
     }catch(e){impStatus.textContent="Error: "+e.message;impStatus.style.color="var(--r)"}
     impBtn.disabled=false;impBtn.textContent="Import";

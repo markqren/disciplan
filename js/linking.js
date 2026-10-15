@@ -298,9 +298,18 @@ async function unlinkFromGroup(txnId,groupId){
 }
 
 async function fetchReimburseFriends(){
-  const reimbRows=await sb("transactions?description=like.Reimbursed*&amount_usd=lt.0&select=description,date&order=date.desc&limit=5000");
   const seen={};const result=[];
-  for(const r of reimbRows){const m=r.description.match(/-\s*(\w+)\s*$/);if(m){const name=m[1].trim();if(!seen[name]){seen[name]=true;result.push(name)}}}
+  function add(name){
+    const n=String(name||"").trim();if(!n)return;
+    const key=n.toLowerCase();if(seen[key])return;seen[key]=true;result.push(n);
+  }
+  try{
+    if(typeof householdMembers!=="undefined"&&householdMembers){
+      householdMembers.forEach(m=>{if(m.owner!==currentOwner)add(m.display_name)});
+    }
+  }catch(e){}
+  const reimbRows=await sb("transactions?description=like.Reimbursed*&amount_usd=lt.0&select=description,date&order=date.desc&limit=5000");
+  for(const r of reimbRows){const m=r.description.match(/-\s*(\w+)\s*$/);if(m)add(m[1])}
   return result.slice(0,15);
 }
 
@@ -360,11 +369,18 @@ async function createRentSplit(rentTxn,split,batchId){
   if(r&&r.newId&&batchId){
     try{await sb(`transactions?id=eq.${r.newId}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({import_batch:batchId})})}catch(e){}
   }
+  let swExpenseId=null,swError=null;
   if(split&&split.push){
-    try{await pushRentSplitToSplitwise(rentTxn,r,person)}
-    catch(e){console.warn("Rent Splitwise push failed:",e&&e.message)}
+    try{
+      const res=await pushRentSplitToSplitwise(rentTxn,r,person);
+      swExpenseId=res&&res.expense_id||null;
+      if(!swExpenseId)swError="Splitwise returned no expense id";
+    }catch(e){
+      swError=(e&&e.message)||String(e);
+      console.warn("Rent Splitwise push failed:",swError);
+    }
   }
-  return r;
+  return{r,swExpenseId,swError,pushed:!!(split&&split.push)};
 }
 
 // Push a rent split to Splitwise using the remembered friend/group mapping for
@@ -380,8 +396,7 @@ async function pushRentSplitToSplitwise(rentTxn,r,person){
   if(!friendId){
     try{
       const friends=await swFetchFriends();
-      const fn=person.split(" ")[0].toLowerCase();
-      const hit=(friends||[]).find(f=>(f.name||"").toLowerCase().includes(fn));
+      const hit=matchSwFriend(friends,person);
       if(hit)friendId=hit.id;
     }catch(e){}
   }
@@ -417,7 +432,11 @@ async function swCallEdge(payload){
   });
   const txt=await r.text();
   let data;try{data=txt?JSON.parse(txt):{}}catch(e){throw new Error(txt||"Bad response")}
-  if(!r.ok)throw new Error(typeof data.error==="string"?data.error:(data.error?JSON.stringify(data.error):`${r.status}`));
+  if(!r.ok){
+    const msg=typeof data.error==="string"?data.error:(data.error?JSON.stringify(data.error):String(r.status));
+    const det=data.detail==null?"":(typeof data.detail==="string"?data.detail:JSON.stringify(data.detail));
+    throw new Error(det?msg+": "+det:msg);
+  }
   return data;
 }
 async function swFetchFriends(){const d=await swCallEdge({action:"friends"});return d.friends||[]}
@@ -429,19 +448,36 @@ async function swSetKey(apiKey){return await swCallEdge({action:"set_key",api_ke
 async function swDisconnect(){return await swCallEdge({action:"disconnect"})}
 async function swRegisterImported(expenseId,txnId){return await swCallEdge({action:"register_imported",expense_id:expenseId,txn_id:txnId})}
 
-// Persisted label -> Splitwise friend mapping, scoped to the logged-in user.
+// Persisted label -> Splitwise friend mapping, scoped to the ledger being written.
 function normPersonLabel(s){return String(s||"").trim().toLowerCase()}
+function swMapOwnerQS(){
+  let qs="";
+  if(currentHousehold!=null)qs+=`&household_id=eq.${currentHousehold}`;
+  const o=typeof writeOwner==="function"?writeOwner():currentOwner;
+  if(o!=null)qs+=`&owner=eq.${encodeURIComponent(o)}`;
+  return qs;
+}
+function matchSwFriend(friends,label){
+  const key=normPersonLabel(label);if(!key||!friends||!friends.length)return null;
+  const first=key.split(/\s+/)[0];
+  const named=friends.filter(f=>{
+    const n=normPersonLabel(f.name);
+    return n===key||n===first||n.split(/\s+/)[0]===first;
+  });
+  if(!named.length)return null;
+  const exact=named.find(f=>normPersonLabel(f.name)===key);
+  return exact||named[0];
+}
 async function getSwFriendMap(label){
   const key=normPersonLabel(label);if(!key)return null;
   try{
-    const rows=await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}&limit=1${importerQS()}`);
+    const rows=await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}&limit=1${swMapOwnerQS()}`);
     return (rows&&rows[0])||null;
   }catch(e){console.warn("getSwFriendMap failed:",e);return null}
 }
 async function saveSwFriendMap(label,friend,group){
   const key=normPersonLabel(label);if(!key||!friend||!friend.id)return;
-  // Replace any prior mapping for this label (scoped to the importing user).
-  try{await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}${importerQS()}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});}catch(e){}
+  try{await sb(`splitwise_friend_map?person_label=eq.${encodeURIComponent(key)}${swMapOwnerQS()}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});}catch(e){}
   const row={person_label:key,sw_user_id:friend.id,sw_name:friend.name||""};
   if(group&&group.id){row.sw_group_id=group.id;row.sw_group_name=group.name||""}
   await sb("splitwise_friend_map",{method:"POST",headers:{"Prefer":"return=minimal"},body:JSON.stringify(row)});

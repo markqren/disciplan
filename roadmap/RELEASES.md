@@ -11,6 +11,13 @@
 
 ### v2.13 — Oct 11, 2026
 
+#### v2.13.2
+<sub>CSV checking picker no longer reloads; Shilpa Splitwise splits confirm and actually push</sub>
+
+##### Fixes
+- **CSV credit-card payment funding picker no longer refreshes the page (BUG)** — Choosing which checking/savings account paid a card bill rebuilt the whole review table while the native `<select>` was still open, which Safari/iOS treats as a navigation and dumps the import. The picker now updates in place; account labels load before the first review render. (~3,000 tokens)
+- **Shilpa's Splitwise splits stayed in the ledger only (FEA-29C / FEA-29D)** — Connecting her key loaded household "Mark" as a person, but never auto-matched his Splitwise friend or checked Create on Splitwise, so reimbursements posted locally with `sw_expense_id` null. The form now name-matches the friend, pre-checks the push, and CSV Save Approved shows a Confirm Splitwise dialog plus a post-import Created/Failed result. (~8,000 tokens)
+
 #### v2.13.1
 <sub>CSV review rows stay compact; Reimburse stays in the edit modal</sub>
 

@@ -283,6 +283,7 @@ function renderEntry(el){
       const pending=candidates.filter(c=>c._status==="pending").length;
       if(!pending)impStatus.textContent="All transactions are duplicates or skipped.";
       else impStatus.textContent=aiResults?"AI categorization complete.":"Using default categories (no AI key).";
+      await acctLabelsReady();
       renderReviewTable(impReview,candidates);
     }catch(e){
       impStatus.textContent="Error: "+e.message;

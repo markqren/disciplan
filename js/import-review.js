@@ -59,11 +59,18 @@ async function undoImportBatchTxns(batchId){
   await sb(`transactions?import_batch=eq.${encodeURIComponent(batchId)}`,{method:"DELETE"});
 }
 
+function scheduleReviewRerender(container,candidates){
+  if(container._reviewRerender)return;
+  container._reviewRerender=true;
+  setTimeout(()=>{container._reviewRerender=false;renderReviewTable(container,candidates)},0);
+}
+
 function renderReviewTable(container,candidates){
   container.innerHTML="";
   // Load the active view's account labels for payment/transfer pickers; re-render
-  // once they arrive so scoped options replace the PTS fallback.
-  if(!_acctLabels.length)acctLabelsReady().then(l=>{if(l&&l.length)renderReviewTable(container,candidates)});
+  // once they arrive so scoped options replace the PTS fallback. Defer so we
+  // never destroy a focused native <select> (Safari/iOS treats that as a reload).
+  if(!_acctLabels.length)acctLabelsReady().then(l=>{if(l&&l.length)scheduleReviewRerender(container,candidates)});
   const skipped=candidates.filter(c=>c._status==="skipped");
   const dupes=candidates.filter(c=>c._isDuplicate);
   const hi=candidates.filter(c=>c.ai_confidence==="high"&&c._status!=="skipped");
@@ -94,6 +101,8 @@ function renderReviewTable(container,candidates){
     saving=true;saveBtn.disabled=true;
     const proceed=await confirmRentSplits(candidates);
     if(!proceed){saving=false;saveBtn.disabled=false;saveBtn.textContent="Save Approved";return}
+    const swProceed=await confirmSplitwisePushes(candidates);
+    if(!swProceed){saving=false;saveBtn.disabled=false;saveBtn.textContent="Save Approved";return}
     saveBtn.textContent="Saving...";
     try{
       const summary=await commitImport(candidates);
@@ -105,6 +114,10 @@ function renderReviewTable(container,candidates){
       const sumEl=h("div",{class:"preview",style:{marginTop:"12px"}});
       const dates=summary.imported.map(c=>c.date).sort();
       sumEl.innerHTML=`<div style="color:var(--g);font-weight:600;margin-bottom:6px">\u2713 Imported ${summary.count} transactions \u00b7 ${summary.skipped} skipped \u00b7 ${summary.dupes} duplicates</div>`;
+      if(summary.swFails&&summary.swFails.length){
+        sumEl.innerHTML+=`<div style="color:var(--y);font-size:12px;margin-bottom:6px">Ledger saved, but Splitwise push failed:<br>${summary.swFails.map(s=>String(s).replace(/</g,"")).join("<br>")}</div>`;
+      }
+      await showSplitwiseImportResult(summary);
       const viewBtn=h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.3);margin-top:4px",onClick:()=>{
         dcInvalidateTxns();state.tab="ledger";state.lf={cat:"",pt:"",dfrom:dates[0]||"",dto:dates[dates.length-1]||"",q:""};state.page=0;renderTabs();renderContent();
       }},"View in Ledger \u2192");
@@ -151,12 +164,13 @@ function renderReviewTable(container,candidates){
     const descText=(c._isCCPayment?"\uD83D\uDCB3 ":"")+(c._isTransfer?"\u2194 ":"")+(importIsCashbackElected(c)?"\uD83C\uDFC6 ":"")+(c.description||c._rawDescription)+((c._linkToTransactionId||c._linkToStagedIdx!=null)?" \uD83D\uDD17":"");
     const descMain=h("div",{style:{color:c._status==="skipped"?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.85)",textDecoration:c._status==="skipped"?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descMain.textContent=descText;
+    let ccPairHint=null,xferPairHint=null;
     if(c._isCCPayment){
       const funding=c._ccPaymentPair&&c._ccPaymentPair.payment_type;
-      const pairHint=h("span",{style:{color:funding?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},funding?(" \u2192 "+funding):" \u2192 pick checking account");
-      descMain.append(pairHint);
+      ccPairHint=h("span",{style:{color:funding?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},funding?(" \u2192 "+funding):" \u2192 pick checking account");
+      descMain.append(ccPairHint);
     }
-    if(c._isTransfer){const pairHint=h("span",{style:{color:c._transferTo?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account");descMain.append(pairHint)}
+    if(c._isTransfer){xferPairHint=h("span",{style:{color:c._transferTo?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account");descMain.append(xferPairHint)}
     const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
     descTd.append(descMain,descSub);
@@ -174,13 +188,28 @@ function renderReviewTable(container,candidates){
       // Card-payment rows require the importing owner to choose the cash account
       // that funded this bill; never infer a household member's default account.
       const funding=c._ccPaymentPair&&c._ccPaymentPair.payment_type;
-      const fundingSel=h("select",{style:{...selStyle,border:funding?selStyle.border:"1px solid var(--y)"},onChange:e=>{c._ccPaymentPair.payment_type=e.target.value;renderReviewTable(container,candidates)}});
+      const fundingSel=h("select",{style:{...selStyle,border:funding?selStyle.border:"1px solid var(--y)"},onChange:e=>{
+        if(!c._ccPaymentPair)c._ccPaymentPair={description:c.description||"",payment_type:"",amount:Math.abs(c.amount_usd)};
+        c._ccPaymentPair.payment_type=e.target.value;
+        fundingSel.style.border=c._ccPaymentPair.payment_type?selStyle.border:"1px solid var(--y)";
+        if(ccPairHint){
+          ccPairHint.textContent=c._ccPaymentPair.payment_type?(" \u2192 "+c._ccPaymentPair.payment_type):" \u2192 pick checking account";
+          ccPairHint.style.color=c._ccPaymentPair.payment_type?"rgba(255,255,255,0.3)":"var(--y)";
+        }
+      }});
       fillCashAcctSelect(fundingSel,funding||"",c.payment_type);
       catTd.append(fundingSel);
       tr.append(catTd);
     }else if(c._isTransfer){
       // Transfer rows pick a counter-account (not a category — they stay financial).
-      const xferSel=h("select",{style:{...selStyle,border:c._transferTo?selStyle.border:"1px solid var(--y)"},onChange:e=>{c._transferTo=e.target.value;renderReviewTable(container,candidates)}});
+      const xferSel=h("select",{style:{...selStyle,border:c._transferTo?selStyle.border:"1px solid var(--y)"},onChange:e=>{
+        c._transferTo=e.target.value;
+        xferSel.style.border=c._transferTo?selStyle.border:"1px solid var(--y)";
+        if(xferPairHint){
+          xferPairHint.textContent=c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account";
+          xferPairHint.style.color=c._transferTo?"rgba(255,255,255,0.3)":"var(--y)";
+        }
+      }});
       fillPtSelect(xferSel,{selected:c._transferTo||null});
       if(!c._transferTo){xferSel.insertBefore(h("option",{value:"",selected:true},"\u2014 pick account \u2014"),xferSel.firstChild);xferSel.value=""}
       catTd.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)",marginRight:"4px"}},"\u2194"));
@@ -195,7 +224,7 @@ function renderReviewTable(container,candidates){
       c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
       propagateEdits(candidates,idx);
-      renderReviewTable(container,candidates);
+      scheduleReviewRerender(container,candidates);
     }});
     CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;catSel2.append(o)});
     catTd.append(catSel2);
@@ -504,6 +533,109 @@ function confirmRentSplits(candidates){
   });
 }
 
+function importSplitRows(candidates){
+  const rows=[];
+  (candidates||[]).forEach(c=>{
+    if(c._status!=="approved")return;
+    if(c._reimburse&&c._reimburse.person){
+      const spec=c._reimburse;
+      const amt=spec.reimbAmt!=null?spec.reimbAmt:Math.round((c.amount_usd||0)*(spec.ratio||0.5)*100)/100;
+      rows.push({c,kind:"reimburse",person:spec.person,amt,willPush:!!(spec.swPayload||spec.pushSw)});
+    }else if(c._splitRent&&c._splitRent.person){
+      const s=c._splitRent;
+      const amt=Math.round((c.amount_usd||0)*(s.ratio||0.5)*100)/100;
+      rows.push({c,kind:"rent",person:s.person,amt,willPush:!!s.push});
+    }
+  });
+  return rows;
+}
+
+// Confirm which staged splits should also create a Splitwise expense.
+// Backdrop cancel aborts the save; "Save without Splitwise" keeps ledger splits.
+function confirmSplitwisePushes(candidates){
+  return new Promise(resolve=>{
+    const splits=importSplitRows(candidates);
+    if(!splits.length)return resolve(true);
+    let done=false;
+    const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)cleanup(false)}});
+    const modal=h("div",{class:"modal",style:{maxWidth:"540px"}});
+    function cleanup(v){if(done)return;done=true;bg.remove();resolve(v)}
+    modal.append(h("h3",{style:{margin:"0 0 6px"}},"Confirm Splitwise"));
+    modal.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"14px"}},
+      "These splits will be saved in the ledger. Check Splitwise to also create the expense there."));
+    const ctrls=[];
+    splits.forEach(s=>{
+      const row=h("div",{style:{background:"rgba(255,255,255,0.04)",borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
+      const top=h("div",{style:{display:"flex",justifyContent:"space-between",gap:"12px",marginBottom:"8px"}});
+      top.append(h("span",{style:{color:"#fff",fontSize:"13px"}},s.c.description||s.c._rawDescription||"Expense"));
+      top.append(h("span",{style:{fontFamily:"var(--mono)",color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(s.amt)));
+      const meta=h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.45)",marginBottom:"8px"}},
+        `${fmtD(s.c.date)} \u00b7 split with ${s.person}`);
+      const push=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"#fff",cursor:"pointer"}});
+      const cb=h("input",{type:"checkbox",style:{width:"auto",margin:"0"}});
+      cb.checked=!!s.willPush;
+      push.append(cb,h("span",{},"Create on Splitwise"));
+      if(!s.willPush){
+        row.append(top,meta,push,h("div",{style:{fontSize:"11px",color:"var(--y)",marginTop:"6px"}},
+          "Ledger only unless you check this \u2014 no Splitwise friend was selected on the split."));
+      }else{
+        row.append(top,meta,push);
+      }
+      modal.append(row);
+      ctrls.push({s,cb});
+    });
+    const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto",gap:"8px",marginTop:"10px"}});
+    const confirm=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+      ctrls.forEach(({s,cb})=>{
+        if(s.kind==="reimburse"&&s.c._reimburse){
+          if(cb.checked){s.c._reimburse.pushSw=true}
+          else{s.c._reimburse.pushSw=false;s.c._reimburse.swPayload=null}
+        }else if(s.c._splitRent){
+          s.c._splitRent.push=!!cb.checked;
+        }
+      });
+      cleanup(true);
+    }},"Confirm & Save");
+    const skip=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{
+      ctrls.forEach(({s})=>{
+        if(s.kind==="reimburse"&&s.c._reimburse){s.c._reimburse.pushSw=false;s.c._reimburse.swPayload=null}
+        else if(s.c._splitRent)s.c._splitRent.push=false;
+      });
+      cleanup(true);
+    }},"Save without Splitwise");
+    btnRow.append(confirm,skip);
+    modal.append(btnRow);
+    bg.append(modal);document.body.append(bg);
+  });
+}
+
+function showSplitwiseImportResult(summary){
+  const results=(summary&&summary.swResults)||[];
+  if(!results.length)return Promise.resolve();
+  return new Promise(resolve=>{
+    const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg){bg.remove();resolve()}}});
+    const modal=h("div",{class:"modal",style:{maxWidth:"540px"}});
+    const ok=results.filter(r=>r.ok);
+    const fail=results.filter(r=>!r.ok);
+    modal.append(h("h3",{style:{margin:"0 0 6px"}},"Splitwise"));
+    modal.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"14px"}},
+      fail.length?`${ok.length} created on Splitwise \u00b7 ${fail.length} failed`:`${ok.length} expense${ok.length===1?"":"s"} created on Splitwise`));
+    results.forEach(r=>{
+      const row=h("div",{style:{background:"rgba(255,255,255,0.04)",borderRadius:"8px",padding:"10px 12px",marginBottom:"8px"}});
+      const top=h("div",{style:{display:"flex",justifyContent:"space-between",gap:"12px"}});
+      top.append(h("span",{style:{color:"#fff",fontSize:"13px"}},r.description||"Expense"));
+      top.append(h("span",{style:{color:r.ok?"var(--g)":"var(--r)",fontSize:"12px",whiteSpace:"nowrap"}},r.ok?"Created":"Failed"));
+      row.append(top);
+      row.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.45)",marginTop:"4px"}},
+        r.ok?`Split with ${r.person||"friend"}${r.expenseId?" \u00b7 #"+r.expenseId:""}`:(r.error||"Splitwise did not create this expense")));
+      modal.append(row);
+    });
+    const okBtn=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)",marginTop:"6px"},onClick:()=>{bg.remove();resolve()}},"Done");
+    modal.append(okBtn);
+    bg.append(modal);document.body.append(bg);
+  });
+}
+
 async function commitImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
   if(!approved.length)throw new Error("No approved transactions to save.");
@@ -619,6 +751,7 @@ async function commitImport(candidates){
   // manual grouping used in prior months (Rent + Bill Paid: Bilt + Bilt Card Payment),
   // then create the confirmed reimbursement split (+ Splitwise push) into that group.
   let splitCount=0;
+  const swResults=[];
   for(const rent of valid.filter(c=>c._isRent)){
     const rentIns=inserted[valid.indexOf(rent)];
     if(!rentIns?.id)continue;
@@ -630,8 +763,11 @@ async function commitImport(candidates){
     if(rent._splitRent&&!rent._reimburse){
       try{
         const rentTxn={id:rentIns.id,date:rent.date,description:rent.description,category_id:rent.category_id,amount_usd:Math.round(rent.amount_usd*100)/100,service_start:rent.service_start,service_end:rent.service_end,transaction_group_id:rentIns.transaction_group_id||null,tag:rent.tag||""};
-        await createRentSplit(rentTxn,rent._splitRent,batchId);
+        const out=await createRentSplit(rentTxn,rent._splitRent,batchId);
         splitCount++;
+        if(out&&out.pushed){
+          swResults.push({description:rent.description,person:rent._splitRent.person,ok:!!out.swExpenseId,expenseId:out.swExpenseId,error:out.swError});
+        }
       }catch(e){console.error("Rent split failed:",e)}
     }
   }
@@ -641,9 +777,17 @@ async function commitImport(candidates){
     const ins=inserted[i];if(!ins?.id)continue;
     try{
       const txn={id:ins.id,date:c.date,description:c.description,category_id:c.category_id,amount_usd:Math.round(c.amount_usd*100)/100,service_start:c.service_start,service_end:c.service_end,transaction_group_id:ins.transaction_group_id||null,tag:c.tag||""};
-      await applyStagedReimbursement(txn,c._reimburse,batchId);
+      const out=await applyStagedReimbursement(txn,c._reimburse,batchId);
       splitCount++;
-    }catch(e){console.error("Import reimbursement failed:",e)}
+      if(out&&out.pushed){
+        swResults.push({description:c.description,person:c._reimburse.person,ok:!!out.swExpenseId,expenseId:out.swExpenseId,error:out.swError});
+      }
+    }catch(e){
+      console.error("Import reimbursement failed:",e);
+      if(c._reimburse.swPayload||c._reimburse.pushSw){
+        swResults.push({description:c.description,person:c._reimburse.person,ok:false,error:(e&&e.message)||String(e)});
+      }
+    }
   }
   // Auto-link AT&T internet charges to existing Connectivity Reimbursement Fund in same month
   const attCharges=valid.filter(c=>c.description&&/AT&T/i.test(c.description)&&c.category_id==="utilities"&&c.amount_usd>0&&c.service_start&&c.service_end);
@@ -672,7 +816,9 @@ async function commitImport(candidates){
     imported:valid,
     skipped:candidates.filter(c=>c._status==="skipped").length,
     dupes:candidates.filter(c=>c._isDuplicate).length,
-    batchId
+    batchId,
+    swResults,
+    swFails:swResults.filter(r=>!r.ok).map(r=>(r.description||"")+" \u2014 "+(r.error||"failed"))
   };
 }
 
