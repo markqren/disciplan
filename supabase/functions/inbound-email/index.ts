@@ -641,6 +641,191 @@ function formatHistoryContext(history: HistoricalMatch[]): string {
   ).join("\n");
 }
 
+// Ledger rows the model may propose linking to. Ids are validated before save.
+interface LinkCandidate {
+  id: number;
+  date: string;
+  description: string;
+  amount_usd: number;
+  category_id: string;
+  payment_type: string;
+  transaction_group_id: number | null;
+}
+
+function keywordTokens(blob: string): string[] {
+  const stop = new Set(["the", "and", "for", "you", "your", "from", "with", "this", "that", "paid", "payment", "venmo", "email", "fwd", "forwarded", "reimbursement", "reimbursed", "splitwise", "cash", "back"]);
+  return [...new Set(
+    blob.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length >= 4 && !stop.has(w)),
+  )].slice(0, 6);
+}
+
+async function fetchLinkCandidates(
+  supabase: ReturnType<typeof createClient>,
+  hints: { amount: number | null; text: string },
+): Promise<LinkCandidate[]> {
+  const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+  const select = "id, date, description, amount_usd, category_id, payment_type, transaction_group_id";
+  const seen = new Map<number, LinkCandidate>();
+  const add = (rows: LinkCandidate[] | null) => {
+    for (const r of rows || []) if (r?.id) seen.set(r.id, r);
+  };
+
+  try {
+    if (hints.amount && hints.amount > 0) {
+      const lo = Math.max(0, hints.amount * 0.5);
+      const hi = hints.amount * 1.5;
+      const { data } = await supabase.from("transactions").select(select)
+        .gt("amount_usd", lo).lt("amount_usd", hi)
+        .gte("date", since).order("date", { ascending: false }).limit(25);
+      add(data as LinkCandidate[]);
+    }
+    for (const tok of keywordTokens(hints.text)) {
+      const { data } = await supabase.from("transactions").select(select)
+        .gt("amount_usd", 0).ilike("description", `%${tok.replace(/[%_]/g, "")}%`)
+        .gte("date", since).order("date", { ascending: false }).limit(8);
+      add(data as LinkCandidate[]);
+    }
+    if (seen.size < 8) {
+      const { data } = await supabase.from("transactions").select(select)
+        .gt("amount_usd", 0).gte("date", since)
+        .order("date", { ascending: false }).limit(20);
+      add(data as LinkCandidate[]);
+    }
+  } catch (e) {
+    console.error("Link candidate lookup failed:", e);
+  }
+  return [...seen.values()].slice(0, 30);
+}
+
+interface ProposedLink {
+  id: number;
+  transaction_group_id: number | null;
+  description: string;
+  date: string;
+  amount_usd: number;
+  category_id: string;
+  payment_type: string;
+  confidence: string;
+  reason: string;
+}
+
+const REVIEW_SYSTEM = `You review a forwarded personal-finance email and propose ONE ledger action for Disciplan.
+Deterministic parsers often miss fields when the email layout changes. Do not refuse just because a field is missing or a parser returned nothing — infer the transaction from the subject, body, and the user's forwarding note.
+Money leaving the user's accounts is a positive amount_usd (expense). Money coming in (reimbursement, refund, cashback, income) is a negative amount_usd.
+A reimbursement, Splitwise settlement, or "X paid you" should link to the existing expense it pays back when one of the LEDGER CANDIDATES is clearly the same purchase (merchant, person, memo, or amount). Only return a link_transaction_id that appears in that list. If none fit, omit the key.
+Categories: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income.
+Reimbursements keep the parent expense's category when you link; otherwise use the forwarding note. Descriptions: "Reimbursed - {what} - {FirstName}" for money in from a person, "Venmo - {Person}" for money out, "Rakuten - {Store}" for cashback (category income, payment_type Rakuten).
+Service period only when the note or email clearly spreads the cost (a month, a year, explicit dates). Omit service_period otherwise.
+If the email is not a financial transaction, return {"is_transaction": false}.
+Return ONLY JSON:
+{"is_transaction":true,"kind":"expense|reimbursement|cashback|income|transfer","date":"YYYY-MM-DD","description":"...","amount_usd":0,"category_id":"...","payment_type":"...","confidence":"high|medium|low","tag":null,"link_transaction_id":null,"link_confidence":"high|medium|low","link_reason":"...","service_period":{"start":"YYYY-MM-DD","end":"YYYY-MM-DD","description":"..."},"is_subscription":false}
+Omit link_transaction_id, link_reason, and service_period when not applicable.`;
+
+async function aiReviewEmail(
+  supabase: ReturnType<typeof createClient>,
+  source: string,
+  parsed: ParsedEmail | null,
+  subject: string,
+  fromAddr: string,
+  textBody: string,
+  forwardingNote: ForwardingNote | null,
+): Promise<(AIResult & { proposed_link?: ProposedLink; kind?: string }) | null> {
+  if (!ANTHROPIC_KEY) return null;
+
+  const parserAmount = parsed?.amount_usd != null ? Math.abs(parsed.amount_usd) : null;
+  const hintText = [subject, forwardingNote?.raw || "", parsed?.description || "", String(parsed?.parsed_data?.counterparty || ""), String(parsed?.parsed_data?.note || "")].join(" ");
+  const candidates = await fetchLinkCandidates(supabase, { amount: parserAmount, text: hintText });
+  const candidateBlock = candidates.length
+    ? candidates.map(c => `#${c.id} | ${c.date} | ${c.description} | $${Number(c.amount_usd).toFixed(2)} | ${c.category_id} | ${c.payment_type}`).join("\n")
+    : "(none)";
+
+  const user = `FROM: ${fromAddr}
+SUBJECT: ${subject}
+DETECTED SOURCE: ${source}
+USER FORWARDING NOTE: ${forwardingNote?.raw || "(none)"}
+PARSER OUTPUT (may be incomplete or wrong — a hint, not a requirement):
+${parsed ? JSON.stringify({
+  date: parsed.date, description: parsed.description, amount_usd: parsed.amount_usd,
+  category_id: parsed.category_id, payment_type: parsed.payment_type,
+  counterparty: parsed.parsed_data?.counterparty || null, note: parsed.parsed_data?.note || null,
+}) : "(parser did not extract a transaction)"}
+
+EMAIL BODY:
+${(textBody || "").slice(0, 3500)}
+
+LEDGER CANDIDATES (link only to one of these ids):
+${candidateBlock}`;
+
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": ANTHROPIC_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1200,
+        system: [{ type: "text", text: REVIEW_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: user }],
+      }),
+    });
+    if (!response.ok) {
+      console.error(`AI review error: ${response.status}`);
+      return null;
+    }
+    const data = await response.json();
+    const text = data.content?.[0]?.text || "";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const raw = JSON.parse(jsonMatch[0]);
+    if (!raw?.is_transaction) return { is_transaction: false };
+
+    const linkId = Number(raw.link_transaction_id);
+    const match = candidates.find(c => c.id === linkId);
+    let proposed_link: ProposedLink | undefined;
+    if (match) {
+      proposed_link = {
+        id: match.id,
+        transaction_group_id: match.transaction_group_id,
+        description: match.description,
+        date: match.date,
+        amount_usd: Number(match.amount_usd),
+        category_id: match.category_id,
+        payment_type: match.payment_type,
+        confidence: raw.link_confidence || "medium",
+        reason: String(raw.link_reason || "").slice(0, 240),
+      };
+    }
+
+    const amount = typeof raw.amount_usd === "number" ? raw.amount_usd : (parsed?.amount_usd ?? null);
+    const category = (proposed_link && raw.kind === "reimbursement" && match?.category_id)
+      ? match.category_id
+      : raw.category_id;
+    return {
+      is_transaction: true,
+      kind: raw.kind,
+      date: raw.date || parsed?.date || undefined,
+      description: raw.description || parsed?.description,
+      amount_usd: amount ?? undefined,
+      category_id: category,
+      confidence: raw.confidence || "medium",
+      payment_type: raw.payment_type || parsed?.payment_type,
+      tag: raw.tag || undefined,
+      service_period: raw.service_period,
+      is_subscription: !!raw.is_subscription,
+      cat: category,
+      conf: raw.confidence || "medium",
+      desc: raw.description,
+      proposed_link,
+    };
+  } catch (e) {
+    console.error("AI review failed:", e);
+    return null;
+  }
+}
+
 // ═══════════════════════════════════════════════════════
 // Service Period Math
 // ═══════════════════════════════════════════════════════
@@ -1061,17 +1246,23 @@ function buildCandidate(
 ): Record<string, unknown> {
   const base: Record<string, unknown> = parsed ? { ...parsed } : {};
 
-  // If AI returned results for an unknown email, use those
-  if (source === "unknown" && aiResult?.is_transaction) {
-    base.date = aiResult.date;
-    base.description = aiResult.description;
-    base.amount_usd = aiResult.amount_usd;
-    base.category_id = aiResult.category_id;
-    base.payment_type = aiResult.payment_type || "unknown";
-    base.service_start = aiResult.date;
-    base.service_end = aiResult.date;
-    base.service_days = 1;
-    base.daily_cost = aiResult.amount_usd;
+  // LLM review fills anything the parser missed, and is the whole proposal
+  // when no parser matched. A successful parser keeps its amount when the
+  // model omitted one.
+  if (aiResult?.is_transaction) {
+    if (aiResult.date) base.date = aiResult.date;
+    if (aiResult.description) base.description = aiResult.description;
+    if (aiResult.amount_usd != null && (source === "unknown" || base.amount_usd == null || base.amount_usd === 0)) {
+      base.amount_usd = aiResult.amount_usd;
+    }
+    if (aiResult.category_id) base.category_id = aiResult.category_id;
+    if (aiResult.payment_type) base.payment_type = aiResult.payment_type;
+    if (!base.service_start) {
+      base.service_start = base.date;
+      base.service_end = base.date;
+      base.service_days = 1;
+      base.daily_cost = base.amount_usd;
+    }
   }
 
   // AI enrichment: description, category, tag improvements
@@ -1093,6 +1284,9 @@ function buildCandidate(
   // Merge forwarding_note into parsed_data
   const parsedData = (base.parsed_data as Record<string, unknown>) || {};
   if (forwardingNote?.raw) parsedData.forwarding_note = forwardingNote.raw;
+  const proposed = (aiResult as { proposed_link?: ProposedLink } | null)?.proposed_link;
+  if (proposed) parsedData.proposed_link = proposed;
+  if ((aiResult as { kind?: string } | null)?.kind) parsedData.kind = (aiResult as { kind?: string }).kind;
 
   // For Rakuten: AI forwarding note interpreter returns clean "Rakuten - {Store}" → prefer it.
   const finalDescription = (source === "rakuten")
@@ -1116,7 +1310,7 @@ function buildCandidate(
 
   return {
     source,
-    status: (source === "unknown" && !aiResult?.is_transaction) ? "skipped" : "pending",
+    status: (source === "unknown" && aiResult && !aiResult.is_transaction) ? "skipped" : "pending",
     date: base.date || null,
     description: finalDescription,
     category_id: ai_category || "other",
@@ -1409,12 +1603,20 @@ Reply with the lesson OR "NONE" — nothing else.`,
     }
   }
 
-  // 6. AI categorization (passes supabase for history lookup)
+  // 6. LLM reviews the email first. Deterministic parse is a hint. If the
+  // review call fails, fall back to the older categorizer.
   let aiResult: AIResult | null = null;
   try {
-    aiResult = await aiCategorize(source, parsed, subject || "", textBody || "", forwardingNote, supabase);
+    aiResult = await aiReviewEmail(supabase, source, parsed, subject || "", fromAddr || "", textBody || htmlToText(htmlBody || ""), forwardingNote);
   } catch (e) {
-    console.error("AI categorization error:", e);
+    console.error("AI review error:", e);
+  }
+  if (!aiResult) {
+    try {
+      aiResult = await aiCategorize(source, parsed, subject || "", textBody || "", forwardingNote, supabase);
+    } catch (e) {
+      console.error("AI categorization error:", e);
+    }
   }
 
   // 7. Build candidate row

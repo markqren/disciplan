@@ -345,6 +345,14 @@ function renderEntry(el){
         service_days:r.service_days||1,daily_cost:parseFloat(r.daily_cost)||parseFloat(r.amount_usd)||0,
         payment_type:r.payment_type||"Venmo",tag:r.tag||"",credit:r.credit||""
       }));
+      for(const c of emailCandidates){
+        const link=c._parsedData&&c._parsedData.proposed_link;
+        if(!link||!link.id)continue;
+        c._linkToTransactionId=link.id;
+        c._linkToGroupId=link.transaction_group_id||null;
+        c._linkConfidence=link.confidence||null;
+        c._linkDisplay={description:link.description,date:link.date,amount_usd:link.amount_usd,category_id:link.category_id,payment_type:link.payment_type};
+      }
       const ptGroups={};
       for(const c of emailCandidates){const pt=c.payment_type;if(!ptGroups[pt])ptGroups[pt]=[];ptGroups[pt].push(c)}
       for(const[pt,group]of Object.entries(ptGroups)){await findDuplicates(group,pt)}

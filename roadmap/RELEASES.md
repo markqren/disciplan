@@ -11,6 +11,12 @@
 
 ### v2.13 — Oct 11, 2026
 
+#### v2.13.3
+<sub>Email imports are reviewed by the model first, including a proposed ledger link</sub>
+
+##### Features
+- **LLM-first Postmark import (FEA-39)** — Inbound email no longer depends on a parser matching the exact layout. Claude reads the message and the forwarding note, proposes the transaction, and may attach it to an existing expense (reimbursements included). The link shows up in Email Imports and can be cleared before approve. (~8,000 tokens)
+
 #### v2.13.2
 <sub>CSV checking picker no longer reloads; Shilpa Splitwise splits confirm and actually push</sub>
 
