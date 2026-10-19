@@ -712,7 +712,7 @@ interface ProposedLink {
 const REVIEW_SYSTEM = `You review a forwarded personal-finance email and propose ONE ledger action for Disciplan.
 Deterministic parsers often miss fields when the email layout changes. Do not refuse just because a field is missing or a parser returned nothing — infer the transaction from the subject, body, and the user's forwarding note.
 Money leaving the user's accounts is a positive amount_usd (expense). Money coming in (reimbursement, refund, cashback, income) is a negative amount_usd.
-A reimbursement, Splitwise settlement, or "X paid you" should link to the existing expense it pays back when one of the LEDGER CANDIDATES is clearly the same purchase (merchant, person, memo, or amount). Only return a link_transaction_id that appears in that list. If none fit, omit the key.
+A reimbursement, Splitwise settlement, or "X paid you" should link to the existing expense it pays back. Match on merchant, person, or memo. Amounts often differ because a reimbursement is only one person's share of a larger bill — still link it. Prefer the original card or cash charge over a Splitwise row when both describe the same meal. Only return a link_transaction_id from the candidate list. Omit the key when nothing in the list is the same purchase.
 Categories: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income.
 Reimbursements keep the parent expense's category when you link; otherwise use the forwarding note. Descriptions: "Reimbursed - {what} - {FirstName}" for money in from a person, "Venmo - {Person}" for money out, "Rakuten - {Store}" for cashback (category income, payment_type Rakuten).
 Service period only when the note or email clearly spreads the cost (a month, a year, explicit dates). Omit service_period otherwise.
@@ -765,21 +765,28 @@ ${candidateBlock}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5-20250929",
         max_tokens: 1200,
         system: [{ type: "text", text: REVIEW_SYSTEM, cache_control: { type: "ephemeral" } }],
         messages: [{ role: "user", content: user }],
       }),
     });
     if (!response.ok) {
-      console.error(`AI review error: ${response.status}`);
-      return null;
+      const errBody = await response.text();
+      console.error(`AI review error: ${response.status} ${errBody.slice(0, 300)}`);
+      return { is_transaction: false, review_error: `http_${response.status} ${errBody.slice(0, 300)}` } as AIResult;
     }
     const data = await response.json();
     const text = data.content?.[0]?.text || "";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
-    const raw = JSON.parse(jsonMatch[0]);
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start < 0 || end <= start) return { is_transaction: false, review_error: "no_json", review_raw: text.slice(0, 500) } as AIResult;
+    let raw: Record<string, unknown>;
+    try {
+      raw = JSON.parse(text.slice(start, end + 1));
+    } catch (e) {
+      return { is_transaction: false, review_error: `bad_json ${(e as Error).message}`, review_raw: text.slice(0, 500) } as AIResult;
+    }
     if (!raw?.is_transaction) return { is_transaction: false };
 
     const linkId = Number(raw.link_transaction_id);
@@ -822,7 +829,7 @@ ${candidateBlock}`;
     };
   } catch (e) {
     console.error("AI review failed:", e);
-    return null;
+    return { is_transaction: false, review_error: (e as Error).message } as AIResult;
   }
 }
 
@@ -945,7 +952,7 @@ async function aiCategorize(
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5-20250929",
         max_tokens: 1000,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -1055,7 +1062,7 @@ Notes:
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-5-20250929",
         max_tokens: 500,
         messages: [{ role: "user", content: prompt }],
       }),
@@ -1284,8 +1291,10 @@ function buildCandidate(
   // Merge forwarding_note into parsed_data
   const parsedData = (base.parsed_data as Record<string, unknown>) || {};
   if (forwardingNote?.raw) parsedData.forwarding_note = forwardingNote.raw;
-  const proposed = (aiResult as { proposed_link?: ProposedLink } | null)?.proposed_link;
-  if (proposed) parsedData.proposed_link = proposed;
+  const review = aiResult as { proposed_link?: ProposedLink; review_error?: string; review_raw?: string } | null;
+  if (review?.proposed_link) parsedData.proposed_link = review.proposed_link;
+  if (review?.review_error) parsedData.review_error = review.review_error;
+  if (review?.review_raw) parsedData.review_raw = review.review_raw;
   if ((aiResult as { kind?: string } | null)?.kind) parsedData.kind = (aiResult as { kind?: string }).kind;
 
   // For Rakuten: AI forwarding note interpreter returns clean "Rakuten - {Store}" → prefer it.
