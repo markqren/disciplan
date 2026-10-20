@@ -1,7 +1,7 @@
 async function aiGroupLabels(groups){
   if(!aiAvailable())return{};
   const result={};
-  const uncached=groups.filter(g=>{const c=sessionStorage.getItem(`grp_label_${g.gid}`);if(c){result[g.gid]=c;return false}return true});
+  const uncached=groups.filter(g=>{const c=sessionStorage.getItem(grpLabelKey(g.gid));if(c){result[g.gid]=c;return false}return true});
   if(!uncached.length)return result;
   // Fetch past manual corrections as few-shot examples (cached per session)
   let examples="";
@@ -11,7 +11,7 @@ async function aiGroupLabels(groups){
       const ovs=await sb("group_overrides?label=not.is.null&order=updated_at.desc&limit=10&select=group_id,label");
       if(ovs.length){
         const exGids=ovs.map(o=>o.group_id);
-        const exTxns=await sb(`transactions?transaction_group_id=in.(${exGids.join(",")})&select=transaction_group_id,description,amount_usd,date&order=date`);
+        const exTxns=await sb(`transactions?transaction_group_id=in.(${exGids.join(",")})&select=transaction_group_id,description,amount_usd,date,service_start,service_end&order=date`);
         const exGroups={};exTxns.forEach(t=>{const g=t.transaction_group_id;if(!exGroups[g])exGroups[g]=[];exGroups[g].push(t)});
         const lines=ovs.filter(o=>exGroups[o.group_id]?.length).map(o=>`${exGroups[o.group_id].map(t=>`${t.description} ($${t.amount_usd})`).join("; ")} => "${o.label}"`);
         exCache=lines.join("\n");
@@ -20,14 +20,18 @@ async function aiGroupLabels(groups){
     }
     if(exCache)examples=`\n\nHere are examples of preferred labels from past corrections:\n${exCache}\n`;
   }catch(e){console.warn("Failed to fetch label examples:",e)}
-  const prompt=`Generate short summary labels (under 40 chars) for these transaction groups. Examples: "Whole Foods x6", "Pinterest Payroll Jan 15-31", "Japan Trip Restaurants x4", "Rent + Utilities Feb".${examples}\n\nGroups:\n${uncached.map(g=>`Group ${g.gid}: ${g.members.map(m=>`${m.description} ($${m.amount_usd}, ${m.date})`).join("; ")}`).join("\n")}\n\nReturn ONLY a JSON object mapping group ID to label string.`;
+  const prompt=`Generate short summary labels (under 40 chars) for these transaction groups. Examples: "Whole Foods x6", "Pinterest Payroll Jan 15-31", "Japan Trip Restaurants x4", "Rent + Utilities Feb". When a label includes a date or date range, use the SERVICE period (service_start to service_end), never the posted/bank date. A paycheck posted in October for June 16-30 is "Jun 16-30", not "Oct 16-31".${examples}\n\nGroups:\n${uncached.map(g=>`Group ${g.gid}: ${g.members.map(m=>`${m.description} ($${m.amount_usd}, posted ${m.date}, service ${m.service_start||"?"} to ${m.service_end||m.service_start||"?"})`).join("; ")}`).join("\n")}\n\nReturn ONLY a JSON object mapping group ID to label string.`;
   try{
     const r=await callClaude({model:getAIModel(),max_tokens:1000,messages:[{role:"user",content:prompt}]});
     if(!r.ok)return result;
     const data=await r.json();const txt=data.content?.[0]?.text||"";
     const m=txt.match(/\{[\s\S]*\}/);if(!m)return result;
     const labels=JSON.parse(m[0]);
-    for(const[gid,label]of Object.entries(labels)){sessionStorage.setItem(`grp_label_${gid}`,label);result[gid]=label}
+    const byGid={};uncached.forEach(g=>{byGid[g.gid]=g.members});
+    for(const[gid,label]of Object.entries(labels)){
+      const fixed=applyServicePeriodLabel(label,byGid[gid]||[]);
+      sessionStorage.setItem(grpLabelKey(gid),fixed);result[gid]=fixed;
+    }
     return result;
   }catch(e){console.warn("AI group labels failed:",e);return result}
 }

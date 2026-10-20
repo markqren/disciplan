@@ -959,7 +959,7 @@ async function renderLedger(el){
         hasOverride:!!ov};
     }
     // Fire-and-forget AI labels (skip groups with manual label overrides)
-    const grpsForAI=Object.entries(groupMembers).filter(([gid,m])=>m.length>=2&&!overrideMap[gid]?.label).map(([gid,members])=>({gid,members:members.map(m=>({description:m.description,amount_usd:m.amount_usd,category_id:m.category_id,date:m.date}))}));
+    const grpsForAI=Object.entries(groupMembers).filter(([gid,m])=>m.length>=2&&!overrideMap[gid]?.label).map(([gid,members])=>({gid,members:members.map(m=>({description:m.description,amount_usd:m.amount_usd,category_id:m.category_id,date:m.date,service_start:m.service_start,service_end:m.service_end}))}));
     if(grpsForAI.length)aiGroupLabels(grpsForAI).then(labels=>{for(const[gid,label]of Object.entries(labels)){if(label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=label}}});
     // Subscription filter (client-side)
     if(f.subsOnly&&subMerchants.size){const before=txns.length;for(let i=txns.length-1;i>=0;i--){if(!subMerchants.has(normalizeMerchant(txns[i].description)))txns.splice(i,1)}}
@@ -1055,7 +1055,7 @@ async function renderLedger(el){
         }},"\u25B6"));
         descTd.append(h("span",{style:{fontSize:"10px",marginRight:"4px",color:"var(--accent)"}},`\uD83D\uDD17${summary.memberCount}`));
         if(showOwner){[...new Set((groupMembers[gid]||[]).map(m=>m.owner).filter(Boolean))].forEach(o=>descTd.append(ownerBadge(o)))}
-        descTd.append(h("span",{"data-grp-label":gid},sessionStorage.getItem(`grp_label_${gid}`)||summary.label));
+        descTd.append(h("span",{"data-grp-label":gid},sessionStorage.getItem(grpLabelKey(gid))||summary.label));
         str.append(descTd);
         // Category
         const catTd=h("td");const catBadge=h("span",{class:"badge",style:{background:(CC[summary.dominantCat]||"#666")+"22",color:CC[summary.dominantCat]||"#888"}},summary.dominantCat);
@@ -1117,7 +1117,7 @@ function openGroupEditModal(gid,members,summary,override,onSaved){
   // Editable fields
   function gRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
   function gField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
-  const autoLabel=sessionStorage.getItem(`grp_label_${gid}`)||summary.label;
+  const autoLabel=sessionStorage.getItem(grpLabelKey(gid))||summary.label;
   const gLabel=h("input",{class:"inp",type:"text",value:override?.label||"",placeholder:autoLabel});
   const gCat=h("select",{class:"inp"});
   gCat.append(h("option",{value:""},"Auto (dominant)"));
@@ -1159,7 +1159,7 @@ function openGroupEditModal(gid,members,summary,override,onSaved){
   const resetBtn=h("button",{class:"pg-btn",style:{background:"rgba(224,122,95,0.15)",color:"#E07A5F"},onClick:async()=>{
     if(!override&&!gLabel.value&&!gCat.value&&!gPt.value&&!gTag.value){bg.remove();return}
     await sb(`group_overrides?group_id=eq.${gid}`,{method:"DELETE",headers:{"Prefer":"return=minimal"}});
-    sessionStorage.removeItem(`grp_label_${gid}`);
+    sessionStorage.removeItem(grpLabelKey(gid));
     sessionStorage.removeItem("grp_label_examples");
     bg.remove();if(onSaved)onSaved();
   }},"Reset to Auto");
@@ -1177,7 +1177,7 @@ function openGroupEditModal(gid,members,summary,override,onSaved){
       await sb("group_overrides",{method:"POST",headers:{"Prefer":"return=minimal,resolution=merge-duplicates"},body:JSON.stringify(body)});
     }
     // Update DOM immediately
-    if(body.label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=body.label;sessionStorage.setItem(`grp_label_${gid}`,body.label)}
+    if(body.label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=body.label;sessionStorage.setItem(grpLabelKey(gid),body.label)}
     sessionStorage.removeItem("grp_label_examples");
     bg.remove();if(onSaved)onSaved();
   }},"Save");

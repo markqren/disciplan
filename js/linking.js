@@ -529,6 +529,23 @@ async function mirrorReimbursementToHousehold(originalTxn,person,reimbAmount,pay
   })});
 }
 
+// Join an accepted household share to the same linked group as the source
+// charge (the txn the other person reimbursed). Combined view then shows
+// charge + their reimbursement + your share together; person views stay
+// owner-filtered (ledger backfill uses ownerQS).
+async function linkAcceptedSharedToSource(sourceTxnId,newTxn){
+  if(!sourceTxnId||!newTxn||!newTxn.id)return;
+  try{
+    const src=await sb(`transactions?id=eq.${sourceTxnId}&select=id,transaction_group_id&limit=1`);
+    const parent=src&&src[0];
+    if(!parent)return;
+    await linkToGroup(
+      {id:parent.id,transaction_group_id:parent.transaction_group_id||null},
+      {id:newTxn.id,transaction_group_id:newTxn.transaction_group_id||null}
+    );
+  }catch(e){console.warn("Shared txn parent link failed:",e)}
+}
+
 // Inbox: surface pending shared transactions addressed to the signed-in user.
 async function checkPendingSharedTxns(){
   if(currentOwner==null)return;
@@ -580,6 +597,7 @@ function showSharedTxnApprovalModal(rows){
         try{
           const ins=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(p)});
           const newId=ins&&ins[0]&&ins[0].id;
+          if(newId)await linkAcceptedSharedToSource(r.source_txn_id,{id:newId,transaction_group_id:null});
           await sb(`pending_shared_txns?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({status:"approved",resolved_at:new Date().toISOString()})});
           // If this reimbursement was also pushed to Splitwise, pre-register the
           // shared expense as imported so my own Splitwise sync won't re-import it.

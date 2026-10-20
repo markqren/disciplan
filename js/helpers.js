@@ -71,17 +71,55 @@ function generateGroupLabel(members){
   // Prefer the primary (non-reimbursement/adjustment) transaction's description
   const secondary=/^(reimburs|cashback|reimb|bill paid|payment)/i;
   const primary=members.find(m=>!secondary.test(m.description)&&m.amount_usd>0)||members.find(m=>!secondary.test(m.description))||members[0];
-  if(members.length===2)return primary.description;
-  // For 3+ members, check if descriptions are similar
-  const descs=members.map(m=>m.description);
-  const roots=descs.map(d=>d.split(/\s+/).slice(0,3).join(" ").replace(/\d{1,2}\/\d{1,2}|\d{4}|#\d+/g,"").trim());
-  const freq={};roots.forEach(r=>{const k=r.toLowerCase();freq[k]=(freq[k]||0)+1});
-  const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]);
-  const top=sorted[0];
-  if(top[1]===members.length)return`${primary.description} x${members.length}`;
-  if(top[1]>members.length/2)return`${primary.description} +${members.length-1}`;
-  return primary.description+` +${members.length-1}`;
+  let label;
+  if(members.length===2)label=primary.description;
+  else{
+    const descs=members.map(m=>m.description);
+    const roots=descs.map(d=>d.split(/\s+/).slice(0,3).join(" ").replace(/\d{1,2}\/\d{1,2}|\d{4}|#\d+/g,"").trim());
+    const freq={};roots.forEach(r=>{const k=r.toLowerCase();freq[k]=(freq[k]||0)+1});
+    const sorted=Object.entries(freq).sort((a,b)=>b[1]-a[1]);
+    const top=sorted[0];
+    if(top[1]===members.length)label=`${primary.description} x${members.length}`;
+    else if(top[1]>members.length/2)label=`${primary.description} +${members.length-1}`;
+    else label=primary.description+` +${members.length-1}`;
+  }
+  return applyServicePeriodLabel(label,members);
 }
+
+const MONTH_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtServiceSpan(ss,se){
+  if(!ss)return"";
+  const a=ss.split("-").map(Number);
+  if(a.length!==3||a.some(isNaN)||a[1]<1||a[1]>12)return"";
+  const start=`${MONTH_ABBR[a[1]-1]} ${a[2]}`;
+  if(!se||se===ss)return start;
+  const b=se.split("-").map(Number);
+  if(b.length!==3||b.some(isNaN)||b[1]<1||b[1]>12)return start;
+  if(a[0]===b[0]&&a[1]===b[1])return `${MONTH_ABBR[a[1]-1]} ${a[2]}-${b[2]}`;
+  return `${start}-${MONTH_ABBR[b[1]-1]} ${b[2]}`;
+}
+function sharedServicePeriod(members){
+  if(!members||!members.length)return null;
+  const ss=members[0].service_start||null;
+  const se=members[0].service_end||ss;
+  if(!ss)return null;
+  if(!members.every(m=>(m.service_start||null)===ss&&(m.service_end||m.service_start||null)===se))return null;
+  return{ss,se};
+}
+// When a parent/group label includes a date, it must be the service period (pay
+// period, stay, etc.), never the posted/bank date. Payroll posted Oct 28 for
+// Jun 16-30 should read "Jun 16-30", not "Oct 16-31".
+function applyServicePeriodLabel(label,members){
+  if(!label)return label;
+  const p=sharedServicePeriod(members);if(!p)return label;
+  const span=fmtServiceSpan(p.ss,p.se);if(!span)return label;
+  const mo="(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)";
+  const range=new RegExp(`\\s+${mo}\\s+\\d{1,2}(?:\\s*[-–]\\s*(?:${mo}\\s+)?\\d{1,2})?\\s*$`,"i");
+  if(range.test(label))return label.replace(range," "+span);
+  if(/payroll|paycheck|payslip|\bincome\b/i.test(label))return label.replace(/\s+$/,"")+" "+span;
+  return label;
+}
+function grpLabelKey(gid){return `grp_label_v2_${gid}`}
 
 function normalizeMerchant(desc){
   return desc.replace(/\s*\([^)]*\)\s*$/,"").replace(/\s*-\s*(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+20\d{2}.*$/i,"").replace(/^(SQ \*|TST\*|CLIP MX\*|TCB\*)/i,"").trim().toLowerCase().split(/\s+/).slice(0,2).join(" ");

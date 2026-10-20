@@ -11,6 +11,13 @@
 
 ### v2.13 — Oct 11, 2026
 
+#### v2.13.4
+<sub>Group titles use the service period; accepted shares join the source charge</sub>
+
+##### Fixes
+- **Linked parent labels dated from the service period, not the bank post date (BUG)** — Pronto paychecks posted Oct 28 for June 16–30 were titled "Oct 16-31". AI group labels now see `service_start`/`service_end`, and `applyServicePeriodLabel` rewrites any trailing month-day range to that window (Jun 16-30, Aug 1-15, …). (~3,000 tokens)
+- **Accepted household shares join the source charge's group (FEA-29D)** — Approving a pending share from the other person now `linkToGroup`s it onto the original reimbursement's parent, so Combined view shows charge + their credit + your share together. (~1,500 tokens)
+
 #### v2.13.3
 <sub>Email imports are reviewed by the model first, including a proposed ledger link</sub>
 
