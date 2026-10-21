@@ -102,12 +102,42 @@ async function findTransferPairs(candidates){
   }
 }
 
+// Checking-account CC bill pays are skipped (the card import owns them). If a
+// matching "Bill Paid: <card>" (or checking-side "… Bill Payment") is not in the
+// ledger yet, flag the skipped row so the reviewer knows to import the card.
+async function findCCImportMatches(candidates){
+  const pays=candidates.filter(c=>c._isBillPay);
+  if(!pays.length)return;
+  const toD=s=>new Date(s+"T00:00:00");
+  const shift=(s,n)=>{const d=toD(s);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
+  const dayDiff=(a,b)=>Math.abs((toD(a)-toD(b))/864e5);
+  const dates=pays.map(c=>c.date).filter(Boolean).sort();
+  if(!dates.length)return;
+  const minD=shift(dates[0],-3),maxD=shift(dates[dates.length-1],3);
+  const cards=new Set(Object.keys(CC_PAY_NAMES||{}));
+  let existing=[];
+  try{existing=await sb(`transactions?category_id=eq.financial&date=gte.${minD}&date=lte.${maxD}&select=date,amount_usd,description,payment_type${ownerQS()}`)}catch(e){existing=[]}
+  const isPair=e=>cards.has(e.payment_type)||/^Bill Paid:/i.test(e.description||"")||/Bill Payment$/i.test(e.description||"");
+  for(const c of pays){
+    const amt=Math.abs(parseFloat(c.amount_usd)||0);
+    const hit=existing.find(e=>isPair(e)&&Math.abs(Math.abs(e.amount_usd)-amt)<0.02&&dayDiff(e.date,c.date)<=3);
+    if(hit){
+      c._ccMissing=false;
+      c._ccMatchedPt=hit.payment_type||"";
+      c._skipReason="CC payment (logged via card import)";
+    }else{
+      c._ccMissing=true;
+      c._skipReason="CC payment not yet on a card import \u2014 skipped here";
+    }
+  }
+}
+
 function fallbackCatMap(bankCat){return AMEX_CAT_MAP[bankCat]||CHASE_CAT_MAP[bankCat]||"other"}
 function applyAIResults(candidates,aiResults,detectedSubs){
   if(!aiResults){
     for(const c of candidates){
       if(c._status==="skipped")continue;
-      if(c._isCCPayment||c._isRent)continue;
+      if(c._isCCPayment||c._isRent||c._isTransfer)continue;
       if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);
       if(!c.ai_confidence)c.ai_confidence="low";
       c.service_start=getDefStart(c.category_id,c.date)||c.date;
@@ -121,7 +151,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
   for(let i=0;i<candidates.length;i++){
     const c=candidates[i];
     if(c._status==="skipped")continue;
-    if(c._isCCPayment||c._isRent)continue;
+    if(c._isCCPayment||c._isRent||c._isTransfer)continue;
     const ai=byIdx[i];
     if(ai){c.category_id=ai.cat;c.ai_confidence=ai.conf;c.description=ai.desc;c._aiOriginal={cat:ai.cat,conf:ai.conf,desc:ai.desc}}
     else{if(!c.category_id)c.category_id=fallbackCatMap(c._bankCategory);if(!c.ai_confidence)c.ai_confidence="low"}
@@ -137,7 +167,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
   if(detectedSubs&&detectedSubs.length){
     const subMerchants=new Set(detectedSubs.map(s=>s.merchant));
     for(const c of candidates){
-      if(c._status==="skipped"||c._isCCPayment||c._isRent)continue;
+      if(c._status==="skipped"||c._isCCPayment||c._isRent||c._isTransfer)continue;
       if(subMerchants.has(normalizeMerchant(c._rawDescription||c.description))){
         c.service_start=startOfMonth(c.date);
         c.service_end=endOfMonth(c.service_start);

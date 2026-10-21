@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Oct 20, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Oct 21, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v2.13 — Oct 11, 2026
+
+#### v2.13.5
+<sub>Wells Fargo checking PDFs import through the existing review pipeline</sub>
+
+##### Features
+- **Wells Fargo statement PDF import (FEA-127)** — Shilpa can drop Everyday Checking PDFs on Entry (and Onboarding) instead of a CSV. The parser reconstructs deposit vs withdrawal from the running daily balance, skips card bill pays (`EPAY` / `Autopay` / `Retry Pymt` / Bilt / AMEX) and flags any that are not yet on a card import, and books `Online Transfer … Way2Save Savings` as a linked checking→savings financial pair. Debit purchases stay as real expenses. Verified against Jul–Sep 2026 statements (totals reconcile). (~8,000 tokens)
 
 #### v2.13.4
 <sub>Group titles use the service period; accepted shares join the source charge</sub>
@@ -885,12 +891,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (170 items)</summary>
+<summary><strong>✅ Completed</strong> (171 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-127 | **Wells Fargo statement PDF import** — Everyday Checking (and Way2Save) PDFs parse through the existing `wells_fargo` CSV pipeline. Card bill pays are skipped and flagged when the matching `Bill Paid:` row is not in the ledger yet; checking→savings online transfers post as a linked net-$0 pair. Running-balance solver distinguishes deposits from withdrawals. | Feature → Done | Oct 20 |
 | FEA-126 | **Budget targets shared backend** — `disciplan.budget_targets` stores household-scoped `% of income` targets (seeded 2019–2026 from `BUDGET_TARGETS`). The Income Statement loads/saves via PostgREST upsert (localStorage diffs migrate once). The `daily-insight` edge function reads the same rows, derives monthly dollar ceilings from trailing-12 income rounded to `$50` for pace archetypes, adds a `BUDGET TARGETS` block to every writer prompt, and registers `insight_ro.budget_targets` for `run_finance_query`. | Feature → Done | Sep 18 |
 | FEA-125 | **Elect a ledger or import credit as cashback** — Negative-amount rows carry a **🏆 Cashback** checkbox beside Subscription (ledger) or Tag (CSV/email/payslip import edit). Ticking it writes a `cashback_redemptions` row inferred from the transaction (date, description, payment account, `\|amount\|` as Dollar Value) so the credit shows on the Cashback tab with no second income transaction; unticking (ledger) or import undo removes it. Tagged rows show a trophy. The Cashback *button* keeps its original FEA-14 meaning — mint a new cashback credit linked to a purchase — and is hidden on credits. Rakuten email cashback stays auto-elected and can be unchecked. Points/rate stay editable from the Cashback tab. | Feature → Done | Sep 1 |
 | FEA-124 | **Shilpa monthly finance checklist** — A floating, collapsible checklist follows Shilpa's person-view across every tab and resets by calendar month. The paycheck task infers expected semi-monthly Pronto service periods, lists matured gaps as nested subtasks, and waits seven days after each period ends before calling it missing. Credit-card and debit/checking items complete automatically after matching imports. Account balances use a resumable per-account workflow: enter a statement balance or skip, upsert the day's balance snapshot, and create an idempotent adjustment only when the live ledger differs; the parent item completes after all active accounts are handled. State persists cross-device in an owner/month `preferences` row, with no migration. | Feature → Done | Jul 25 |

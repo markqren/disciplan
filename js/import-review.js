@@ -77,8 +77,9 @@ function renderReviewTable(container,candidates){
   const med=candidates.filter(c=>c.ai_confidence==="medium"&&c._status!=="skipped");
   const lo=candidates.filter(c=>c.ai_confidence==="low"&&c._status!=="skipped");
 
+  const ccMissing=candidates.filter(c=>c._ccMissing).length;
   const stats=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"12px"}},
-    `${candidates.length} parsed \u00b7 ${skipped.length} auto-skipped \u00b7 ${dupes.length} duplicates \u00b7 ${hi.length} high \u00b7 ${med.length} medium \u00b7 ${lo.length} low confidence`);
+    `${candidates.length} parsed \u00b7 ${skipped.length} auto-skipped \u00b7 ${dupes.length} duplicates \u00b7 ${hi.length} high \u00b7 ${med.length} medium \u00b7 ${lo.length} low confidence${ccMissing?` \u00b7 ${ccMissing} CC payment${ccMissing===1?"":"s"} not yet on a card import`:""}`);
   container.append(stats);
 
   const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
@@ -141,7 +142,7 @@ function renderReviewTable(container,candidates){
   const tbody=h("tbody");
 
   candidates.forEach((c,idx)=>{
-    const tr=h("tr",{style:{borderLeft:c._status==="approved"?"3px solid var(--g)":c._isDuplicate?"3px solid var(--y)":"3px solid transparent",opacity:c._status==="skipped"?"0.4":"1"}});
+    const tr=h("tr",{style:{borderLeft:c._status==="approved"?"3px solid var(--g)":c._ccMissing||c._isDuplicate?"3px solid var(--y)":"3px solid transparent",opacity:c._ccMissing?"0.75":c._status==="skipped"?"0.4":"1"}});
 
     const statusIcon=c._status==="approved"?"\u2713":c._status==="skipped"?"\u2715":c._status==="committed"?"\u2713":"\u25CB";
     const statusColor=c._status==="approved"?"var(--g)":c._status==="skipped"?"var(--r)":c._status==="committed"?"var(--b)":"rgba(255,255,255,0.3)";
@@ -171,7 +172,7 @@ function renderReviewTable(container,candidates){
       descMain.append(ccPairHint);
     }
     if(c._isTransfer){xferPairHint=h("span",{style:{color:c._transferTo?"rgba(255,255,255,0.3)":"var(--y)",fontSize:"11px"}},c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account");descMain.append(xferPairHint)}
-    const descSub=h("div",{style:{fontSize:"10px",color:"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
+    const descSub=h("div",{style:{fontSize:"10px",color:c._ccMissing?"var(--y)":"rgba(255,255,255,0.25)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}});
     descSub.textContent=c._skipReason?c._skipReason+(c._rawDescription?" \u00b7 "+c._rawDescription:""):c._rawDescription;
     descTd.append(descMain,descSub);
     if(c._reimburse){

@@ -194,14 +194,14 @@ function renderEntry(el){
   let impOpen=false;
   const impHdr=h("div",{style:{display:"flex",alignItems:"center",gap:"8px",cursor:"pointer"},onClick:()=>{impOpen=!impOpen;impArrow.textContent=impOpen?"\u25BE":"\u25B8";impBody.classList.toggle("hidden")}});
   const impArrow=h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.4)"}},"\u25B8");
-  impHdr.append(impArrow,h("h3",{style:{margin:"0"}},"Import CSV"));
+  impHdr.append(impArrow,h("h3",{style:{margin:"0"}},"Import CSV / PDF"));
   impCard.append(impHdr);
 
   const impBody=h("div",{class:"hidden",style:{marginTop:"16px"}});
   let impCandidates=null;
 
   // Upload bar
-  const fileInp=h("input",{class:"inp",type:"file",accept:".csv"});
+  const fileInp=h("input",{class:"inp",type:"file",accept:".csv,.pdf"});
   let impPtManual=false;
   const impPtSel=h("select",{class:"inp",onChange:()=>{impPtManual=true}});
   fillPtSelect(impPtSel,{prefer:["Chase Sapphire"]});
@@ -225,7 +225,7 @@ function renderEntry(el){
 
   const impBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
     const file=fileInp.files[0];
-    if(!file)return alert("Choose a CSV file first.");
+    if(!file)return alert("Choose a CSV or PDF file first.");
 
     // API key handling
     const keyVal=apiKeyInp.value.trim();
@@ -237,28 +237,33 @@ function renderEntry(el){
     impBtn.disabled=true;impBtn.textContent="Processing...";
     impStatus.classList.remove("hidden");
     impStatus.style.color="rgba(255,255,255,0.4)";
-    impStatus.textContent="Parsing CSV...";
+    const isPdf=/\.pdf$/i.test(file.name)||file.type==="application/pdf";
+    impStatus.textContent=isPdf?"Parsing PDF...":"Parsing CSV...";
     try{
-      const text=await file.text();
-      let csv=parseCSV(text);
-      if(!csv.rows.length)throw new Error("No data rows found in CSV.");
-
-      const profile=detectBankProfile(csv.headers);
-      if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo");
-      if(profile.reparse)csv=profile.reparse(text);
-
-      // Auto-detect payment type from filename (only if user hasn't manually
-      // changed it). Only apply when the guessed account is actually one of the
-      // viewer's options — otherwise their explicit account choice stands.
-      if(!impPtManual){
-        let guess="";
-        if(profile.name==="chase_checking")guess="Chase Chequing";
-        else if(profile.name==="chase")guess="Chase Sapphire";
-        else if(profile.name==="amex")guess="AMEX Rose Gold";
-        else if(profile.name==="bilt"||profile.name==="bilt_legacy")guess="Bilt";
-        else if(profile.name==="wells_fargo")guess=/sav/i.test(file.name)?"Wells Fargo Savings":"Wells Fargo Checking";
-        if(guess&&[...impPtSel.options].some(o=>o.value===guess))impPtSel.value=guess;
+      let csv,profile,acctGuess="";
+      if(isPdf){
+        const parsed=await parseWellsFargoStatementPDF(file);
+        csv={headers:["DATE","DESCRIPTION","AMOUNT","CHECK #","STATUS"],rows:parsed.rows};
+        profile={name:"wells_fargo",...BANK_PROFILES.wells_fargo};
+        acctGuess=parsed.account||"Wells Fargo Checking";
+      }else{
+        const text=await file.text();
+        csv=parseCSV(text);
+        if(!csv.rows.length)throw new Error("No data rows found in CSV.");
+        profile=detectBankProfile(csv.headers);
+        if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo");
+        if(profile.reparse)csv=profile.reparse(text);
+        if(profile.name==="chase_checking")acctGuess="Chase Chequing";
+        else if(profile.name==="chase")acctGuess="Chase Sapphire";
+        else if(profile.name==="amex")acctGuess="AMEX Rose Gold";
+        else if(profile.name==="bilt"||profile.name==="bilt_legacy")acctGuess="Bilt";
+        else if(profile.name==="wells_fargo")acctGuess=/sav/i.test(file.name)?"Wells Fargo Savings":"Wells Fargo Checking";
       }
+
+      // Auto-detect payment type from filename / PDF account (only if user hasn't
+      // manually changed it). Only apply when the guessed account is actually one
+      // of the viewer's options — otherwise their explicit account choice stands.
+      if(!impPtManual&&acctGuess&&[...impPtSel.options].some(o=>o.value===acctGuess))impPtSel.value=acctGuess;
       const pt=impPtSel.value;
       const tag=impTagInp.value.trim();
 
@@ -279,6 +284,7 @@ function renderEntry(el){
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
       await findTransferPairs(candidates);
+      await findCCImportMatches(candidates);
 
       const pending=candidates.filter(c=>c._status==="pending").length;
       if(!pending)impStatus.textContent="All transactions are duplicates or skipped.";
@@ -292,7 +298,7 @@ function renderEntry(el){
     impBtn.disabled=false;impBtn.textContent="Import";
   }},"Import");
 
-  impBody.append(row(field("CSV File",fileInp),field("Payment Account",impPtSel)));
+  impBody.append(row(field("CSV or PDF",fileInp),field("Payment Account",impPtSel)));
   impBody.append(row(field("Bulk Tag (optional)",impTagInp),apiKeyField));
   impBody.append(row(modelField));
   impBody.append(impBtn);

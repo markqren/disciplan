@@ -94,13 +94,14 @@ wells_fargo:{detect:hd=>hd.includes("DESCRIPTION")&&hd.includes("AMOUNT")&&hd.in
   // through to the default AI-categorized expense path. See transformCSVRow.
   classifyRow:(row,rawAmt)=>{
     const d=(row.DESCRIPTION||"").toUpperCase();
-    // CC payments — already captured by the card-statement import; skip here.
-    if(/CHASE CREDIT CRD EPAY|BILT CARD\s+PMT|AMEX EPAYMENT|AMERICAN EXPRESS/.test(d))return{_skip:"CC payment (logged via card import)"};
+    // CC payments — owned by the card-statement import; skip here (findCCImportMatches
+    // later flags whether the card side is already in the ledger).
+    if(/CHASE CREDIT CRD\s+(EPAY|AUTOPAY|RETRY PYMT)|BILT CARD\s+PMT|AMEX EPAYMENT|AMERICAN EXPRESS/.test(d))return{_skip:"CC payment (logged via card import)"};
     // Pronto/TAV payroll — captured by the payslip import; skip (net verified separately).
     if(/TAV EMPLOYER\s+PAYROLL|PRONTO\s*AI?\s+PAYROLL/.test(d))return{_payrollSkip:true};
     // Account-to-account transfers / withdrawals — paired as a financial swap.
     let to=null;
-    if(/ONLINE TRANSFER/.test(d)&&/SAVINGS/.test(d))to="Wells Fargo Savings";
+    if(/ONLINE TRANSFER/.test(d)&&(/SAVINGS/.test(d)||/WAY2SAVE/.test(d)))to="Wells Fargo Savings";
     else if(/ONLINE TRANSFER/.test(d)&&/CHECKING/.test(d))to="Wells Fargo Checking";
     else if(/ATM WITHDRAWAL/.test(d))to="Cash";
     else if(/SCHWAB BROKERAGE/.test(d))to="Charles Schwab";

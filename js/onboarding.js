@@ -139,7 +139,7 @@ async function renderOnboarding(el){
   impCard.append(h("h3",{style:{marginTop:"0"}},"Import Transactions"));
 
   const impAcctSel=h("select",{class:"inp"});
-  const fileInp=h("input",{class:"inp",type:"file",accept:".csv",multiple:true});
+  const fileInp=h("input",{class:"inp",type:"file",accept:".csv,.pdf",multiple:true});
   const tagInp=attachTagSuggestions(h("input",{class:"inp",type:"text",placeholder:"Bulk tag for all rows"}));
   const modelSel=h("select",{class:"inp",style:{maxWidth:"200px"},onChange:()=>setAIModel(modelSel.value)});
   [["claude-haiku-4-5-20251001","Haiku 4.5 (fast)"],["claude-sonnet-4-20250514","Sonnet 4 (quality)"]].forEach(([v,l])=>{const o=h("option",{value:v},l);if(v===getAIModel())o.selected=true;modelSel.append(o)});
@@ -154,7 +154,7 @@ async function renderOnboarding(el){
     const pt=impAcctSel.value;
     if(!pt)return alert("Add and select an account first.");
     const files=Array.from(fileInp.files||[]);
-    if(!files.length)return alert("Choose one or more CSV files first.");
+    if(!files.length)return alert("Choose one or more CSV or PDF files first.");
     if(!aiAvailable()&&!confirm("AI unavailable (not signed in). Import with basic category mapping only?"))return;
     impBtn.disabled=true;impBtn.textContent="Processing...";
     impStatus.classList.remove("hidden");impStatus.style.color="rgba(255,255,255,0.4)";
@@ -167,14 +167,22 @@ async function renderOnboarding(el){
       for(let fi=0;fi<files.length;fi++){
         const file=files[fi];
         impStatus.textContent=`Parsing ${file.name} (${fi+1}/${files.length})...`;
-        const text=await file.text();
-        let csv=parseCSV(text);
-        if(!csv.rows.length)continue;
-        const fp=detectBankProfile(csv.headers);
-        if(!fp)throw new Error(`Unrecognized bank format in ${file.name}. Supported: Chase CC, Chase Chequing, AMEX, Bilt`);
+        const isPdf=/\.pdf$/i.test(file.name)||file.type==="application/pdf";
+        let csv,fp;
+        if(isPdf){
+          const parsed=await parseWellsFargoStatementPDF(file);
+          csv={rows:parsed.rows};
+          fp={name:"wells_fargo",...BANK_PROFILES.wells_fargo};
+        }else{
+          const text=await file.text();
+          csv=parseCSV(text);
+          if(!csv.rows.length)continue;
+          fp=detectBankProfile(csv.headers);
+          if(!fp)throw new Error(`Unrecognized bank format in ${file.name}. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo PDF`);
+          if(fp.reparse)csv=fp.reparse(text);
+        }
         if(profile&&fp.name!==profile.name)throw new Error(`Mixed bank formats: ${file.name} is ${fp.name} but earlier files are ${profile.name}. Import one account format at a time.`);
         profile=fp;
-        if(fp.reparse)csv=fp.reparse(text);
         for(const r of csv.rows)candidates.push(transformCSVRow(r,fp,pt,tag,candidates.length));
       }
       if(!candidates.length)throw new Error("No data rows found in the selected file(s).");
@@ -197,6 +205,8 @@ async function renderOnboarding(el){
       applyAIResults(candidates,aiResults,subs);
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
+      await findTransferPairs(candidates);
+      await findCCImportMatches(candidates);
       const pending=candidates.filter(c=>c._status==="pending").length;
       const fileNote=files.length>1?`${files.length} files \u00b7 ${candidates.length} rows${intraDupes?` \u00b7 ${intraDupes} cross-file duplicates skipped`:""} \u00b7 `:"";
       const aiMsg=aiResults?"AI categorization complete. Review and approve below, then reconcile the balance.":aiAvailable()?"AI call failed \u2014 descriptions left raw. Check connection/credits and re-import.":"AI unavailable \u2014 descriptions left raw. Sign in and re-import.";
@@ -208,7 +218,7 @@ async function renderOnboarding(el){
     impBtn.disabled=false;impBtn.textContent="Import";
   }},"Import");
 
-  impCard.append(obRow(obField("Account",impAcctSel),obField("CSV File(s) \u2014 select multiple",fileInp)));
+  impCard.append(obRow(obField("Account",impAcctSel),obField("CSV / PDF file(s)",fileInp)));
   impCard.append(obRow(obField("Bulk Tag (optional)",tagInp),modelField));
   impCard.append(impBtn);
   impCard.append(impStatus);

@@ -11,6 +11,12 @@
 
 ### v2.13 — Oct 11, 2026
 
+#### v2.13.5
+<sub>Wells Fargo checking PDFs import through the existing review pipeline</sub>
+
+##### Features
+- **Wells Fargo statement PDF import (FEA-127)** — Shilpa can drop Everyday Checking PDFs on Entry (and Onboarding) instead of a CSV. The parser reconstructs deposit vs withdrawal from the running daily balance, skips card bill pays (`EPAY` / `Autopay` / `Retry Pymt` / Bilt / AMEX) and flags any that are not yet on a card import, and books `Online Transfer … Way2Save Savings` as a linked checking→savings financial pair. Debit purchases stay as real expenses. Verified against Jul–Sep 2026 statements (totals reconcile). (~8,000 tokens)
+
 #### v2.13.4
 <sub>Group titles use the service period; accepted shares join the source charge</sub>
 
