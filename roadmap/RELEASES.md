@@ -9,6 +9,20 @@
 
 ## 🚀 Releases
 
+### v3.0 — Oct 25, 2026
+
+#### v3.0.0
+<sub>Mobile-first UI kit, bottom nav, and Income Statement month view</sub>
+
+##### Features
+- **Mobile UI kit** — Styles moved to `css/app.css`; shared helpers in `js/ui.js` (`formGrid`, `openSheet`, `respList`, `segmented`). Bottom tab bar + More sheet; collapsing header; pull-to-refresh on Income/Ledger; FAB on key tabs; `today()` uses local date (fixes evening entry date). (~18,000 tokens)
+- **Entry + ledger on phone** — Amount-first entry with category chips, collapsed details, sticky submit; ledger card rows + Filters sheet; edit modal as full-height sheet with Save + overflow actions. (~12,000 tokens)
+- **Income Statement mobile** — Month/Year toggle; month view with swipe; year table tap fixes (category vs total); 3×4 month grid breakdown; drilldown shows accrual-first on mobile; charts collapsed on year view. (~14,000 tokens)
+- **Phone extras** — Ledger swipe-left Edit/Delete (with undo), infinite scroll instead of Prev/Next, inline group expand, Today/Yesterday headers; FAB opens a quick-entry sheet without leaving the tab; month view shows vs last month and vs same month last year per category; long-press a category for its yearly trend; All-years category breakdown on mobile; pull-to-refresh indicator on Income/Ledger; save flash on the undo toast. (~9,000 tokens)
+
+##### Fixes
+- **`h()` dropped extra children** — Calls passing several children silently kept only the first (mobile nav labels, linked-group card titles, month header subtitle), and `dataset` was written as a literal attribute. `h()` now accepts multiple children and a `dataset` object. (~1,000 tokens)
+
 ### v2.13 — Oct 11, 2026
 
 #### v2.13.5

@@ -1,14 +1,19 @@
-function renderEntry(el){
+function renderEntry(el,opts){
+  opts=opts||{};
   fetchCreditNames();
   const acctReady=acctLabelsReady();
-  const card=h("div",{class:"cd"});
-  card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">New Transaction</h3><span id="okMsg" class="ok-msg hidden">✓ Saved to Supabase</span></div>`;
+  const card=h("div",{class:opts.quick?"":"cd"});
+  if(!opts.quick)card.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px"><h3 style="margin:0">New Transaction</h3><span id="okMsg" class="ok-msg hidden">✓ Saved to Supabase</span></div>`;
+  function savedFeedback(){
+    flashSaved(card);
+    if(opts.onSaved)opts.onSaved();
+  }
 
   const t=today();
-  let f={date:t,desc:"",cat:"groceries",amt:"",cur:"USD",pt:"Chase Sapphire",tag:"",fx:"",ss:t,se:getDefEnd("groceries",t),seManual:false,transfer:false,toPt:"Cash"};
+  let f={date:t,desc:"",cat:"groceries",amt:"",cur:"USD",pt:lastPaymentAccount("Chase Sapphire"),tag:"",fx:"",ss:t,se:getDefEnd("groceries",t),seManual:false,transfer:false,toPt:"Cash"};
 
-  function row(...children){const d=h("div",{style:{display:"grid",gridTemplateColumns:children.length===3?"1fr 1fr 1fr":children.length===2?"1fr 1fr":"1fr 2fr",gap:"12px",marginBottom:"14px"}});children.forEach(c=>d.append(c));return d}
-  function field(lbl,input){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(input);return d}
+  function row(...children){return formGrid(children.length===3?3:children.length===1?1:2,...children)}
+  function field(lbl,input,opts){return uiField(lbl,input,opts)}
 
   const dateInp=h("input",{class:"inp",type:"date",value:f.date,onInput:e=>{f.date=e.target.value}});
   const descInp=h("input",{class:"inp",type:"text",placeholder:"e.g., Whole Foods groceries",onInput:e=>{f.desc=e.target.value}});
@@ -24,7 +29,7 @@ function renderEntry(el){
   const catSel=h("select",{class:"inp",onChange:e=>{f.cat=e.target.value;if(!f.seManual){f.ss=getDefStart(f.cat,f.date)||f.date;ssInp.value=f.ss;f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se;updateHint()}updateXferVisibility()}});
   CATS_LIST.forEach(c=>{const o=h("option",{value:c.id},c.l);if(c.id==="groceries")o.selected=true;catSel.append(o)});
 
-  const amtInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"0.00",onInput:e=>{f.amt=e.target.value;updatePreview()}});
+  const amtInp=h("input",{class:"inp"+(isMobile()?" inp-amt-lg":""),type:"number",step:"0.01",inputMode:"decimal",placeholder:"0.00",onInput:e=>{f.amt=e.target.value;updatePreview()}});
   const curSel=h("select",{class:"inp",onChange:e=>{
     f.cur=e.target.value;
     fxRow.style.display=f.cur!=="USD"?"grid":"none";
@@ -50,13 +55,13 @@ function renderEntry(el){
   const creditRow=h("div",{style:{display:"none",gridTemplateColumns:"1fr 2fr",gap:"12px",marginBottom:"14px"}});
   creditRow.append(field("Credit Sub-Account",creditSel));
   const ptSel=h("select",{class:"inp",onChange:e=>{f.pt=e.target.value;creditRow.style.display=f.pt==="Transfer"?"grid":"none";updatePreview()}});
-  f.pt=fillPtSelect(ptSel,{prefer:["Chase Sapphire"],keep:["Transfer"]});
+  f.pt=fillPtSelect(ptSel,{prefer:[f.pt],keep:["Transfer"]});
   const ptLabel=h("label",{class:"lbl"},"Payment Account");
   const ptField=h("div");ptField.append(ptLabel,ptSel);
   const toPtSel=h("select",{class:"inp",onChange:e=>{f.toPt=e.target.value;updatePreview()}});
   f.toPt=fillPtSelect(toPtSel,{prefer:["Cash"],keep:["Transfer"]});
   acctReady.then(()=>{
-    f.pt=fillPtSelect(ptSel,{prefer:["Chase Sapphire"],keep:["Transfer"]});
+    f.pt=fillPtSelect(ptSel,{prefer:[f.pt],keep:["Transfer"]});
     f.toPt=fillPtSelect(toPtSel,{prefer:["Cash"],keep:["Transfer"]});
     creditRow.style.display=f.pt==="Transfer"?"grid":"none";
     updatePreview();
@@ -87,13 +92,17 @@ function renderEntry(el){
     const usd=f.cur==="USD"?a:a*fx;
     const daily=usd/days;
     previewEl.classList.remove("hidden");
-    previewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
+    if(isMobile()){
+      previewEl.innerHTML=`<div style="font-size:12px;color:rgba(255,255,255,0.65)"><span style="font-family:var(--mono);font-weight:700;color:#fff">${fmtF(usd)}</span> over ${days} day${days===1?"":"s"} · <span style="color:var(--g);font-family:var(--mono)">${fmtF(daily)}/d</span>${f.cur!=="USD"?` · FX ${fx}`:""}</div>`;
+    }else{
+      previewEl.innerHTML=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Accrual Preview</div>
     <div style="display:grid;grid-template-columns:${f.cur!=="USD"?"1fr 1fr 1fr 1fr":"1fr 1fr 1fr"};gap:12px">
       <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">USD Amount</div><div style="font-size:18px;font-weight:700;color:#fff;font-family:var(--mono)">${fmtF(usd)}</div></div>
       <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Service Days</div><div style="font-size:18px;font-weight:700;color:var(--b);font-family:var(--mono)">${days}</div></div>
       <div><div style="font-size:10px;color:rgba(255,255,255,0.25)">Daily Cost</div><div style="font-size:18px;font-weight:700;color:var(--g);font-family:var(--mono)">${fmtF(daily)}/d</div></div>
       ${f.cur!=="USD"?`<div><div style="font-size:10px;color:rgba(255,255,255,0.25)">FX Rate</div><div style="font-size:18px;font-weight:700;color:var(--y);font-family:var(--mono)">${fx}</div></div>`:""}
     </div>`;
+    }
   }
 
   function applyXferMode(){
@@ -135,7 +144,9 @@ function renderEntry(el){
         if(ids.length)showUndo("\u2713 Transfer: "+savedDesc,async()=>{
           await sb(`transactions?id=in.(${ids.join(",")})`,{method:"DELETE"});
           state.txnCount-=ids.length;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+          dcInvalidateTxns();if(opts.onSaved)opts.onSaved();
         });
+        savedFeedback();
       }catch(e){alert("Error: "+e.message)}
       submitBtn.textContent=f.transfer?"Add Transfer":"Add Transaction";
       return;
@@ -158,20 +169,17 @@ function renderEntry(el){
       previewEl.classList.add("hidden");
       state.txnCount++;
       document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
-      if(newId)showUndo("\u2713 Added: "+savedDesc,async()=>{
+        rememberPaymentAccount(f.pt);rememberTopCategory(f.cat);
+        if(newId)showUndo("\u2713 Added: "+savedDesc,async()=>{
         await sb(`transactions?id=eq.${newId}`,{method:"DELETE"});
         state.txnCount--;document.getElementById("dbStatus").textContent=`● ${state.txnCount.toLocaleString()} txns`;
+        dcInvalidateTxns();if(opts.onSaved)opts.onSaved();
       });
+      savedFeedback();
     }catch(e){alert("Error: "+e.message)}
     submitBtn.textContent="Add Transaction";
   }},"Add Transaction");
 
-  card.append(row(field("Date Entered",dateInp),field("Description",descInp)));
-  card.append(row(field("Category",catSel),field("Amount (positive)",amtInp),field("Currency",curSel)));
-
-  const seField=h("div");seField.append(seLbl);seField.append(seInp);
-  card.append(row(field("Service Start",ssInp),seField));
-  card.append(fxRow);
   const subChk=h("input",{type:"checkbox",style:{accentColor:"var(--g)",cursor:"pointer"}});
   const subLabel=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"rgba(255,255,255,0.6)",cursor:"pointer"}});
   subLabel.append(subChk,document.createTextNode("Subscription"));
@@ -180,14 +188,58 @@ function renderEntry(el){
   xferLabel.append(xferChk,document.createTextNode("Balance transfer / withdrawal"));
   const xferWrap=h("div",{class:f.cat==="financial"?"":"hidden"});
   xferWrap.append(xferLabel);
-  const subWrap=h("div",{style:{display:"flex",flexDirection:"column",gap:"8px",justifyContent:"flex-end",paddingBottom:"4px"}});
-  subWrap.append(subLabel,xferWrap);
-  card.append(row(ptField,field("Tag (optional)",tagInp),subWrap));
-  card.append(creditRow);
-  card.append(toRow);
-  card.append(previewEl);
-  card.append(submitBtn);
+  const seField=h("div");seField.append(seLbl);seField.append(seInp);
+  const moreInner=h("div");
+  moreInner.append(row(field("Service Start",ssInp),seField));
+  moreInner.append(fxRow);
+  moreInner.append(row(field("Currency",curSel)));
+  moreInner.append(row(field("Tag (optional)",tagInp)));
+  moreInner.append(subLabel,xferWrap);
+  moreInner.append(creditRow);
+  moreInner.append(toRow);
+  function setCatFromChip(id){
+    f.cat=id;catSel.value=id;
+    if(!f.seManual){f.ss=getDefStart(f.cat,f.date)||f.date;ssInp.value=f.ss;f.se=getDefEnd(f.cat,f.ss)||f.ss;seInp.value=f.se;updateHint()}
+    updateXferVisibility();updatePreview();
+    chipRow.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.cat===id));
+  }
+  const chipRow=h("div",{class:"chip-row"});
+  topCategoriesFromCache(6).forEach(cid=>{
+    chipRow.append(h("button",{type:"button",class:"chip"+(f.cat===cid?" on":""),dataset:{cat:cid},onClick:()=>setCatFromChip(cid)},(CATS_LIST.find(c=>c.id===cid)||{l:cid}).l));
+  });
+  chipRow.append(h("button",{type:"button",class:"chip",onClick:()=>{catSel.focus()}}, "More…"));
+  const dateChips=h("div",{class:"chip-row",style:{marginTop:"6px"}});
+  dateChips.append(h("button",{type:"button",class:"chip on",onClick:()=>{f.date=today();dateInp.value=f.date}},"Today"));
+  dateChips.append(h("button",{type:"button",class:"chip",onClick:()=>{f.date=shiftDate(today(),-1);dateInp.value=f.date}},"Yesterday"));
+  const moreBlock=uiCollapsible("More details",moreInner,false);
+  function refreshMoreOpen(){const open=f.transfer||f.cur!=="USD";if(open){moreBlock.querySelector(".collapsible-hd").click()}}
+  if(isMobile()){
+    card.append(field("Amount (positive)",amtInp));
+    card.append(field("Description",descInp));
+    catSel.style.display="none";
+    const catWrap=h("div");catWrap.append(h("label",{class:"lbl"},"Category"),chipRow,catSel);card.append(catWrap);
+    card.append(ptField);
+    card.append(field("Date",dateInp));
+    card.append(dateChips);
+    card.append(moreBlock);
+    card.append(previewEl);
+    const foot=h("div",{class:"sticky-foot"});foot.append(submitBtn);card.append(foot);
+    setTimeout(refreshMoreOpen,0);
+  }else{
+    card.append(row(field("Date Entered",dateInp),field("Description",descInp)));
+    card.append(row(field("Category",catSel),field("Amount (positive)",amtInp),field("Currency",curSel)));
+    card.append(row(field("Service Start",ssInp),seField));
+    card.append(fxRow);
+    const subWrap=h("div",{style:{display:"flex",flexDirection:"column",gap:"8px",justifyContent:"flex-end",paddingBottom:"4px"}});
+    subWrap.append(subLabel,xferWrap);
+    card.append(row(ptField,field("Tag (optional)",tagInp),subWrap));
+    card.append(creditRow);
+    card.append(toRow);
+    card.append(previewEl);
+    card.append(submitBtn);
+  }
   el.append(card);
+  if(opts.quick){setTimeout(()=>amtInp.focus(),50);return}
 
   // ── Import CSV Section ──
   const impCard=h("div",{class:"cd"});

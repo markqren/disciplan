@@ -1,3 +1,24 @@
+async function deleteTxnWithUndo(txn,onSaved,beforeToast,onUndone){
+  const txnCopy={...txn};delete txnCopy.id;
+  const delGroupId=txn.transaction_group_id;
+  await sb(`transactions?id=eq.${txn.id}`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
+  dcInvalidateTxns();
+  state.txnCount--;
+  document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+  // Deleting a group member can leave a lone survivor — unlink it.
+  const orphansCleared=delGroupId?await pruneOrphanGroups([delGroupId]):[];
+  if(beforeToast)beforeToast();
+  showUndo("\u2713 Deleted: "+txn.description,async()=>{
+    await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id:txn.id,...txnCopy})});
+    for(const o of orphansCleared)await sb(`transactions?id=eq.${o.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:o.groupId})});
+    dcInvalidateTxns();
+    state.txnCount++;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
+    const after=onUndone||onSaved;
+    if(after)after();
+  });
+  if(onSaved)onSaved();
+}
+
 function openLedgerEditModal(txn,onSaved){
   const _orig=onSaved;
   const _onSaved=()=>{dcInvalidateTxns();if(_orig)_orig()};
@@ -91,7 +112,7 @@ function openLedgerEditModal(txn,onSaved){
   const isReimbursable=isReimbursableTxn(txn);
   const isCashbackable=txn.amount_usd>0&&!["income","investment","adjustment"].includes(txn.category_id);
   const extraBtns=(isReimbursable?1:0)+(isCashbackable?1:0);
-  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr"+(" auto".repeat(extraBtns+2)),gap:"8px",marginTop:"4px"}});
+  const btnRow=h("div",{class:"btn-row",style:{marginTop:"4px"}});
   const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:async()=>{
     mSave.textContent="Saving...";mSave.disabled=true;
     const sdays=daysInclusive(mSs.value,mSe.value);
@@ -171,22 +192,8 @@ function openLedgerEditModal(txn,onSaved){
     }
     if(delTimer)clearTimeout(delTimer);
     mDel.textContent="Deleting...";mDel.disabled=true;
-    const txnCopy={...txn};delete txnCopy.id;
-    const delGroupId=txn.transaction_group_id;
     try{
-      await sb(`transactions?id=eq.${txn.id}`,{method:"DELETE",headers:{"Prefer":"return=representation"}});
-      state.txnCount--;
-      document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
-      // Deleting a group member can leave a lone survivor — unlink it.
-      const orphansCleared=delGroupId?await pruneOrphanGroups([delGroupId]):[];
-      bg.remove();
-      showUndo("\u2713 Deleted: "+txn.description,async()=>{
-        await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({id:txn.id,...txnCopy})});
-        for(const o of orphansCleared)await sb(`transactions?id=eq.${o.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({transaction_group_id:o.groupId})});
-        state.txnCount++;document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
-        onSaved();
-      });
-      onSaved();
+      await deleteTxnWithUndo(txn,onSaved,()=>bg.remove());
     }catch(e){alert("Delete failed: "+e.message);mDel.textContent="Delete";mDel.disabled=false;mDel.dataset.confirm="0"}
   }},"Delete");
 
@@ -198,12 +205,14 @@ function openLedgerEditModal(txn,onSaved){
   // Cashback button (FEA-14)
   const mCashback=isCashbackable?h("button",{class:"btn",style:{background:"rgba(242,204,143,0.15)",color:"#F2CC8F",width:"auto",padding:"12px 20px"},onClick:()=>showCashbackForm()},"\uD83C\uDFC6 Cashback"):null;
 
+  const uiHost=modal;
   function showReimburseForm(){
-    const editContent=Array.from(modal.children);
-    modal.innerHTML="";
-    fillReimburseForm(modal,txn,{
-      bg,
-      onBack:()=>{modal.innerHTML="";editContent.forEach(c=>modal.append(c))},
+    const host=uiHost._uiHost||uiHost;
+    const editContent=Array.from(host.children);
+    host.innerHTML="";
+    fillReimburseForm(host,txn,{
+      bg:{remove:()=>document.querySelector(".sheet-bg,.modal-bg")?.remove()},
+      onBack:()=>{host.innerHTML="";editContent.forEach(c=>host.append(c))},
       onCreated:onSaved
     });
   }
@@ -211,8 +220,9 @@ function openLedgerEditModal(txn,onSaved){
   // Cashback form (FEA-14): create a NEW cashback credit linked to this purchase.
   // Electing an existing credit as cashback is the mCbChk checkbox instead.
   function showCashbackForm(){
-    const editContent=Array.from(modal.children);
-    modal.innerHTML="";
+    const host=uiHost._uiHost||uiHost;
+    const editContent=Array.from(host.children);
+    host.innerHTML="";
     let cbType="Dollar Value";
     let cbPaymentType=txn.payment_type||"";
     let cbCategory=txn.category_id||"income";
@@ -221,8 +231,8 @@ function openLedgerEditModal(txn,onSaved){
     const cHdrLeft=h("div");
     cHdrLeft.append(h("h3",{style:{margin:"0"}},"\uD83C\uDFC6 Cashback"));
     cHdrLeft.append(h("div",{style:{fontSize:"11px",color:"rgba(255,255,255,0.5)",marginTop:"4px"}},`${txn.description} \u00B7 ${fmtF(txn.amount_usd)}`));
-    cHdr.append(cHdrLeft,h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>bg.remove()},"\u2715"));
-    modal.append(cHdr);
+    cHdr.append(cHdrLeft,h("span",{style:{cursor:"pointer",fontSize:"18px",color:"rgba(255,255,255,0.3)",lineHeight:"1"},onClick:()=>document.querySelector(".sheet-bg,.modal-bg")?.remove()},"\u2715"));
+    host.append(cHdr);
 
     // Type selector
     const typeWrap=h("div",{style:{marginBottom:"14px"}});
@@ -231,14 +241,14 @@ function openLedgerEditModal(txn,onSaved){
     typeSelect.append(h("option",{value:"Dollar Value"},"Dollar Value"));
     typeSelect.append(h("option",{value:"Points"},"Points"));
     typeWrap.append(typeSelect);
-    modal.append(typeWrap);
+    host.append(typeWrap);
 
     // Dollar value input
     const dvWrap=h("div",{style:{marginBottom:"14px"}});
     dvWrap.append(h("label",{class:"lbl"},"Dollar Value"));
     const dvInp=h("input",{class:"inp",type:"number",step:"0.01",placeholder:"e.g. 10.00",onInput:updateCPreview});
     dvWrap.append(dvInp);
-    modal.append(dvWrap);
+    host.append(dvWrap);
 
     // Points fields (hidden by default)
     const ptsFields=h("div",{style:{display:"none",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"14px"}});
@@ -256,14 +266,14 @@ function openLedgerEditModal(txn,onSaved){
       updateCPreview();
     }});
     ptsRateWrap.append(ptsRateInp);ptsFields.append(ptsRateWrap);
-    modal.append(ptsFields);
+    host.append(ptsFields);
 
     // Description
     const descWrap=h("div",{style:{marginBottom:"14px"}});
     descWrap.append(h("label",{class:"lbl"},"Description"));
     const cDesc=h("input",{class:"inp",type:"text",value:"Cashback - "+txn.description});
     descWrap.append(cDesc);
-    modal.append(descWrap);
+    host.append(descWrap);
 
     // Payment type + category (defaults to parent, can be changed)
     const cbPtSel=h("select",{class:"inp",onChange:()=>{cbPaymentType=cbPtSel.value;updateCPreview()}});
@@ -271,14 +281,14 @@ function openLedgerEditModal(txn,onSaved){
     acctLabelsReady().then(()=>{cbPaymentType=fillPtSelect(cbPtSel,{selected:cbPaymentType||null,keep:["Transfer"]});updateCPreview()});
     const cbCatSel=h("select",{class:"inp",onChange:()=>{cbCategory=cbCatSel.value;updateCPreview()}});
     CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===cbCategory)o.selected=true;cbCatSel.append(o)});
-    modal.append(mRow(mField("Payment Type",cbPtSel),mField("Category",cbCatSel)));
+    host.append(mRow(mField("Payment Type",cbPtSel),mField("Category",cbCatSel)));
 
     // Preview
     const cPreview=h("div",{class:"preview",style:{marginBottom:"14px"}});
-    modal.append(cPreview);
+    host.append(cPreview);
 
     const errEl=h("div",{style:{color:"var(--r)",fontSize:"11px",marginBottom:"8px",minHeight:"16px"}});
-    modal.append(errEl);
+    host.append(errEl);
 
     function updateCPreview(){
       const dv=parseFloat(dvInp.value)||0;
@@ -335,7 +345,7 @@ function openLedgerEditModal(txn,onSaved){
           transaction_id:newId||null
         })});
 
-        bg.remove();
+        document.querySelector(".sheet-bg,.modal-bg")?.remove();
         showUndo("\u2713 Cashback: "+fmtF(dv),async()=>{
           // Undo: delete both the transaction and cashback record
           if(newId){
@@ -350,18 +360,20 @@ function openLedgerEditModal(txn,onSaved){
       }catch(e){alert("Failed: "+e.message);cCreate.textContent="Create Cashback";cCreate.disabled=false}
     }},"Create Cashback");
     const cBack=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>{
-      modal.innerHTML="";editContent.forEach(c=>modal.append(c));
+      host.innerHTML="";editContent.forEach(c=>host.append(c));
     }},"Back");
     cBtnRow.append(cCreate,cBack);
-    modal.append(cBtnRow);
+    host.append(cBtnRow);
   }
 
   if(canWrite){
     btnRow.append(mSave);
-    if(mReimb)btnRow.append(mReimb);
-    if(mCashback)btnRow.append(mCashback);
-    btnRow.append(mDel,mCancel);
-  }else{
+    if(!isMobile()){
+      if(mReimb)btnRow.append(mReimb);
+      if(mCashback)btnRow.append(mCashback);
+      btnRow.append(mDel,mCancel);
+    }
+  }else if(!isMobile()){
     btnRow.append(mCancel);
   }
 
@@ -505,6 +517,18 @@ function openLedgerEditModal(txn,onSaved){
   }
 
   modal.append(btnRow);
+  if(isMobile()&&canWrite){
+    const overflow=[];
+    if(mReimb)overflow.push({label:"\uD83D\uDCB8 Reimburse",onClick:()=>showReimburseForm()});
+    if(mCashback)overflow.push({label:"\uD83C\uDFC6 Cashback",onClick:()=>showCashbackForm()});
+    overflow.push({label:"Delete",danger:true,onClick:()=>mDel.click()});
+    const bodyEl=h("div");
+    while(modal.firstChild)bodyEl.appendChild(modal.firstChild);
+    uiHost._uiHost=bodyEl;
+    bg.remove();
+    openSheet({title:"Edit Transaction",body:bodyEl,primary:{label:"Save",onClick:()=>mSave.click()},overflow});
+    return;
+  }
   bg.append(modal);
   document.body.append(bg);
 }
@@ -887,10 +911,35 @@ async function renderLedger(el){
 
   const pasteBtn=h("button",{class:"pg-btn",title:"Paste TSV",style:"font-size:11px",onClick:()=>openPasteModal(loadPage)},"\uD83D\uDCE5");
   fb.append(pasteBtn);
+  if(isMobile()){
+    [...fb.children].slice(1).forEach(ch=>{ch.classList.add("ldg-filter-extra");ch.style.display="none"});
+    const filtBtn=h("button",{class:"pg-btn mob-filter-btn",style:"font-size:11px",onClick:()=>{
+      const body=h("div",{class:"stack"});
+      fb.querySelectorAll(".ldg-filter-extra").forEach(el=>{
+        const clone=el.cloneNode(true);
+        clone.style.display="";
+        if(clone.tagName==="SELECT")clone.addEventListener("change",()=>{el.value=clone.value;el.dispatchEvent(new Event("change"))});
+        if(clone.type==="date")clone.addEventListener("change",()=>{el.value=clone.value;el.dispatchEvent(new Event("change"))});
+        if(clone.tagName==="BUTTON")clone.onclick=el.onclick;
+        body.append(clone);
+      });
+      body.append(h("button",{type:"button",class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>document.querySelector(".sheet-bg")?.remove()},"Apply"));
+      openSheet({title:"Filters",body});
+    }},"Filters");
+    fb.append(filtBtn);
+  }
 
-  async function loadPage(){
-    selected.clear();updateBatchBar();
-    document.getElementById("ledgerBody").innerHTML="Loading...";
+  const mob={gen:0,list:null,sentinel:null,obs:null,lastHdr:"",groups:null,ids:null,loading:false,done:false};
+  async function loadPage(append){
+    const mobile=isMobile();
+    append=append===true&&mobile;
+    if(!append){
+      selected.clear();updateBatchBar();
+      if(mobile)state.page=0;
+      mob.gen++;
+      document.getElementById("ledgerBody").innerHTML="Loading...";
+    }
+    const gen=mob.gen;
     await subFetch;
     let q=`transactions?select=*&order=date.desc,id.desc&limit=${PS}&offset=${state.page*PS}`+ownerQS();
     if(f.cat)q+=`&category_id=eq.${f.cat}`;
@@ -900,6 +949,7 @@ async function renderLedger(el){
     if(f.dto)q+=`&date=lte.${f.dto}`;
     if(f.q){const eq=encodeURIComponent(f.q);let orParts=`description.ilike.*${eq}*,tag.ilike.*${eq}*,payment_type.ilike.*${eq}*,credit.ilike.*${eq}*`;const num=parseFloat(f.q);if(!isNaN(num)&&String(num)===f.q.trim())orParts+=`,amount_usd.eq.${num}`;q+=`&or=(${orParts})`}
     const txns=await sb(q);
+    const rawCount=txns.length;
     // Backfill missing linked group members from other pages. Scope to the active
     // person view (ownerQS) so a cross-owner link — e.g. Mark's share of an expense
     // Shilpa fronted — only surfaces in Combined, not in a single person's ledger.
@@ -970,8 +1020,95 @@ async function renderLedger(el){
         (cbRows||[]).forEach(r=>{if(r.transaction_id)cbTagged.add(r.transaction_id)});
       }catch(e){}
     }
+    if(gen!==mob.gen)return;
     const nav=document.getElementById("pgNav");
     nav.innerHTML="";
+    if(mobile){
+      if(!append){
+        if(mob.obs)mob.obs.disconnect();
+        mob.list=h("div");mob.lastHdr="";mob.groups=new Set();mob.ids=new Set();
+        mob.sentinel=h("div",{class:"ldg-sentinel"});
+        const body=document.getElementById("ledgerBody");body.innerHTML="";body.append(mob.list,mob.sentinel);
+        currentTxns=[];
+      }
+      mob.done=rawCount<PS;
+      currentTxns=currentTxns.concat(txns);
+      const reload=()=>loadPage();
+      function ledgerCard(t){
+        const card=h("div",{class:"resp-card",onClick:()=>openLedgerEditModal(t,reload)});
+        const l1=h("div",{class:"resp-card-line1"});
+        const desc=h("div",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:"13px"}},t.description);
+        l1.append(desc,h("div",{style:{fontFamily:"var(--mono)",fontWeight:600,flexShrink:0,color:t.amount_usd<0?"var(--g)":"rgba(255,255,255,0.85)"}},fmtF(t.amount_usd)));
+        card.append(l1);
+        const l2=h("div",{class:"resp-card-line2"});
+        l2.append(h("span",{class:"badge",style:{background:(CC[t.category_id]||"#666")+"22",color:CC[t.category_id]||"#888"}},t.category_id));
+        if(t.payment_type)l2.append(h("span",{},t.payment_type));
+        if(t.tag)l2.append(h("span",{},t.tag));
+        if(t.service_start&&t.service_end&&t.service_start!==t.service_end)l2.append(h("span",{},`${fmtD(t.service_start)}\u2013${fmtD(t.service_end)}`));
+        card.append(l2);
+        if(!canWriteOwner(t.owner))return card;
+        let wrapEl=null;
+        wrapEl=swipeActions(card,[
+          {label:"Edit",onClick:()=>openLedgerEditModal(t,reload)},
+          {label:"Delete",danger:true,onClick:async()=>{
+            try{await deleteTxnWithUndo(t,()=>{if(wrapEl)wrapEl.remove()},null,reload)}
+            catch(e){alert("Delete failed: "+e.message)}
+          }}
+        ]);
+        return wrapEl;
+      }
+      function dateHdr(d){
+        const k=dayLabel(d);
+        if(k!==mob.lastHdr){mob.lastHdr=k;mob.list.append(h("div",{class:"ldg-date-hdr"},k))}
+      }
+      txns.forEach(t=>{
+        if(mob.ids.has(t.id))return;
+        const gid=t.transaction_group_id;
+        const isLinked=gid&&(groupCounts[gid]||0)>=2;
+        const summary=isLinked?groupSummaries[gid]:null;
+        const expanded=state.expandedGroups.has(gid)||f.pt;
+        if(summary&&!mob.groups.has(gid)){
+          mob.groups.add(gid);
+          dateHdr(summary.dateMax);
+          const card=h("div",{class:"resp-card",onClick:()=>openGroupEditModal(gid,groupMembers[gid]||[],summary,overrideMap[gid],reload)});
+          const lbl=h("div",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:"13px"},"data-grp-label":gid},summary.label);
+          card.append(h("div",{class:"resp-card-line1"},h("span",{},"\uD83D\uDD17"),lbl,h("div",{style:{fontFamily:"var(--mono)",fontWeight:600,flexShrink:0}},fmtF(summary.net))));
+          const l2=h("div",{class:"resp-card-line2"});
+          l2.append(h("span",{class:"badge",style:{background:(CC[summary.dominantCat]||"#666")+"22",color:CC[summary.dominantCat]||"#888"}},summary.dominantCat));
+          l2.append(h("span",{},`${summary.memberCount} linked`));
+          const kids=h("div",{style:{marginLeft:"14px",borderLeft:"2px solid rgba(255,255,255,0.08)",paddingLeft:"8px",display:expanded?"":"none"}});
+          (groupMembers[gid]||[]).forEach(m=>{mob.ids.add(m.id);kids.append(ledgerCard(m))});
+          const tog=h("button",{type:"button",class:"chip",style:{padding:"2px 8px",fontSize:"10px"},onClick:e=>{
+            e.stopPropagation();
+            const open=kids.style.display==="none";
+            kids.style.display=open?"":"none";tog.textContent=open?"Hide":"Show";
+            if(open)state.expandedGroups.add(gid);else state.expandedGroups.delete(gid);
+          }},expanded?"Hide":"Show");
+          l2.append(tog);
+          card.append(l2);
+          mob.list.append(card,kids);
+          return;
+        }
+        if(summary)return;
+        mob.ids.add(t.id);
+        dateHdr(t.date);
+        mob.list.append(ledgerCard(t));
+      });
+      mob.sentinel.textContent=mob.done?(mob.ids.size?"End of results":"No transactions"):"Loading more\u2026";
+      const loadMore=()=>{
+        if(mob.loading||mob.done||gen!==mob.gen)return;
+        mob.loading=true;state.page++;
+        loadPage(true).finally(()=>{
+          mob.loading=false;
+          if(mob.sentinel&&mob.sentinel.getBoundingClientRect().top<innerHeight+400)loadMore();
+        });
+      };
+      if(!append){
+        mob.obs=new IntersectionObserver(entries=>{if(entries[0].isIntersecting)loadMore()},{rootMargin:"400px"});
+        mob.obs.observe(mob.sentinel);
+      }
+      return;
+    }
     const prev=h("button",{class:"pg-btn",onClick:()=>{if(state.page>0){state.page--;loadPage()}}},"\u2190 Prev");
     if(state.page===0)prev.disabled=true;
     nav.append(prev);

@@ -2,7 +2,11 @@ function fmtN(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);let r;if(a>
 function fmtT(n){if(n==null||isNaN(n))return"$0";const a=Math.abs(n);const r=`$${a.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})}`;return n<0?`(${r})`:r}
 function fmtF(n){if(n==null||isNaN(n))return"$0.00";const r=`$${Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}`;return n<0?`(${r})`:r}
 function fmtD(d){if(!d)return"";const p=d.split("-");return`${+p[1]}/${+p[2]}/${p[0].slice(2)}`}
-function today(){return new Date().toISOString().slice(0,10)}
+function today(){
+  const d=new Date();
+  const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+}
 // Date helpers below are pure UTC arithmetic on YYYY-MM-DD strings. Building a
 // LOCAL-midnight Date and formatting it with toISOString() (UTC) shifts the day
 // back by one at any positive UTC offset, which is how endOfMonth returned Jan 30
@@ -575,9 +579,10 @@ function attachDescriptionSuggestions(input,opts){
   return input;
 }
 
-function h(tag,attrs,children){
+function h(tag,attrs,...rest){
   const el=document.createElement(tag);
-  if(attrs)for(const[k,v]of Object.entries(attrs)){if(k==="style"&&typeof v==="object")Object.assign(el.style,v);else if(k.startsWith("on"))el.addEventListener(k.slice(2).toLowerCase(),v);else el.setAttribute(k,v)}
+  if(attrs)for(const[k,v]of Object.entries(attrs)){if(k==="style"&&typeof v==="object")Object.assign(el.style,v);else if(k==="dataset"&&typeof v==="object")Object.assign(el.dataset,v);else if(k.startsWith("on"))el.addEventListener(k.slice(2).toLowerCase(),v);else el.setAttribute(k,v)}
+  const children=rest.length>1?rest:rest[0];
   if(children!=null){if(Array.isArray(children))children.forEach(c=>{if(c!=null)el.append(typeof c==="string"?document.createTextNode(c):c)});else if(typeof children==="string")el.textContent=children;else el.append(children)}
   return el;
 }
@@ -597,6 +602,7 @@ function showUndo(label,undoFn){
   const dismiss=h("button",{class:"undo-dismiss",onClick:()=>{if(_undoTimer)clearTimeout(_undoTimer);toast.remove()}},"\u2715");
   toast.append(btn,dismiss);
   document.body.append(toast);
+  if(typeof flashSaved==="function")flashSaved(toast);
   _undoTimer=setTimeout(()=>toast.remove(),10000);
 }
 

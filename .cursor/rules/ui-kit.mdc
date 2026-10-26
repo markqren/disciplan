@@ -1,0 +1,12 @@
+---
+description: Use js/ui.js and css/app.css primitives for UI work
+globs: js/**,index.html,css/**
+alwaysApply: false
+---
+
+# UI kit
+
+- Layout: `formGrid`, `uiField`, `openSheet`, `respList`, `segmented` from `js/ui.js`.
+- No new inline 2–3 column grids in entry/ledger/modals — use `formGrid` (stacks on mobile via CSS).
+- Modals on phone: `openSheet` (sticky Save + overflow menu).
+- Check mobile at 402px and 440px; optional `?debug=layout`.

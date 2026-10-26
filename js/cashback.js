@@ -316,7 +316,7 @@ async function renderCashback(el){
     // Inline add-redemption form (hidden by default)
     rhtml+='<div id="cbAddForm" style="display:none;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:16px;margin-bottom:16px">';
     rhtml+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">';
-    rhtml+='<div><label class="lbl">Date</label><input id="cbAddDate" class="inp" type="date" value="'+new Date().toISOString().slice(0,10)+'"></div>';
+    rhtml+='<div><label class="lbl">Date</label><input id="cbAddDate" class="inp" type="date" value="'+today()+'"></div>';
     rhtml+='<div><label class="lbl">Card</label><select id="cbAddCard" class="inp">'+addCardOpts.map(c=>'<option value="'+c+'">'+c+'</option>').join("")+'</select></div>';
     rhtml+='</div>';
     rhtml+='<div style="margin-bottom:12px"><label class="lbl">Item</label><input id="cbAddItem" class="inp" type="text" placeholder="e.g. Hilton Points Transfer"></div>';

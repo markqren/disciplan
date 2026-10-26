@@ -206,7 +206,7 @@ async function renderPortfolio(el){
           const sym=td.dataset.priceSym;
           const symObj=activePriceSyms.find(s=>s.symbol===sym);if(!symObj)return;
           const oldPrice=parseFloat(symObj.latest_price||0);
-          const today=new Date().toISOString().slice(0,10);
+          const today=today();
           const oldAsOf=symObj.price_as_of?symObj.price_as_of.slice(0,10):today;
           td.innerHTML=`<div style="display:flex;gap:4px;justify-content:flex-end;align-items:center"><input type="number" step="0.01" value="${oldPrice||""}" placeholder="Price" style="width:72px;background:rgba(255,255,255,0.08);border:1px solid rgba(74,111,165,0.5);border-radius:3px;color:#e8e8e4;font-family:var(--mono);font-size:11px;text-align:right;padding:2px 4px;outline:none" id="pfPrIn_${sym}"><input type="date" value="${oldAsOf}" style="width:108px;background:rgba(255,255,255,0.08);border:1px solid rgba(74,111,165,0.5);border-radius:3px;color:#e8e8e4;font-size:11px;padding:2px 4px;outline:none" id="pfDtIn_${sym}"><button id="pfPrApi_${sym}" title="Fetch from API" style="background:rgba(74,111,165,0.2);border:1px solid rgba(74,111,165,0.4);border-radius:3px;color:#4A6FA5;font-size:11px;padding:2px 6px;cursor:pointer;white-space:nowrap">↻ Live</button></div>`;
           const pi=document.getElementById(`pfPrIn_${sym}`);
@@ -236,7 +236,7 @@ async function renderPortfolio(el){
               const p=j?.chart?.result?.[0]?.meta?.regularMarketPrice;
               if(!p||p<=0)throw new Error("No price returned");
               pi.value=Math.round(p*100)/100;
-              di.value=new Date().toISOString().slice(0,10);
+              di.value=today();
               await commit("live");
             }catch(err){
               apiBt.textContent="↻ Live";apiBt.disabled=false;
@@ -508,7 +508,7 @@ async function renderPortfolio(el){
         row.addEventListener("click",e=>{
           e.stopPropagation();
           const [acctId,sym]=row.dataset.addLot.split("|");
-          const today=new Date().toISOString().slice(0,10);
+          const today=today();
           row.innerHTML=`<td colspan="8" style="padding:6px 0 6px 28px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input type="date" class="pf-al-date inp" value="${today}" style="width:120px;font-size:11px"><input type="number" class="pf-al-shares inp" placeholder="Shares" step="any" style="width:80px;font-size:11px"><input type="number" class="pf-al-price inp" placeholder="Price" step="any" style="width:80px;font-size:11px"><button class="pf-al-save btn" style="font-size:11px;padding:3px 10px">Save</button><button class="pf-al-cancel btn" style="font-size:11px;padding:3px 8px;background:rgba(255,255,255,0.06)">Cancel</button></div></td>`;
           row.querySelector(".pf-al-shares").focus();
           row.querySelector(".pf-al-cancel").addEventListener("click",ev=>{ev.stopPropagation();renderHoldings()});
@@ -540,7 +540,7 @@ async function renderPortfolio(el){
         const symList=symbols.map(s=>s.symbol);
         const acTypeOpts=Object.entries(PF_ATL).map(([k,v])=>`<option value="${k}">${v}</option>`).join("");
         const acOpts=Object.entries(PF_ACM).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join("");
-        const today=new Date().toISOString().slice(0,10);
+        const today=today();
         addHoldForm.innerHTML=`<div style="border:1px solid rgba(74,111,165,0.2);border-radius:8px;padding:14px;margin:12px 0;background:rgba(74,111,165,0.04)">
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end">
             <div><label style="font-size:10px;color:rgba(255,255,255,0.4);display:block;margin-bottom:3px">Account</label><select id="pfAhAcct" class="inp" style="font-size:12px;min-width:140px"><option value="">Select…</option>${acctOpts}<option value="__new__">New Account…</option></select></div>
@@ -835,7 +835,7 @@ function parseHealthEquityLots(rows){
   const hdr=rows[headerIdx];
   const col=n=>hdr.findIndex(c=>new RegExp(n,"i").test(String(c)));
   const iFund=col("fund"),iSym=col("symbol|ticker"),iShares=col("shares|units|qty"),iPrice=col("price|nav"),iDate=col("date|purchased");
-  const today=new Date().toISOString().slice(0,10);
+  const today=today();
   const lots=[];
   for(let i=headerIdx+1;i<rows.length;i++){
     const r=rows[i]||[];
@@ -902,7 +902,7 @@ async function fetchProposedPrices(symbolList,impliedPrices={},symbolData=[]){
 
 // Save old price to history, then apply new price
 async function applyPriceUpdate(sym,newPrice,source,oldPrice,oldAsOf){
-  const today=new Date().toISOString().slice(0,10);
+  const today=today();
   // Log old price to history if it exists
   if(oldPrice>0){
     try{await sb("investment_price_history",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify({symbol:sym,price:oldPrice,price_as_of:oldAsOf||today,source:"archived"})});}

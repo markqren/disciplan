@@ -2,8 +2,8 @@
 const CACHE_FONTS='dc-fonts-v1';
 
 const PRECACHE_URLS=[
-  '/','/index.html','/manifest.json',
-  '/js/config.js','/js/constants.js','/js/helpers.js','/js/state.js',
+  '/','/index.html','/manifest.json','/css/app.css',
+  '/js/config.js','/js/constants.js','/js/helpers.js','/js/ui.js','/js/state.js',
   '/js/ai-categorize.js','/js/import-engine.js','/js/payslip-parser.js','/js/wf-statement-parser.js','/js/linking.js','/js/reimburse-form.js',
   '/js/income-stmt.js','/js/portfolio.js','/js/ledger.js','/js/entry.js',
   '/js/import-review.js','/js/balance-sheet.js','/js/tags.js','/js/cashback.js',

@@ -85,14 +85,125 @@ function renderISTimeChart(card,opts){
   });
 }
 
+// Monthly category map for one year's get_income_statement rows, with "_p_<parent>"
+// totals that include children.
+function buildISMonths(data,year){
+  const months={};
+  for(let m=1;m<=12;m++)months[`${year}-${String(m).padStart(2,"0")}`]={};
+  for(const r of data||[]){const mk=r.month?.slice(0,7);if(mk&&months[mk])months[mk][r.category_id]=(parseFloat(r.amount)||0)}
+  for(const mk of Object.keys(months)){
+    for(const[p,ch]of Object.entries(SUB_MAP)){
+      let v=months[mk][p]||0;
+      for(const c of ch)v+=months[mk][c]||0;
+      months[mk]["_p_"+p]=v;
+    }
+  }
+  return months;
+}
+
+async function isYearMonths(year){
+  const cacheKey='is_'+year+'_'+state.view;
+  let data=dcGet(cacheKey);
+  if(!data){data=await scopedRPC("get_income_statement",{p_year:year});dcSet(cacheKey,data)}
+  return buildISMonths(data,year);
+}
+
+function isDeltaEl(cur,prev,lbl){
+  if(prev==null||Math.abs(prev)<1)return h("span",{class:"is-delta",style:{color:"rgba(255,255,255,0.25)"}},`\u2014 vs ${lbl}`);
+  const d=cur-prev;
+  if(Math.abs(d)<1)return h("span",{class:"is-delta",style:{color:"rgba(255,255,255,0.35)"}},`= vs ${lbl}`);
+  const pct=Math.round(d/Math.abs(prev)*100);
+  return h("span",{class:"is-delta "+(d>0?"up":"dn")},`${d>0?"\u25B2":"\u25BC"}${fmtT(Math.abs(Math.round(d)))} (${pct>0?"+":""}${pct}%) vs ${lbl}`);
+}
+
+function renderISMonthView(body,ctx){
+  const{mData,expCats,totI,totE,completedMonths,isCurrentYear,year}=ctx;
+  if(state.isMonthIdx==null||state.isMonthIdx===undefined)state.isMonthIdx=defaultISChartMonth(year);
+  let mi=Math.max(0,Math.min(11,state.isMonthIdx));
+  const card=h("div",{class:"cd"});
+  const hdr=h("div",{class:"is-month-hdr"});
+  const go=(d)=>{state.isMonthIdx=Math.max(0,Math.min(11,mi+d));renderContent()};
+  hdr.append(h("button",{type:"button",class:"is-month-nav",onClick:()=>go(-1)},"\u2039"),h("div",{style:{textAlign:"center",flex:1}},h("div",{style:{fontSize:"18px",fontWeight:700}},ML[mi]+" "+year),h("div",{style:{fontSize:11,color:"rgba(255,255,255,0.4)"}},"Swipe or use arrows")),h("button",{type:"button",class:"is-month-nav",onClick:()=>go(1)},"\u203A"));
+  card.append(hdr);
+  let touchX=0;
+  card.addEventListener("touchstart",e=>{touchX=e.touches[0].clientX},{passive:true});
+  card.addEventListener("touchend",e=>{const dx=e.changedTouches[0].clientX-touchX;if(dx>60)go(-1);else if(dx<-60)go(1)},{passive:true});
+  const md=mData[mi];
+  const stats=h("div",{class:"g5"+(isWideMobile()?" g5-wide-m":"")});
+  stats.append(statCard("💵","income",fmtN(md.inc),"var(--b)"));
+  stats.append(statCard("📊","expenses",fmtN(md.totE),"var(--r)"));
+  stats.append(statCard("✨","net",fmtN(md.net),"var(--g)"));
+  stats.append(statCard("📈","rate",md.inc>0?((md.net/md.inc)*100).toFixed(1)+"%":"—","var(--y)"));
+  card.append(stats);
+  const rows=[];
+  for(const p of expCats){
+    const v=md.c["_p_"+p]??md.c[p]??0;
+    if(Math.abs(v)<1)continue;
+    rows.push({id:p,lbl:p[0].toUpperCase()+p.slice(1),val:v,par:true});
+    if(SUB_MAP[p])for(const ch of SUB_MAP[p]){
+      const cv=md.c[ch]||0;
+      if(Math.abs(cv)<1)continue;
+      rows.push({id:ch,lbl:ch[0].toUpperCase()+ch.slice(1),val:cv,par:false,parent:p});
+    }
+  }
+  rows.sort((a,b)=>Math.abs(b.val)-Math.abs(a.val));
+  const maxE=Math.max(...rows.filter(r=>r.par).map(r=>Math.abs(r.val)),1);
+  const list=h("div",{style:{marginTop:"12px"}});
+  list.append(h("h3",{style:{marginBottom:"8px"}},"Expenses by category"));
+  list.append(h("div",{style:{fontSize:10,color:"rgba(255,255,255,0.3)",marginBottom:"6px"}},"Tap a name for subcategories, an amount for transactions, long-press for the yearly trend"));
+  const deltaRows=[];
+  rows.filter(r=>r.par).forEach(r=>{
+    const bar=h("div",{class:"is-bar-row",style:{borderBottom:"none",paddingBottom:"2px"}});
+    const lbl=h("span",{style:{width:100,fontSize:12,fontWeight:600,color:"rgba(255,255,255,0.85)",cursor:"pointer"}},(state.isMonthExpanded===r.id?"▾ ":"▸ ")+r.lbl);
+    lbl.onclick=e=>{e.stopPropagation();state.isMonthExpanded=state.isMonthExpanded===r.id?null:r.id;renderContent()};
+    onLongPress(lbl,()=>showCatYoYForCat(r.id));
+    bar.append(lbl);
+    bar.append(h("div",{class:"is-bar-track"},h("div",{class:"is-bar-fill",style:{width:Math.round(Math.abs(r.val)/maxE*100)+"%",background:CC[r.id]||"#666"}})));
+    const amt=h("span",{class:"m",style:{width:72,textAlign:"right",cursor:"pointer"}},fmtT(Math.round(r.val)));
+    amt.onclick=()=>showISDrilldown(r.id,true,mi,year);
+    bar.append(amt);
+    list.append(bar);
+    const dl=h("div",{style:{display:"flex",flexWrap:"wrap",justifyContent:"flex-end",gap:"10px",padding:"0 0 8px",borderBottom:"1px solid rgba(255,255,255,0.04)"}});
+    list.append(dl);
+    deltaRows.push({r,el:dl});
+    if(state.isMonthExpanded===r.id){
+      rows.filter(x=>x.parent===r.id).forEach(sub=>{
+        const srow=h("div",{class:"is-bar-row",style:{paddingLeft:20},onClick:()=>showISDrilldown(sub.id,false,mi,year)});
+        srow.append(h("span",{style:{flex:1,fontSize:11,color:"rgba(255,255,255,0.55)"}},sub.lbl));
+        srow.append(h("span",{class:"m"},fmtT(Math.round(sub.val))));
+        list.append(srow);
+      });
+    }
+  });
+  card.append(list);
+  body.append(card);
+  const yy="'"+String(year-1).slice(2);
+  const lmLbl=mi>0?ML[mi-1]:ML[11]+" "+yy;
+  const lyLbl=ML[mi]+" "+yy;
+  const catVal=(c,id)=>c?(c["_p_"+id]??c[id]??0):null;
+  const fillDeltas=prevYear=>{
+    const lm=mi>0?mData[mi-1].c:prevYear?.[`${year-1}-12`];
+    const ly=prevYear?.[`${year-1}-${String(mi+1).padStart(2,"0")}`];
+    deltaRows.forEach(({r,el})=>{
+      el.innerHTML="";
+      el.append(isDeltaEl(r.val,catVal(lm,r.id),lmLbl),isDeltaEl(r.val,catVal(ly,r.id),lyLbl));
+    });
+  };
+  fillDeltas(null);
+  isYearMonths(year-1).then(fillDeltas).catch(()=>{});
+}
+
 async function renderIS(el){
   if(_isChartModeYear!==state.year){_isChartModeYear=state.year;_isChartModes={}}
-  el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px">
+  el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
     <div><h2>Income Statement</h2><p class="sub">Accrual basis · USD · ${state.year} · Live from Supabase</p></div>
-    <div class="tabs" id="yearTabs"></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
+    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><div class="tabs" id="yearTabs"></div><div id="isModeBar"></div></div></div><div id="isBody"><div style="text-align:center;padding:60px;color:rgba(255,255,255,0.3)">Loading...</div></div>`;
 
   const yt=document.getElementById("yearTabs");
   ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;history.replaceState(null,null,y==="all"?"#income-all":"#income");renderContent()}},y==="all"?"All":String(y));yt.append(b)});
+  if(state.year!=="all"){
+    document.getElementById("isModeBar").append(segmented([["month","Month"],["year","Year"]],getIsMode(),v=>{setIsMode(v);renderContent()}));
+  }
 
   try{
     const cacheKey='is_'+state.year+'_'+state.view;
@@ -100,19 +211,7 @@ async function renderIS(el){
     if(!data){data=await scopedRPC("get_income_statement",{p_year:state.year});dcSet(cacheKey,data)}
     const body=document.getElementById("isBody");body.innerHTML="";
 
-    // Process monthly data
-    const months={};
-    for(let m=1;m<=12;m++)months[`${state.year}-${String(m).padStart(2,"0")}`]={};
-    for(const r of data){const mk=r.month?.slice(0,7);if(mk&&months[mk])months[mk][r.category_id]=(parseFloat(r.amount)||0)}
-
-    // Compute parent totals
-    for(const mk of Object.keys(months)){
-      for(const[p,ch]of Object.entries(SUB_MAP)){
-        let v=months[mk][p]||0;
-        for(const c of ch)v+=months[mk][c]||0;
-        months[mk]["_p_"+p]=v;
-      }
-    }
+    const months=buildISMonths(data,state.year);
 
     const mKeys=Object.keys(months).sort();
     const expCats=PARENT_CATS;
@@ -137,11 +236,17 @@ async function renderIS(el){
     stats.append(statCard("✨","net savings",fmtN(totI-totE),"var(--g)"));
     stats.append(statCard("📈","savings rate",totI>0?((totI-totE)/totI*100).toFixed(1)+"%":"—","var(--y)"));
     stats.append(statCard("📊","unrealized G/L",(totInv<0?"+":totInv>0?"-":"")+fmtN(totInv),totInv<=0?"var(--g)":"var(--r)"));
+    if(getIsMode()==="month"){
+      renderISMonthView(body,{mData,expCats,totI,totE,totInv,completedMonths,isCurrentYear,year:state.year});
+      return;
+    }
     body.append(stats);
 
+    const chartsStack=h("div",{class:"stack"});
+    const appendChart=child=>{isMobile()?chartsStack.append(child):body.append(child)};
     // Cash flow chart
     const cfCard=h("div",{class:"cd"});
-    body.append(cfCard);
+    appendChart(cfCard);
     const cashFlowConfig=(rows,weekly)=>({type:"bar",data:{labels:rows.map(m=>weekly?weekLabel(m.start):m.month),datasets:[
       {label:"Income",data:rows.map(m=>Math.round(m.inc)),backgroundColor:"rgba(74,111,165,0.75)",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?2:0),borderRadius:4},
       {label:"Expenses",data:rows.map(m=>[Math.round(m.net),Math.round(m.inc)]),backgroundColor:"rgba(224,122,95,0.75)",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?2:0),borderRadius:4},
@@ -160,7 +265,8 @@ async function renderIS(el){
 
     const stackCard=h("div",{class:"cd"});
     row2.append(stackCard);
-    body.append(row2);
+    appendChart(row2);
+    if(isMobile()&&chartsStack.childNodes.length)body.append(uiCollapsible("Charts",chartsStack,false));
     const stackConfig=(rows,weekly)=>{
       const stackCats=expCats.filter(c=>rows.some(m=>(m.c["_p_"+c]??m.c[c]??0)>0));
       return{type:"bar",data:{labels:rows.map(m=>weekly?weekLabel(m.start):m.month),datasets:stackCats.map(c=>({label:c,data:rows.map(m=>Math.round(m.c["_p_"+c]??m.c[c]??0)),backgroundColor:CC[c]||"#666",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?1:0)}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>weekly&&items.length?`${fmtD(rows[items[0].dataIndex].start)}–${fmtD(rows[items[0].dataIndex].end)}`:items[0]?.label}}},scales:{x:{stacked:true,ticks:{color:ctx=>weekly&&rows[ctx.index]?.selected?"rgba(242,204,143,0.9)":"rgba(255,255,255,0.3)",maxTicksLimit:weekly?(window.innerWidth<=700?7:14):12},grid:{color:"rgba(255,255,255,0.04)"}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}};
@@ -175,7 +281,7 @@ async function renderIS(el){
       const bActual=bCats.map(c=>{const v=mKeys.reduce((s,mk)=>s+(months[mk]["_p_"+c]??months[mk][c]??0),0);return parseFloat((v/totI*100).toFixed(1))});
       const bTarget=bCats.map(c=>bgt[c]||0);
       budgetCard.innerHTML=`<h3>Budget vs Actual</h3><div class="chrt" style="height:${Math.max(200,bCats.length*32)}px"><canvas id="budgetChart"></canvas></div>`;
-      body.append(budgetCard);
+      appendChart(budgetCard);
       setTimeout(()=>makeChart("budgetChart",{type:"bar",data:{labels:bCats.map(c=>c[0].toUpperCase()+c.slice(1)),datasets:[
         {label:"Actual %",data:bActual,backgroundColor:bCats.map((c,i)=>bActual[i]>bTarget[i]?"rgba(224,122,95,0.7)":(CC[c]||"#666")+"B3"),borderRadius:3,barPercentage:0.6},
         {label:"Target %",data:bTarget,backgroundColor:"rgba(255,255,255,0.08)",borderColor:"rgba(255,255,255,0.25)",borderWidth:1,borderRadius:3,barPercentage:0.6}
@@ -190,10 +296,14 @@ async function renderIS(el){
     const tblCard=h("div",{class:"cd"});
     const activeMonths=Math.max(1,Math.min(mData.filter(m=>m.totE>0||m.inc>0).length,completedMonths));
     const hasBgt=bgt&&totI>0;
-    let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table class="is-tbl" style="table-layout:fixed"><colgroup><col style="width:140px"><col style="width:70px"><col style="width:70px">`;
-    for(let i=0;i<12;i++)thtml+=`<col class="is-mo">`;
-    if(hasBgt)thtml+=`<col style="width:48px"><col style="width:48px">`;
+    const curMoIdx=isCurrentYear?now.getMonth():11;
+    const mobTbl=isMobile();
+    let thtml=`<h3>Monthly Detail</h3><div style="overflow-x:auto"><table class="is-tbl"${mobTbl?"":" style=\"table-layout:fixed\""}><colgroup><col style="width:140px"><col style="width:70px"><col style="width:70px">`;
+    if(mobTbl)thtml+=`<col style="width:64px">`;
+    else for(let i=0;i<12;i++)thtml+=`<col class="is-mo">`;
+    if(hasBgt&&!mobTbl)thtml+=`<col style="width:48px"><col style="width:48px">`;
     thtml+=`</colgroup><thead><tr><th>Category</th><th class="r" style="font-weight:700">Total</th><th class="r" style="font-weight:700">Avg</th>`;
+    if(mobTbl)thtml+=`<th class="r">${ML[curMoIdx]}</th>`;
     ML.forEach(m=>thtml+=`<th class="r hide-m">${m}</th>`);
     if(hasBgt)thtml+=`<th class="r hide-m" style="font-weight:600;color:rgba(255,255,255,0.35)">Tgt</th><th class="r hide-m" style="font-weight:600;color:rgba(255,255,255,0.35)">\u0394</th>`;
     thtml+=`</tr></thead><tbody>`;
@@ -218,13 +328,14 @@ async function renderIS(el){
       const mj=JSON.stringify(r.m.map(v=>Math.round(v)));
       if(r.par){
         const hasSubs=SUB_MAP[r.id]&&allRows.some(x=>!x.par&&SUB_MAP[r.id].includes(x.id));
-        thtml+=`<tr class="is-mo-row" data-cat="${r.id}" data-is-parent="true" data-months='${mj}' style="cursor:${hasSubs?"pointer":"default"}" ${hasSubs?`onclick="document.querySelectorAll('.sub-${r.id}').forEach(el=>el.classList.toggle('hidden'));this.querySelector('.toggl').textContent=this.querySelector('.toggl').textContent==='▸'?'▾':'▸'"`:""}><td style="padding-left:4px;color:rgba(255,255,255,0.85);font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hasSubs?`<span class="toggl" style="display:inline-block;width:14px;font-size:10px;color:rgba(255,255,255,0.3)">▸</span>`:`<span style="display:inline-block;width:14px"></span>`}<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}<span class="is-mob-chev">▸</span></td>`;
+        thtml+=`<tr class="is-mo-row" data-cat="${r.id}" data-is-parent="true" data-sub="${r.id}" data-months='${mj}' style="cursor:${hasSubs?"pointer":"default"}"><td class="is-cat-cell" style="padding-left:4px;color:rgba(255,255,255,0.85);font-weight:600;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${hasSubs?`<span class="toggl" style="display:inline-block;width:14px;font-size:10px;color:rgba(255,255,255,0.3)">▸</span>`:`<span style="display:inline-block;width:14px"></span>`}<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}</td>`;
       }else{
         const parentId=Object.entries(SUB_MAP).find(([,ch])=>ch.includes(r.id))?.[0]||"";
-        thtml+=`<tr class="sub-${parentId} hidden is-mo-row" data-cat="${r.id}" data-is-parent="false" data-months='${mj}'><td style="padding-left:32px;color:rgba(255,255,255,0.5);font-weight:400;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}<span class="is-mob-chev">▸</span></td>`;
+        thtml+=`<tr class="sub-${parentId} hidden is-mo-row" data-cat="${r.id}" data-is-parent="false" data-months='${mj}'><td class="is-cat-cell" style="padding-left:32px;color:rgba(255,255,255,0.5);font-weight:400;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${CC[r.id]||"#555"};margin-right:6px;vertical-align:middle"></span>${r.lbl}</td>`;
       }
-      thtml+=`<td class="r m" style="font-weight:${r.par?700:500};color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.6)"}">${fmtT(Math.round(r.t))}</td>`;
+      thtml+=`<td class="r m is-total-cell" style="font-weight:${r.par?700:500};color:${r.par?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.6)"}">${fmtT(Math.round(r.t))}<span class="is-mob-chev">▸</span></td>`;
       thtml+=`<td class="r m" style="color:rgba(255,255,255,0.4)">${fmtT(Math.round(avg))}</td>`;
+      if(mobTbl){const cv=Math.round(r.m[curMoIdx]||0);thtml+=`<td class="r m is-mo-cell" data-mi="${curMoIdx}" style="cursor:${Math.abs(cv)>0.5?"pointer":"default"};color:${cv<-0.5?"var(--g)":cv>0.5?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.15)"}">${Math.abs(cv)>0.5?fmtT(cv):""}</td>`}
       r.m.forEach((v,mi)=>thtml+=`<td class="r m hide-m is-mo-cell" data-mi="${mi}" style="cursor:${Math.abs(v)>0.5?"pointer":"default"};color:${v<-0.5?"var(--g)":v>0.5?"rgba(255,255,255,0.6)":"rgba(255,255,255,0.15)"}">${Math.abs(v)>0.5?fmtT(Math.round(v)):""}</td>`);
       if(hasBgt){const tgt=bgt[r.id]??null;if(tgt!=null&&tgt>0){const actPct=totI>0?r.t/totI*100:0;const delta=tgt-actPct;const dClr=delta>=0?"var(--g)":"var(--r)";thtml+=`<td class="r m hide-m bgt-tgt" data-bgt-key="${r.id}" style="color:rgba(255,255,255,0.3);font-size:10px;cursor:pointer" title="Click to edit target">${tgt.toFixed(1)}%</td><td class="r m hide-m bgt-delta" style="color:${dClr};font-size:10px;font-weight:600">${delta>=0?"+":""}${delta.toFixed(1)}%</td>`}else{thtml+=`<td class="hide-m"></td><td class="hide-m"></td>`}}
       thtml+=`</tr>`;
@@ -348,42 +459,66 @@ async function renderIS(el){
       });
     }
 
-    // Mobile tap-to-expand monthly detail
-    tblCard.querySelectorAll('.is-mo-row').forEach(tr=>{
-      tr.addEventListener('click',function(){
-        if(window.innerWidth>700)return;
-        const nxt=tr.nextElementSibling;
-        if(nxt&&nxt.classList.contains('is-mob-detail')){
-          nxt.remove();
-          const ch=tr.querySelector('.is-mob-chev');if(ch)ch.textContent='▸';
-          return;
-        }
-        const months=JSON.parse(tr.dataset.months);
-        const isPct=tr.dataset.monthFmt==='pct';
-        const cat=tr.dataset.cat;
-        const isParent=tr.dataset.isParent==='true';
-        let cells='';
-        months.forEach((v,i)=>{
-          if(v==null||(!isPct&&Math.abs(v)<1))return;
-          const val=isPct?v.toFixed(1)+"%":fmtT(v);
-          const clickable=cat&&!isPct&&Math.abs(v)>0.5;
-          cells+=`<span ${clickable?`class="is-mob-drill" data-mi="${i}" `:""}style="display:inline-block;padding:2px 8px;margin:1px 0;font-size:11px;font-family:var(--mono);${clickable?"cursor:pointer;text-decoration:underline;text-decoration-color:rgba(255,255,255,0.15)":""}"><span style="color:rgba(255,255,255,0.35)">${ML[i]}</span> <span style="color:rgba(255,255,255,0.6)">${val}</span></span>`;
-        });
-        if(!cells)return;
-        const dr=document.createElement('tr');
-        dr.className='is-mob-detail';
-        dr.innerHTML=`<td colspan="3" style="padding:4px 8px 8px 28px;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05)"><div style="display:flex;flex-wrap:wrap;gap:0">${cells}</div></td>`;
-        if(cat){
-          dr.querySelectorAll('.is-mob-drill').forEach(sp=>{
-            sp.addEventListener('click',function(e){
-              e.stopPropagation();
-              showISDrilldown(cat,isParent,parseInt(sp.dataset.mi),state.year);
-            });
-          });
-        }
-        tr.after(dr);
-        const ch=tr.querySelector('.is-mob-chev');if(ch)ch.textContent='▾';
+    function clearMobDetails(tr){
+      let n=tr.nextElementSibling;
+      while(n&&n.classList.contains("is-mob-detail")){const rm=n;n=n.nextElementSibling;rm.remove()}
+    }
+    function clearSubDetails(parentId){
+      tblCard.querySelectorAll(`.sub-${parentId}.is-mo-row`).forEach(sub=>clearMobDetails(sub));
+    }
+    tblCard.addEventListener("click",e=>{
+      if(window.innerWidth>700)return;
+      const drill=e.target.closest(".is-mob-drill");
+      if(drill){
+        e.stopPropagation();
+        const tr=drill.closest("tr.is-mo-row");
+        showISDrilldown(tr.dataset.cat,tr.dataset.isParent==="true",parseInt(drill.dataset.mi),state.year);
+        return;
+      }
+      const catCell=e.target.closest(".is-cat-cell");
+      if(catCell){
+        const tr=catCell.closest("tr.is-mo-row");
+        if(!tr||!tr.dataset.sub)return;
+        const pid=tr.dataset.sub;
+        const togg=tr.querySelector(".toggl");
+        tblCard.querySelectorAll(`.sub-${pid}`).forEach(el=>el.classList.toggle("hidden"));
+        if(togg)togg.textContent=togg.textContent==="▸"?"▾":"▸";
+        clearMobDetails(tr);
+        clearSubDetails(pid);
+        return;
+      }
+      const totalCell=e.target.closest(".is-total-cell");
+      if(!totalCell)return;
+      const tr=totalCell.closest("tr.is-mo-row");
+      if(!tr||!tr.dataset.months)return;
+      const nxt=tr.nextElementSibling;
+      if(nxt&&nxt.classList.contains("is-mob-detail")){clearMobDetails(tr);return}
+      const months=JSON.parse(tr.dataset.months);
+      const isPct=tr.dataset.monthFmt==="pct";
+      const cat=tr.dataset.cat;
+      const isParent=tr.dataset.isParent==="true";
+      const avg=months.filter(v=>v!=null&&!isPct&&Math.abs(v)>=1).reduce((s,v)=>s+Math.abs(v),0)/(months.filter(v=>v!=null&&!isPct&&Math.abs(v)>=1).length||1);
+      let cells="";
+      months.forEach((v,i)=>{
+        if(v==null||(!isPct&&Math.abs(v)<1))return;
+        const val=isPct?v.toFixed(1)+"%":fmtT(v);
+        const clickable=cat&&!isPct&&Math.abs(v)>0.5;
+        const hot=!isPct&&Math.abs(v)>avg*1.05;
+        cells+=`<div class="is-mo-grid-cell${i===curMoIdx?" cur":""}" ${clickable?`data-mi="${i}"`:""}><span class="mo-lbl">${ML[i]}</span><span style="color:${hot?"var(--y)":"rgba(255,255,255,0.65)"}">${val}</span></div>`;
       });
+      if(!cells)return;
+      const dr=document.createElement("tr");
+      dr.className="is-mob-detail";
+      const cols=mobTbl?4:3;
+      dr.innerHTML=`<td colspan="${cols}" style="padding:0;background:rgba(255,255,255,0.03);border-bottom:1px solid rgba(255,255,255,0.05)"><div class="is-mo-grid">${cells}</div></td>`;
+      dr.querySelectorAll(".is-mo-grid-cell[data-mi]").forEach(cell=>{
+        cell.classList.add("is-mob-drill");
+        cell.addEventListener("click",ev=>{
+          ev.stopPropagation();
+          showISDrilldown(cat,isParent,parseInt(cell.dataset.mi),state.year);
+        });
+      });
+      tr.after(dr);
     });
 
     // Desktop IS drilldown click handlers on month cells
@@ -530,9 +665,9 @@ async function renderIS(el){
 }
 
 async function showISDrilldown(categoryId,isParent,monthIndex,year){
-  const existing=document.querySelector(".modal-bg");if(existing)existing.remove();
+  const existing=document.querySelector(".modal-bg,.sheet-bg");if(existing)existing.remove();
   const mStart=`${year}-${String(monthIndex+1).padStart(2,"0")}-01`;
-  const mEnd=new Date(year,monthIndex+1,0).toISOString().slice(0,10);
+  const mEnd=endOfMonth(mStart);
   const mLabel=ML[monthIndex]+" "+year;
   let catFilter,catLabel;
   if(categoryId==="_expenses"){
@@ -573,10 +708,8 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
   for(const g of sorted){g.items.sort((a,b)=>Math.abs(b._accrual)-Math.abs(a._accrual));txnAccruals.push(...g.items)}
   const daysInMonth=Math.floor((new Date(mEnd)-new Date(mStart))/864e5)+1;
   const bg=h("div",{class:"modal-bg",onClick:e=>{if(e.target===bg)bg.remove()}});
-  let mhtml=`<div style="display:flex;justify-content:space-between;margin-bottom:20px"><div><h2 style="font-size:22px">${catLabel}</h2><p style="font-size:12px;color:rgba(255,255,255,0.35);margin-top:4px">${mLabel}</p></div><button onclick="this.closest('.modal-bg').remove()" style="background:rgba(255,255,255,0.06);border:none;border-radius:8px;width:32px;height:32px;cursor:pointer;color:rgba(255,255,255,0.5);font-size:16px">✕</button></div>`;
-  mhtml+=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px">`;
-  [["Total Accrued",fmtF(total),"var(--r)"],["Transactions",txnAccruals.length,"var(--b)"],["Per Day",daysInMonth>0?fmtF(total/daysInMonth):"—","var(--g)"]].forEach(([l,v,c])=>mhtml+=`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`);
-  mhtml+=`</div>`;
+  const mobDrill=isMobile();
+  let mhtml=mobDrill?`<p style="font-size:12px;color:rgba(255,255,255,0.45);margin-bottom:12px"><span style="font-family:var(--mono);font-weight:700;color:var(--r);font-size:16px">${fmtF(total)}</span> accrued · ${txnAccruals.length} txns · ${daysInMonth>0?fmtF(total/daysInMonth)+"/d":"—"}</p>`:`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:24px">${[["Total Accrued",fmtF(total),"var(--r)"],["Transactions",txnAccruals.length,"var(--b)"],["Per Day",daysInMonth>0?fmtF(total/daysInMonth):"—","var(--g)"]].map(([l,v,c])=>`<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:12px 14px;text-align:center"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase">${l}</div><div style="font-size:20px;font-weight:700;color:${c};font-family:var(--mono)">${v}</div></div>`).join("")}</div>`;
   // Build group summaries for parent row rendering
   const isSummaries=new Map();
   for(const g of sorted){
@@ -593,6 +726,15 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
   if(txnAccruals.length){
     const showCat=categoryId==="_expenses"||(isParent&&SUB_MAP[categoryId]);
     const renderedIS=new Set();
+    if(mobDrill){
+      mhtml+=`<div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:8px">${txnAccruals.length} Transactions</div><div class="stack">`;
+      txnAccruals.forEach(t=>{
+        const diff=Math.abs(t.amount_usd-t._accrual)>0.01;
+        const sub=diff?` <span style="font-size:10px;color:rgba(255,255,255,0.35)">(${fmtF(t.amount_usd)}${t._oDays?`, ${t._oDays}d`:""})</span>`:"";
+        mhtml+=`<div class="resp-card is-drill-row" data-tid="${t.id}"><div class="resp-card-line1"><div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${t.description}</div><div class="m" style="font-weight:600;color:${t._accrual<0?"var(--g)":"var(--r)"}">${fmtF(t._accrual)}${sub}</div></div><div class="resp-card-line2"><span>${fmtD(t.date)}</span>${showCat?`<span>${t.category_id}</span>`:""}</div></div>`;
+      });
+      mhtml+=`</div>`;
+    }else{
     mhtml+=`<div style="margin-top:4px"><div style="font-size:10px;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">${txnAccruals.length} Transactions</div>`;
     mhtml+=`<div style="overflow-x:auto"><table style="width:100%;font-size:11px"><thead><tr style="color:rgba(255,255,255,0.3);font-size:10px;text-transform:uppercase"><th style="text-align:left;padding:4px 6px">Date</th><th style="text-align:left;padding:4px 6px">Description</th>${showCat?`<th style="text-align:left;padding:4px 6px" class="hide-m">Category</th>`:""}<th style="text-align:right;padding:4px 6px">Amount</th><th style="text-align:right;padding:4px 6px" class="hide-m">Accrual</th><th style="text-align:right;padding:4px 6px" class="hide-m">Days</th></tr></thead><tbody>`;
     txnAccruals.forEach(t=>{
@@ -613,8 +755,25 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
       mhtml+=`<tr class="is-drill-row" data-tid="${t.id}" style="cursor:pointer;border-bottom:1px solid rgba(255,255,255,0.03)"><td style="padding:5px 6px;color:rgba(255,255,255,0.4);white-space:nowrap">${fmtD(t.date)}</td><td style="padding:5px 6px;color:rgba(255,255,255,0.7);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.description}</td>${showCat?`<td style="padding:5px 6px" class="hide-m"><span style="background:${(CC[t.category_id]||"#666")}22;color:${CC[t.category_id]||"#888"};padding:1px 5px;border-radius:3px;font-size:10px">${t.category_id}</span></td>`:""}<td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.5)">${fmtF(t.amount_usd)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:${isNeg?"var(--g)":"var(--r)"}" class="hide-m">${fmtF(t._accrual)}</td><td style="padding:5px 6px;text-align:right;font-family:var(--mono);color:rgba(255,255,255,0.3)" class="hide-m">${t._oDays||""}</td></tr>`;
     });
     mhtml+=`</tbody></table></div></div>`;
+    }
   }else{
     mhtml+=`<div style="text-align:center;padding:30px;color:rgba(255,255,255,0.3)">No transactions found</div>`;
+  }
+  function wireDrillRows(root){
+    root.querySelectorAll(".is-drill-row").forEach(row=>{
+      row.addEventListener("click",e=>{
+        e.stopPropagation();
+        const tid=parseInt(row.dataset.tid);
+        const txn=txnAccruals.find(t=>t.id===tid);
+        if(txn){document.querySelector(".modal-bg,.sheet-bg")?.remove();openLedgerEditModal(txn,()=>showISDrilldown(categoryId,isParent,monthIndex,year))}
+      });
+    });
+  }
+  if(mobDrill){
+    const wrap=h("div");wrap.innerHTML=mhtml;
+    wireDrillRows(wrap);
+    openSheet({title:`${catLabel} · ${mLabel}`,body:wrap,maxWidth:"700px"});
+    return;
   }
   const modal=h("div",{class:"modal",style:{maxWidth:"700px"}});
   modal.innerHTML=mhtml;
@@ -631,15 +790,13 @@ async function showISDrilldown(categoryId,isParent,monthIndex,year){
     row.addEventListener("mouseenter",()=>row.style.background="rgba(74,111,165,0.08)");
     row.addEventListener("mouseleave",()=>row.style.background="rgba(74,111,165,0.04)");
   });
-  modal.querySelectorAll(".is-drill-row").forEach(row=>{
-    row.addEventListener("click",e=>{
-      e.stopPropagation();
-      const tid=parseInt(row.dataset.tid);
-      const txn=txnAccruals.find(t=>t.id===tid);
-      if(txn){bg.remove();openLedgerEditModal(txn,()=>showISDrilldown(categoryId,isParent,monthIndex,year))}
-    });
-    const isChild=row.classList.contains("is-grp-child");
-    row.addEventListener("mouseenter",()=>row.style.background=isChild?"rgba(74,111,165,0.06)":"rgba(255,255,255,0.04)");
+  wireDrillRows(modal);
+  modal.querySelectorAll(".is-drill-row.is-grp-child").forEach(row=>{
+    row.addEventListener("mouseenter",()=>row.style.background="rgba(74,111,165,0.06)");
+    row.addEventListener("mouseleave",()=>row.style.background="transparent");
+  });
+  modal.querySelectorAll(".is-drill-row:not(.is-grp-child)").forEach(row=>{
+    row.addEventListener("mouseenter",()=>row.style.background="rgba(255,255,255,0.04)");
     row.addEventListener("mouseleave",()=>row.style.background="transparent");
   });
   bg.append(modal);document.body.append(bg);

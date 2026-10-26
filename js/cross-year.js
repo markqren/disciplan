@@ -24,6 +24,30 @@ function showCatYoY(catId,yearData){
   setTimeout(()=>makeChart("catYoY_"+catId,{type:"bar",data:{labels:rows.map(d=>d.year),datasets:[{label,data:rows.map(d=>Math.round(d.cats[catId]||0)),backgroundColor:color,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:"rgba(255,255,255,0.4)"},grid:{display:false}},y:{ticks:{color:"rgba(255,255,255,0.4)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}}),50);
 }
 
+const IS_YEARS=[2017,2018,2019,2020,2021,2022,2023,2024,2025,2026];
+async function crossYearResults(){
+  let results=dcGet('crossyear_'+state.view);
+  if(!results){results=await Promise.all(IS_YEARS.map(y=>scopedRPC("get_income_statement",{p_year:y})));dcSet('crossyear_'+state.view,results)}
+  return results;
+}
+
+// Yearly trend for any category (parent totals include children), from the cross-year cache.
+async function showCatYoYForCat(catId){
+  const results=await crossYearResults();
+  const yearData=IS_YEARS.map((y,i)=>{
+    const cats={};
+    for(const r of results[i]||[]){
+      const amt=parseFloat(r.amount)||0;
+      const p=Object.entries(SUB_MAP).find(([,subs])=>subs.includes(r.category_id));
+      const pid=p?p[0]:r.category_id;
+      cats[pid]=(cats[pid]||0)+amt;
+      if(pid!==r.category_id)cats[r.category_id]=(cats[r.category_id]||0)+amt;
+    }
+    return{year:y,cats};
+  });
+  showCatYoY(catId,yearData);
+}
+
 async function renderCrossYear(el){
   el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:16px">
     <div><h2>Income Statement</h2><p class="sub">Cross-year summary · USD · All Years</p></div>
@@ -32,9 +56,8 @@ async function renderCrossYear(el){
   ["all",2023,2024,2025,2026].forEach(y=>{const b=h("button",{class:"tab"+(state.year===y?" on":""),onClick:()=>{state.year=y;history.replaceState(null,null,y==="all"?"#income-all":"#income");renderContent()}},y==="all"?"All":String(y));yt.append(b)});
 
   try{
-    const years=[2017,2018,2019,2020,2021,2022,2023,2024,2025,2026];
-    let results=dcGet('crossyear_'+state.view);
-    if(!results){results=await Promise.all(years.map(y=>scopedRPC("get_income_statement",{p_year:y})));dcSet('crossyear_'+state.view,results)}
+    const years=IS_YEARS;
+    const results=await crossYearResults();
     const allTax=await fetchAllTaxTxns();
     const taxByYear={};
     for(const t of allTax){const yr=parseInt(t.date.slice(0,4));taxByYear[yr]=(taxByYear[yr]||0)+parseFloat(t.amount_usd)}
@@ -100,7 +123,7 @@ async function renderCrossYear(el){
     if(hasTax)thtml+=`<th class="r hide-m" style="color:rgba(224,122,95,0.8)">Tax</th><th class="r hide-m" style="color:rgba(242,204,143,0.7)">Tax%</th>`;
     thtml+=`</tr></thead><tbody>`;
     yearData.forEach(d=>{
-      thtml+=`<tr><td style="font-weight:600">${d.year}</td><td class="r m" style="color:var(--b)">${fmtT(Math.round(d.inc))}</td><td class="r m" style="color:var(--r)">${fmtT(Math.round(d.exp))}</td><td class="r m" style="color:var(--g)">${fmtT(Math.round(d.net))}</td><td class="r m" style="color:var(--y)">${(d.rate*100).toFixed(1)}%</td>`;
+      thtml+=`<tr class="cy-year-row" data-year="${d.year}" style="cursor:pointer"><td style="font-weight:600">${d.year}</td><td class="r m" style="color:var(--b)">${fmtT(Math.round(d.inc))}</td><td class="r m" style="color:var(--r)">${fmtT(Math.round(d.exp))}</td><td class="r m" style="color:var(--g)">${fmtT(Math.round(d.net))}</td><td class="r m" style="color:var(--y)">${(d.rate*100).toFixed(1)}%</td>`;
       cyExpCats.forEach(c=>thtml+=`<td class="r m hide-m" style="color:rgba(255,255,255,0.5)">${d.cats[c]?fmtT(Math.round(d.cats[c])):""}</td>`);
       thtml+=`<td class="r m hide-m" style="color:#264653;font-weight:600">${Math.abs(d.inv)>0.5?fmtT(Math.round(d.inv)):""}</td>`;
       if(hasTax)thtml+=`<td class="r m hide-m" style="color:rgba(224,122,95,0.8)">${d.tax>0.5?fmtT(Math.round(d.tax)):""}</td><td class="r m hide-m" style="color:rgba(242,204,143,0.7)">${d.tax>0.5?(d.taxRate*100).toFixed(1)+"%":""}</td>`;
@@ -109,8 +132,30 @@ async function renderCrossYear(el){
     thtml+=`</tbody></table></div>`;
     tblCard.innerHTML=thtml;
     body.append(tblCard);
+    if(isMobile()){
+      const catCard=h("div",{class:"cd"});
+      catCard.append(h("h3",{},"By category (all years)"),h("div",{style:{fontSize:10,color:"rgba(255,255,255,0.3)",marginBottom:"6px"}},"Tap a category for its yearly trend"));
+      const catTotals=cyExpCats.map(c=>({c,tot:yearData.reduce((s,d)=>s+(d.cats[c]||0),0),n:yearData.filter(d=>(d.cats[c]||0)>0).length})).filter(x=>x.tot>1).sort((a,b)=>b.tot-a.tot);
+      const maxT=Math.max(...catTotals.map(x=>x.tot),1);
+      catTotals.forEach(x=>{
+        const row=h("div",{class:"is-bar-row",onClick:()=>showCatYoY(x.c,yearData)});
+        row.append(h("span",{style:{width:100,fontSize:12,fontWeight:600,color:"rgba(255,255,255,0.85)"}},x.c[0].toUpperCase()+x.c.slice(1)));
+        row.append(h("div",{class:"is-bar-track"},h("div",{class:"is-bar-fill",style:{width:Math.round(x.tot/maxT*100)+"%",background:CC[x.c]||"#666"}})));
+        row.append(h("div",{style:{textAlign:"right",minWidth:84}},h("div",{class:"m"},fmtT(Math.round(x.tot))),h("div",{style:{fontSize:9,color:"rgba(255,255,255,0.35)",fontFamily:"var(--mono)"}},`${fmtT(Math.round(x.tot/Math.max(x.n,1)))}/yr`)));
+        catCard.append(row);
+      });
+      body.append(catCard);
+    }
     tblCard.querySelectorAll("th[data-cat]").forEach(th=>{
       th.addEventListener("click",()=>showCatYoY(th.dataset.cat,yearData));
+    });
+    tblCard.querySelectorAll(".cy-year-row").forEach(tr=>{
+      tr.addEventListener("click",()=>{
+        state.year=+tr.dataset.year;
+        if(typeof setIsMode==="function")setIsMode(isMobile()?"month":"year");
+        history.replaceState(null,null,"#income");
+        renderContent();
+      });
     });
   }catch(e){document.getElementById("isBody").innerHTML=`<div class="cd" style="color:var(--r)">Error: ${e.message}</div>`}
 }

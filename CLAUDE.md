@@ -122,6 +122,12 @@ All Disciplan tables live in the **`disciplan`** Postgres schema (Nocturnal live
 5. **Entry** — Add new transactions
 6. **Export** — TSV/JSON download (all, new-only since import)
 
+## UI conventions (mobile + desktop)
+
+- Shared layout lives in [`css/app.css`](css/app.css) and [`js/ui.js`](js/ui.js). Use **`formGrid` / `uiField`**, **`openSheet`**, **`respList`**, and **`segmented`** for new UI — no new inline multi-column `gridTemplateColumns` in feature modules.
+- Breakpoint **`700px`**: `isMobile()` / `@media (max-width:700px)`. Verify at **402px and 440px** widths before shipping UI (`?debug=layout` outlines overflow offenders).
+- **`today()`** in `helpers.js` is local calendar date — use it for “today” defaults, not `toISOString().slice(0,10)`.
+
 ## Conventions
 
 - All functions are plain globals (no module system, no `window.app` prefix)
