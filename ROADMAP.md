@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Oct 25, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Oct 26, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v3.0 — Oct 25, 2026
+
+#### v3.0.1
+<sub>Linked group names show again on the phone ledger</sub>
+
+##### Fixes
+- **Automatic group names missing on mobile (BUG)** — The phone ledger drew only the raw fallback ("Jiangxi Bistro +2") and applied the automatic label before the cards existed, so a cached name never landed. Cards now read the saved label, and the update runs after the rows are on screen. (~1,500 tokens)
 
 #### v3.0.0
 <sub>Mobile-first UI kit, bottom nav, and Income Statement month view</sub>

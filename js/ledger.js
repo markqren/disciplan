@@ -1008,9 +1008,21 @@ async function renderLedger(el){
         label:ov?.label||generateGroupLabel(members),memberCount:members.length,
         hasOverride:!!ov};
     }
-    // Fire-and-forget AI labels (skip groups with manual label overrides)
+    // AI labels (skip groups with manual overrides). Started now so it overlaps
+    // the cashback fetch, but painted only after the rows exist — a cached
+    // result resolves during that await, and applying it earlier finds no nodes.
     const grpsForAI=Object.entries(groupMembers).filter(([gid,m])=>m.length>=2&&!overrideMap[gid]?.label).map(([gid,members])=>({gid,members:members.map(m=>({description:m.description,amount_usd:m.amount_usd,category_id:m.category_id,date:m.date,service_start:m.service_start,service_end:m.service_end}))}));
-    if(grpsForAI.length)aiGroupLabels(grpsForAI).then(labels=>{for(const[gid,label]of Object.entries(labels)){if(label){const el=document.querySelector(`[data-grp-label="${gid}"]`);if(el)el.textContent=label}}});
+    const labelPromise=grpsForAI.length?aiGroupLabels(grpsForAI):null;
+    function paintGroupLabels(){
+      if(!labelPromise||gen!==mob.gen)return;
+      labelPromise.then(labels=>{
+        if(gen!==mob.gen)return;
+        for(const[gid,label]of Object.entries(labels||{})){
+          if(!label)continue;
+          document.querySelectorAll(`[data-grp-label="${gid}"]`).forEach(el=>{el.textContent=label});
+        }
+      });
+    }
     // Subscription filter (client-side)
     if(f.subsOnly&&subMerchants.size){const before=txns.length;for(let i=txns.length-1;i>=0;i--){if(!subMerchants.has(normalizeMerchant(txns[i].description)))txns.splice(i,1)}}
     const cbTagged=new Set();
@@ -1071,7 +1083,7 @@ async function renderLedger(el){
           mob.groups.add(gid);
           dateHdr(summary.dateMax);
           const card=h("div",{class:"resp-card",onClick:()=>openGroupEditModal(gid,groupMembers[gid]||[],summary,overrideMap[gid],reload)});
-          const lbl=h("div",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:"13px"},"data-grp-label":gid},summary.label);
+          const lbl=h("div",{style:{flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",fontSize:"13px"},"data-grp-label":gid},sessionStorage.getItem(grpLabelKey(gid))||summary.label);
           card.append(h("div",{class:"resp-card-line1"},h("span",{},"\uD83D\uDD17"),lbl,h("div",{style:{fontFamily:"var(--mono)",fontWeight:600,flexShrink:0}},fmtF(summary.net))));
           const l2=h("div",{class:"resp-card-line2"});
           l2.append(h("span",{class:"badge",style:{background:(CC[summary.dominantCat]||"#666")+"22",color:CC[summary.dominantCat]||"#888"}},summary.dominantCat));
@@ -1107,6 +1119,7 @@ async function renderLedger(el){
         mob.obs=new IntersectionObserver(entries=>{if(entries[0].isIntersecting)loadMore()},{rootMargin:"400px"});
         mob.obs.observe(mob.sentinel);
       }
+      paintGroupLabels();
       return;
     }
     const prev=h("button",{class:"pg-btn",onClick:()=>{if(state.page>0){state.page--;loadPage()}}},"\u2190 Prev");
@@ -1228,6 +1241,7 @@ async function renderLedger(el){
     });
     tbl.append(tbody);wrap.append(tbl);
     const body=document.getElementById("ledgerBody");body.innerHTML="";body.append(wrap);
+    paintGroupLabels();
     document.getElementById("ldgChkAll")?.addEventListener("change",e=>{
       const checked=e.target.checked;
       currentTxns.forEach(t=>{if(checked)selected.add(t.id);else selected.delete(t.id)});
