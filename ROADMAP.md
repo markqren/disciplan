@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Oct 26, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Oct 29, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v3.0 — Oct 25, 2026
+
+#### v3.0.2
+<sub>Category donut splits a group into its subcategories</sub>
+
+##### Features
+- **Category donut drill-in** — On the Income Statement year view, clicking a group parent (personal, home, food, entertainment) pulls that slice out of the ring and breaks it into its subcategories. Spend still filed on the parent shows as "(other)", so the pieces sum to the original wedge. All categories restores the full ring. (~3,000 tokens)
 
 #### v3.0.1
 <sub>Linked group names show again on the phone ledger</sub>

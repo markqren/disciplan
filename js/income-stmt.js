@@ -193,6 +193,115 @@ function renderISMonthView(body,ctx){
   isYearMonths(year-1).then(fillDeltas).catch(()=>{});
 }
 
+// Category donut. Clicking a parent with children pulls that arc out of the ring,
+// then splits it into subcategory slices that sum to the same total.
+function renderCategoryDonut(card,months,mKeys,expCats){
+  let focus=null,token=0;
+  // Chart.js translates a doughnut arc by offset/4, and also insets short
+  // slices by that same amount. 48 is about 12px: enough to leave the ring
+  // without turning a thin subcategory into a detached blob.
+  const POP=48;
+  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px",marginBottom:"16px"}});
+  const title=h("h3",{style:{margin:0}},"Category Breakdown");
+  const back=h("button",{type:"button",class:"pg-btn",style:{display:"none"},onClick:()=>openPie(null)},"All categories");
+  hdr.append(title,back);
+  const wrap=h("div",{class:"chrt",style:{height:"230px",marginTop:0}});
+  wrap.append(h("canvas",{id:"pieChart"}));
+  card.append(hdr,wrap);
+
+  const yearTotal=id=>Math.round(mKeys.reduce((s,mk)=>s+(months[mk][id]||0),0));
+  const parentTotal=id=>Math.round(mKeys.reduce((s,mk)=>s+(months[mk]["_p_"+id]??months[mk][id]??0),0));
+  const cap=id=>id?id[0].toUpperCase()+id.slice(1):"";
+
+  function partsOf(parent){
+    const kids=SUB_MAP[parent];
+    if(!kids)return [];
+    const parts=[];
+    for(const ch of kids){
+      const val=yearTotal(ch);
+      if(val>0)parts.push({id:ch,label:ch,val,color:CC[ch]||"#666",kind:"sub",parent,offset:POP});
+    }
+    if(!parts.length)return parts;
+    const own=yearTotal(parent);
+    if(own>0)parts.push({id:parent,label:parent+" (other)",val:own,color:CC[parent]||"#666",kind:"sub",parent,offset:POP});
+    parts.sort((a,b)=>b.val-a.val);
+    const drift=parentTotal(parent)-parts.reduce((s,p)=>s+p.val,0);
+    parts[0].val=Math.max(0,parts[0].val+drift);
+    return parts.filter(p=>p.val>0);
+  }
+  function parentSlices(popId){
+    return expCats.map(id=>{
+      const val=parentTotal(id);
+      return{id,label:id,val,color:CC[id]||"#666",kind:"parent",expandable:partsOf(id).length>0,offset:id===popId?POP:0};
+    }).filter(s=>s.val>0).sort((a,b)=>b.val-a.val);
+  }
+  function splitSlices(parent){
+    const parts=partsOf(parent);
+    const slices=[];
+    for(const p of parentSlices(null)){if(p.id===parent)slices.push(...parts);else slices.push(p)}
+    return slices;
+  }
+  function paint(slices){
+    const chart=charts.pieChart;
+    if(!chart||!card.isConnected)return;
+    const split=slices.some(s=>s.kind==="sub");
+    wrap.style.height=split?"272px":"230px";
+    title.textContent=focus?cap(focus):"Category Breakdown";
+    back.style.display=focus?"":"none";
+    chart.$slices=slices;
+    chart.data.labels=slices.map(s=>s.label);
+    const ds=chart.data.datasets[0];
+    ds.data=slices.map(s=>s.val);
+    ds.backgroundColor=slices.map(s=>s.color);
+    ds.offset=slices.map(s=>s.offset||0);
+    ds.spacing=split?4:0;
+    ds.borderWidth=split?2:0;
+    ds.borderColor="#0a0a14";
+    ds.borderRadius=split?4:0;
+    chart.options.layout.padding=slices.some(s=>s.offset)?14:4;
+    chart.update();
+  }
+  function openPie(next){
+    const my=++token;
+    if(next&&!partsOf(next).length)return;
+    const chart=charts.pieChart;
+    const subsOpen=chart?.$slices?.some(s=>s.kind==="sub");
+    if(!next){
+      const prev=focus;
+      if(prev&&subsOpen){
+        paint(parentSlices(prev));
+        setTimeout(()=>{if(token!==my||!card.isConnected)return;focus=null;paint(parentSlices(null))},460);
+        return;
+      }
+      focus=null;
+      paint(parentSlices(null));
+      return;
+    }
+    if(next===focus&&subsOpen)return;
+    focus=next;
+    const showingParents=!chart?.$slices||chart.$slices.every(s=>s.kind==="parent");
+    if(showingParents){
+      paint(parentSlices(next));
+      setTimeout(()=>{if(token===my&&card.isConnected)paint(splitSlices(next))},460);
+      return;
+    }
+    paint(splitSlices(next));
+  }
+  function onPick(index){
+    const slice=charts.pieChart?.$slices?.[index];
+    if(!slice)return;
+    if(slice.expandable)openPie(slice.id);
+  }
+
+  setTimeout(()=>{
+    const canvas=card.querySelector("canvas");
+    if(!card.isConnected||!canvas)return;
+    const slices=parentSlices(null);
+    makeChart("pieChart",{type:"doughnut",data:{labels:slices.map(s=>s.label),datasets:[{data:slices.map(s=>s.val),backgroundColor:slices.map(s=>s.color),borderWidth:0,offset:slices.map(()=>0),spacing:0,hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,cutout:"50%",layout:{padding:4},animation:{duration:420},onClick(e,els){if(els.length)onPick(els[0].index)},onHover(e,els){const c=e.native?.target;if(!c)return;const slice=els.length?charts.pieChart?.$slices?.[els[0].index]:null;c.style.cursor=slice&&slice.expandable?"pointer":"default"},plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.4)",font:{size:10},padding:8},onClick(e,item){onPick(item.index)},onHover(e,item){const slice=charts.pieChart?.$slices?.[item.index];e.native.target.style.cursor=slice&&slice.expandable?"pointer":"default"},onLeave(e){e.native.target.style.cursor="default"}},tooltip:{callbacks:{label(ctx){const slice=ctx.chart.$slices?.[ctx.dataIndex];const val=ctx.parsed;const all=(ctx.chart.$slices||[]).reduce((s,x)=>s+x.val,0);const pct=all?(val/all*100).toFixed(1):"0.0";if(slice?.kind==="sub"){const grp=ctx.chart.$slices.filter(s=>s.parent===slice.parent).reduce((s,x)=>s+x.val,0);const ofP=grp?Math.round(val/grp*100):0;return `${fmtT(val)} (${pct}%, ${ofP}% of ${slice.parent})`}return `${fmtT(val)} (${pct}%)`}}}}}});
+    if(charts.pieChart)charts.pieChart.$slices=slices;
+  },100);
+}
+
 async function renderIS(el){
   if(_isChartModeYear!==state.year){_isChartModeYear=state.year;_isChartModes={}}
   el.innerHTML=`<div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:16px">
@@ -259,9 +368,8 @@ async function renderIS(el){
     const row2=h("div",{class:"g2"});
 
     const pieCard=h("div",{class:"cd"});
-    pieCard.innerHTML=`<h3>Category Breakdown</h3><div class="chrt" style="height:230px"><canvas id="pieChart"></canvas></div>`;
-    const catTotals=expCats.map(c=>({name:c,val:Math.round(mKeys.reduce((s,mk)=>s+(months[mk]["_p_"+c]??months[mk][c]??0),0))})).filter(c=>c.val>0).sort((a,b)=>b.val-a.val);
     row2.append(pieCard);
+    renderCategoryDonut(pieCard,months,mKeys,expCats);
 
     const stackCard=h("div",{class:"cd"});
     row2.append(stackCard);
@@ -287,10 +395,6 @@ async function renderIS(el){
         {label:"Target %",data:bTarget,backgroundColor:"rgba(255,255,255,0.08)",borderColor:"rgba(255,255,255,0.25)",borderWidth:1,borderRadius:3,barPercentage:0.6}
       ]},options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:"rgba(255,255,255,0.5)",font:{size:11}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+": "+ctx.parsed.x.toFixed(1)+"%"}}},scales:{x:{ticks:{color:"rgba(255,255,255,0.3)",callback:v=>v+"%"},grid:{color:"rgba(255,255,255,0.04)"}},y:{ticks:{color:"rgba(255,255,255,0.6)",font:{size:11}},grid:{display:false}}}}}),150);
     }
-
-    setTimeout(()=>{
-      makeChart("pieChart",{type:"doughnut",data:{labels:catTotals.map(c=>c.name),datasets:[{data:catTotals.map(c=>c.val),backgroundColor:catTotals.map(c=>CC[c.name]||"#666"),borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:"50%",plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.4)",font:{size:10},padding:8}}}}});
-    },100);
 
     // Detail table with subcategories
     const tblCard=h("div",{class:"cd"});
