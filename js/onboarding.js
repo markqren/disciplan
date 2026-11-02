@@ -149,12 +149,15 @@ async function renderOnboarding(el){
 
   const impStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
   const impReview=h("div");
+  let impReviewCandidates=null;
+  let impReviewBaseline=null;
 
   const impBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
     const pt=impAcctSel.value;
     if(!pt)return alert("Add and select an account first.");
     const files=Array.from(fileInp.files||[]);
     if(!files.length)return alert("Choose one or more CSV or PDF files first.");
+    if(!confirmDiscardImportEdits(impReviewCandidates,impReviewBaseline))return;
     if(!aiAvailable()&&!confirm("AI unavailable (not signed in). Import with basic category mapping only?"))return;
     impBtn.disabled=true;impBtn.textContent="Processing...";
     impStatus.classList.remove("hidden");impStatus.style.color="rgba(255,255,255,0.4)";
@@ -214,6 +217,8 @@ async function renderOnboarding(el){
       if(!aiResults){impStatus.style.color="var(--y)"}
       await acctLabelsReady();
       renderReviewTable(impReview,candidates);
+      impReviewCandidates=candidates;
+      impReviewBaseline=snapshotImportReview(candidates);
     }catch(e){impStatus.textContent="Error: "+e.message;impStatus.style.color="var(--r)"}
     impBtn.disabled=false;impBtn.textContent="Import";
   }},"Import");

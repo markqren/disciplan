@@ -10,6 +10,45 @@ function normalizeCandidateServicePeriod(c){
   }
 }
 
+// Fingerprint of fields a reviewer can change. Compared to the snapshot taken
+// when the review first rendered, so a second Import click can warn before it
+// discards unsaved work. Committed rows are ignored — those edits are saved.
+function importEditFingerprint(c){
+  const reimb=c._reimburse?JSON.stringify(c._reimburse):"";
+  const link=c._linkToTransactionId||(c._linkToStagedIdx==null?"":"staged:"+c._linkToStagedIdx);
+  const funding=c._ccPaymentPair&&c._ccPaymentPair.payment_type||"";
+  return[
+    c._status,c.date,c.description||"",c.amount_usd,c.category_id,
+    c.service_start,c.service_end,c.payment_type||"",c.tag||"",c.credit||"",
+    c._isCashback?1:0,c._transferTo||"",funding,link,reimb
+  ].join("\u001f");
+}
+
+function snapshotImportReview(candidates){
+  return (candidates||[]).map(importEditFingerprint);
+}
+
+function importReviewUnsavedEdits(candidates,baseline){
+  if(!candidates||!candidates.length||!baseline)return 0;
+  if(candidates.length!==baseline.length){
+    return candidates.filter(c=>c._status!=="committed").length;
+  }
+  let n=0;
+  for(let i=0;i<candidates.length;i++){
+    if(candidates[i]._status==="committed")continue;
+    if(importEditFingerprint(candidates[i])!==baseline[i])n++;
+  }
+  return n;
+}
+
+// Returns true when Import may proceed. Cancel leaves the current review in place.
+function confirmDiscardImportEdits(candidates,baseline){
+  const n=importReviewUnsavedEdits(candidates,baseline);
+  if(!n)return true;
+  const noun=n===1?"transaction has":"transactions have";
+  return confirm(n+" imported "+noun+" unsaved edits. Importing again discards them.\n\nContinue?");
+}
+
 function importIsCashbackElected(c){
   if(c._isCashback===false)return false;
   if(c._isCashback===true)return true;

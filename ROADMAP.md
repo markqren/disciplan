@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Oct 29, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Nov 1, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v3.0 — Oct 25, 2026
+
+#### v3.0.3
+<sub>Import again asks before it discards unsaved review edits</sub>
+
+##### Fixes
+- **Second Import no longer wipes an edited review** — CSV, payslip, and onboarding Import clicks check the open review first. If a row was edited, approved, or skipped, a confirm explains that importing again discards those changes. Cancel keeps the review, so Save Approved is still there. An untouched review still imports immediately, and rows already saved do not count. (~6,000 tokens)
 
 #### v3.0.2
 <sub>Category donut splits a group into its subcategories</sub>

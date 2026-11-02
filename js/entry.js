@@ -274,10 +274,12 @@ function renderEntry(el,opts){
 
   const impStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
   const impReview=h("div",{id:"importReview"});
+  let impReviewBaseline=null;
 
   const impBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
     const file=fileInp.files[0];
     if(!file)return alert("Choose a CSV or PDF file first.");
+    if(!confirmDiscardImportEdits(impCandidates,impReviewBaseline))return;
 
     // API key handling
     const keyVal=apiKeyInp.value.trim();
@@ -324,7 +326,6 @@ function renderEntry(el,opts){
       const checklistTask=profile.isCheckingAccount?"debit":"credit";
       const checklistOwner=writeOwner();
       candidates.forEach(c=>{c._monthlyChecklistTask=checklistTask;c._monthlyChecklistOwner=checklistOwner});
-      impCandidates=candidates;
 
       // AI categorization
       impStatus.textContent="AI categorizing...";
@@ -343,6 +344,8 @@ function renderEntry(el,opts){
       else impStatus.textContent=aiResults?"AI categorization complete.":"Using default categories (no AI key).";
       await acctLabelsReady();
       renderReviewTable(impReview,candidates);
+      impCandidates=candidates;
+      impReviewBaseline=snapshotImportReview(candidates);
     }catch(e){
       impStatus.textContent="Error: "+e.message;
       impStatus.style.color="var(--r)";
@@ -458,10 +461,12 @@ function renderEntry(el,opts){
   const psDateInp=h("input",{class:"inp",type:"date",value:today()});
   const psStatus=h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.4)",margin:"10px 0"},class:"hidden"});
   const psReview=h("div");
+  let psReviewBaseline=null;
 
   const psBtn=h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)"},onClick:async()=>{
     const file=psFileInp.files[0];
     if(!file)return alert("Choose a payslip file first.");
+    if(!confirmDiscardImportEdits(psCandidates,psReviewBaseline))return;
     const ext=file.name.split(".").pop().toLowerCase();
     psBtn.disabled=true;psBtn.textContent="Processing...";
     psStatus.classList.remove("hidden");
@@ -497,8 +502,6 @@ function renderEntry(el,opts){
         c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
       });
 
-      psCandidates=txns;
-
       psStatus.textContent="Checking for duplicates...";
       const ptGroups={};
       for(const c of txns){const pt=c.payment_type;if(!ptGroups[pt])ptGroups[pt]=[];ptGroups[pt].push(c)}
@@ -507,7 +510,9 @@ function renderEntry(el,opts){
       const dupes=txns.filter(c=>c._isDuplicate).length;
       psStatus.textContent=`${txns.length} transactions generated \u00b7 ${dupes} duplicates`;
 
-      renderPayslipReviewTable(psReview,psCandidates,psSkippedPages);
+      renderPayslipReviewTable(psReview,txns,psSkippedPages);
+      psCandidates=txns;
+      psReviewBaseline=snapshotImportReview(txns);
     }catch(e){
       psStatus.textContent="Error: "+e.message;
       psStatus.style.color="var(--r)";
