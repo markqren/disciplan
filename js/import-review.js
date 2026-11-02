@@ -875,12 +875,30 @@ function renderEmailReviewTable(container,candidates){
 
   container.append(h("div",{style:{fontSize:"12px",color:"rgba(255,255,255,0.5)",marginBottom:"12px"}},
     `${candidates.length} total \u00b7 ${pending} pending \u00b7 ${approved} approved${venmo?" \u00b7 "+venmo+" venmo":""}${unknown?" \u00b7 "+unknown+" unknown":""}${dupes?" \u00b7 "+dupes+" duplicates":""}`));
+  if(container._linkNote){
+    container.append(h("div",{style:{fontSize:"11px",color:"rgba(129,178,154,0.9)",marginTop:"-6px",marginBottom:"10px"}},container._linkNote));
+  }
 
   const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
   bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
     candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
     renderEmailReviewTable(container,candidates);
   }},"\u2713 Approve All"));
+
+  let refreshing=false;
+  const refreshBtn=h("button",{class:"pg-btn",style:"color:var(--b);border-color:rgba(74,111,165,0.35)",onClick:async()=>{
+    if(refreshing)return;
+    refreshing=true;refreshBtn.disabled=true;refreshBtn.textContent="Refreshing...";
+    try{
+      const n=await refreshEmailLinks(candidates);
+      container._linkNote=n?`Relinked ${n} to the merchant named in the note.`:"Nothing to change. Named merchants were already linked.";
+      renderEmailReviewTable(container,candidates);
+    }catch(e){
+      alert("Refresh failed: "+e.message);
+      refreshBtn.disabled=false;refreshBtn.textContent="Refresh links";refreshing=false;
+    }
+  }},"Refresh links");
+  bulkBar.append(refreshBtn);
 
   let saving=false;
   const saveBtn=h("button",{class:"pg-btn",style:"color:#fff;background:rgba(129,178,154,0.2);border-color:rgba(129,178,154,0.4);font-weight:600",onClick:async()=>{
@@ -1237,7 +1255,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
       const right=h("div",{style:{display:"flex",alignItems:"center",gap:"8px"}});
       if(info.amount_usd!=null)right.append(h("span",{style:{fontFamily:"var(--mono)",color:"rgba(255,255,255,0.6)",whiteSpace:"nowrap"}},fmtF(info.amount_usd)));
       right.append(h("button",{class:"pg-btn",style:{fontSize:"9px",color:"rgba(224,122,95,0.8)",padding:"2px 6px"},onClick:()=>{
-        delete c._linkToTransactionId;delete c._linkToGroupId;delete c._linkDisplay;c._linkCleared=true;emRenderLink();
+        delete c._linkToTransactionId;delete c._linkToGroupId;delete c._linkDisplay;delete c._linkManual;c._linkCleared=true;emRenderLink();
       }},"Unlink"));
       row.append(right);
       linkBody.append(row);
@@ -1264,7 +1282,7 @@ function openEmailEditModal(candidates,idx,reviewContainer){
         if(!rows.length){results.innerHTML="<div style='color:rgba(255,255,255,0.3);padding:8px'>No transactions found</div>";return}
         rows.forEach(r=>{
           const row=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 8px",cursor:"pointer",borderBottom:"1px solid rgba(255,255,255,0.04)",borderRadius:"4px"},onClick:()=>{
-            c._linkToTransactionId=r.id;c._linkToGroupId=r.transaction_group_id||null;delete c._linkCleared;
+            c._linkToTransactionId=r.id;c._linkToGroupId=r.transaction_group_id||null;delete c._linkCleared;c._linkManual=true;
             c._linkDisplay={description:r.description,date:r.date,amount_usd:r.amount_usd,category_id:r.category_id,payment_type:r.payment_type};
             wrap.remove();emRenderLink();
           }});

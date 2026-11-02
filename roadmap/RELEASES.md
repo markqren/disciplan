@@ -11,6 +11,12 @@
 
 ### v3.0 — Oct 25, 2026
 
+#### v3.0.4
+<sub>Email reimbursements link to the named bill</sub>
+
+##### Fixes
+- **Reimbursement links follow the merchant** — Pending email imports can be relinked with Refresh links. A reimbursement matches the card charge named in the note or description, including when each person pays a small share of a large bill. A same-dollar charge at another merchant is not treated as the parent, and the card charge wins over a Splitwise copy of the same meal. (~4,500 tokens)
+
 #### v3.0.3
 <sub>Import again asks before it discards unsaved review edits</sub>
 

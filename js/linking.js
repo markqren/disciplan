@@ -56,6 +56,109 @@ async function findRakutenParentMatch(storeName,orderAmount,searchDate){
   return best.txn;
 }
 
+// Words that show up in reimbursement labels but are not a merchant.
+const EMAIL_LINK_STOP=new Set(["the","and","for","you","your","from","with","this","that","paid","payment","venmo","email","fwd","forwarded","reimbursement","reimbursed","reimburse","splitwise","cash","back","attribute","restaurant","note","transaction","into","onto","was","are","but","not","its","per","via"]);
+
+// Merchant phrases from the description and the forwarding note. The counterparty's
+// name is left out so "Sophie" does not become the thing we search for.
+function emailLinkHints(c){
+  const pd=c._parsedData||{};
+  const person=new Set(String(pd.counterparty||"").toLowerCase().replace(/[^a-z\s]/g," ").split(/\s+/).filter(w=>w.length>=3));
+  const blob=[c.description,pd.forwarding_note,pd.note].filter(Boolean).join(" ");
+  const words=blob.toLowerCase().replace(/[^a-z0-9\s]/g," ").split(/\s+/).filter(Boolean);
+  const keep=w=>w.length>=3&&!EMAIL_LINK_STOP.has(w)&&!person.has(w);
+  const phrases=[];
+  for(let i=0;i<words.length-1;i++){
+    if(keep(words[i])&&keep(words[i+1]))phrases.push(words[i]+" "+words[i+1]);
+  }
+  return{phrases:[...new Set(phrases)].slice(0,4),date:c.date||"",category:c.category_id||""};
+}
+
+// A reimbursement is often one person's share of a larger bill. The merchant
+// named in the note decides the parent. An exact dollar match at a different
+// merchant (Soba Noodle $50 for a Fish Cheeks dinner) does not.
+function scoreEmailParent(txn,hints){
+  const desc=String(txn.description||"").toLowerCase();
+  if(/^reimbursed\b/.test(desc))return null;
+  if(!hints.phrases.some(p=>desc.includes(p)))return null;
+  let score=120;
+  const pt=String(txn.payment_type||"");
+  if(/splitwise/i.test(pt))score-=40;
+  else if(!/venmo/i.test(pt))score+=12;
+  if(hints.category&&txn.category_id===hints.category)score+=10;
+  const base=hints.date?new Date(hints.date+"T00:00:00"):new Date();
+  const days=Math.abs(new Date(String(txn.date)+"T00:00:00")-base)/864e5;
+  if(days<=14)score+=12;else if(days<=45)score+=8;else if(days<=120)score+=4;
+  return{score,days};
+}
+
+// Search the ledger for the card charge a pending reimbursement pays back.
+// Returns {txn, confidence, reason} or null when the note names no merchant we have.
+async function findEmailParentMatch(c){
+  if(!(Number(c.amount_usd)<0||(c._parsedData&&c._parsedData.kind==="reimbursement")))return null;
+  const hints=emailLinkHints(c);
+  if(!hints.phrases.length)return null;
+  const base=hints.date?new Date(hints.date+"T00:00:00"):new Date();
+  if(isNaN(base.getTime()))return null;
+  const from=new Date(base.getTime()-180*864e5).toISOString().slice(0,10);
+  const select="id,date,description,amount_usd,category_id,payment_type,transaction_group_id";
+  const seen=new Map();
+  for(const phrase of hints.phrases){
+    const rows=await sb(`transactions?description=ilike.*${encodeURIComponent(phrase)}*&amount_usd=gt.0&date=gte.${from}&order=date.desc&limit=8&select=${select}`+ownerQS());
+    for(const r of rows||[])if(r&&r.id)seen.set(r.id,r);
+  }
+  let best=null;
+  for(const txn of seen.values()){
+    const scored=scoreEmailParent(txn,hints);
+    if(!scored)continue;
+    if(!best||scored.score>best.score||(scored.score===best.score&&scored.days<best.days))best={txn,score:scored.score,days:scored.days};
+  }
+  if(!best)return null;
+  const split=/splitwise/i.test(best.txn.payment_type||"");
+  return{
+    txn:best.txn,
+    confidence:split?"medium":"high",
+    reason:split
+      ?"Named in the note. Only a Splitwise copy of that merchant is on the ledger."
+      :"Named in the note. Linked the card charge. The reimbursement is a share of that bill."
+  };
+}
+
+function applyEmailLink(c,match){
+  const txn=match.txn;
+  c._linkToTransactionId=txn.id;
+  c._linkToGroupId=txn.transaction_group_id||null;
+  c._linkConfidence=match.confidence;
+  c._linkDisplay={description:txn.description,date:txn.date,amount_usd:txn.amount_usd,category_id:txn.category_id,payment_type:txn.payment_type};
+  delete c._linkCleared;
+  if(!c._parsedData)c._parsedData={};
+  c._parsedData.proposed_link={
+    id:txn.id,transaction_group_id:txn.transaction_group_id||null,
+    description:txn.description,date:txn.date,amount_usd:Number(txn.amount_usd),
+    category_id:txn.category_id,payment_type:txn.payment_type,
+    confidence:match.confidence,reason:match.reason
+  };
+  if(Number(c.amount_usd)<0&&txn.category_id)c.category_id=txn.category_id;
+}
+
+// Re-run parent matching for pending email rows and store the new link.
+// Skips a row the reviewer already pointed at a specific transaction.
+async function refreshEmailLinks(candidates){
+  let updated=0;
+  for(const c of candidates){
+    if(c._status==="committed"||c._linkManual)continue;
+    if(c._parsedData&&c._parsedData.type==="cashback_earned")continue;
+    const match=await findEmailParentMatch(c);
+    if(!match||c._linkToTransactionId===match.txn.id)continue;
+    applyEmailLink(c,match);
+    if(c._id){
+      await sb(`pending_imports?id=eq.${c._id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({parsed_data:c._parsedData,category_id:c.category_id})});
+    }
+    updated++;
+  }
+  return updated;
+}
+
 async function linkRakutenCashback(rakutenCandidates,allValid,createdTxns){
   for(const c of rakutenCandidates){
     const idx=allValid.indexOf(c);

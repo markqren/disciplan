@@ -652,16 +652,64 @@ interface LinkCandidate {
   transaction_group_id: number | null;
 }
 
+// Short Venmo memos the user uses for a specific merchant. Searching the
+// expanded words is what puts the parent expense in front of the model.
+const MEMO_ALIASES: Record<string, string[]> = {
+  jx: ["bistro", "jiangxi"],
+};
+
+const MERCHANT_STOP = new Set(["the", "and", "for", "you", "your", "from", "with", "this", "that", "paid", "payment", "venmo", "email", "fwd", "forwarded", "reimbursement", "reimbursed", "reimburse", "splitwise", "cash", "back", "attribute", "restaurant", "note", "transaction", "into", "onto", "was", "are", "but", "not", "its", "per", "via"]);
+
+// Two-word merchant names from the note, with the counterparty removed.
+// "Fish Cheeks" survives. "Sophie" does not.
+function merchantPhrases(blob: string, counterparty: string): string[] {
+  const person = new Set(counterparty.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter(w => w.length >= 3));
+  const words = blob.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const keep = (w: string) => w.length >= 3 && !MERCHANT_STOP.has(w) && !person.has(w);
+  const phrases: string[] = [];
+  for (let i = 0; i < words.length - 1; i++) {
+    if (keep(words[i]) && keep(words[i + 1])) phrases.push(`${words[i]} ${words[i + 1]}`);
+  }
+  return [...new Set(phrases)].slice(0, 4);
+}
+
+// Card charge for the merchant the note names. Splitwise copies of the same
+// meal lose to the card. Exact-dollar rows at other merchants are not considered.
+function preferNamedCharge(candidates: LinkCandidate[], phrases: string[], emailDate: string | null): LinkCandidate | null {
+  const named = candidates.filter(c => {
+    const d = (c.description || "").toLowerCase();
+    return phrases.some(p => d.includes(p)) && !/^reimbursed\b/.test(d);
+  });
+  if (!named.length) return null;
+  const base = emailDate ? new Date(emailDate + "T00:00:00").getTime() : Date.now();
+  const rank = (c: LinkCandidate) => {
+    let s = 120;
+    if (/splitwise/i.test(c.payment_type || "")) s -= 40;
+    else if (!/venmo/i.test(c.payment_type || "")) s += 12;
+    const days = Math.abs(new Date(c.date + "T00:00:00").getTime() - base) / 86_400_000;
+    return { s, days };
+  };
+  named.sort((a, b) => {
+    const ra = rank(a), rb = rank(b);
+    if (rb.s !== ra.s) return rb.s - ra.s;
+    return ra.days - rb.days;
+  });
+  return named[0];
+}
+
 function keywordTokens(blob: string): string[] {
   const stop = new Set(["the", "and", "for", "you", "your", "from", "with", "this", "that", "paid", "payment", "venmo", "email", "fwd", "forwarded", "reimbursement", "reimbursed", "splitwise", "cash", "back"]);
-  return [...new Set(
-    blob.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length >= 4 && !stop.has(w)),
-  )].slice(0, 6);
+  const words = blob.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const tokens = words.filter(w => w.length >= 4 && !stop.has(w));
+  for (const w of words) {
+    if (MEMO_ALIASES[w]) tokens.push(...MEMO_ALIASES[w]);
+  }
+  return [...new Set(tokens)].slice(0, 8);
 }
 
 async function fetchLinkCandidates(
   supabase: ReturnType<typeof createClient>,
-  hints: { amount: number | null; text: string },
+  hints: { text: string; counterparty?: string },
 ): Promise<LinkCandidate[]> {
   const since = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
   const select = "id, date, description, amount_usd, category_id, payment_type, transaction_group_id";
@@ -669,16 +717,16 @@ async function fetchLinkCandidates(
   const add = (rows: LinkCandidate[] | null) => {
     for (const r of rows || []) if (r?.id) seen.set(r.id, r);
   };
+  const phrases = merchantPhrases(hints.text, hints.counterparty || "");
 
   try {
-    if (hints.amount && hints.amount > 0) {
-      const lo = Math.max(0, hints.amount * 0.5);
-      const hi = hints.amount * 1.5;
+    for (const phrase of phrases) {
       const { data } = await supabase.from("transactions").select(select)
-        .gt("amount_usd", lo).lt("amount_usd", hi)
-        .gte("date", since).order("date", { ascending: false }).limit(25);
+        .gt("amount_usd", 0).ilike("description", `%${phrase.replace(/[%_]/g, "")}%`)
+        .gte("date", since).order("date", { ascending: false }).limit(8);
       add(data as LinkCandidate[]);
     }
+    // Amount is not a filter. A reimbursement is often one person's small share of a much larger bill.
     for (const tok of keywordTokens(hints.text)) {
       const { data } = await supabase.from("transactions").select(select)
         .gt("amount_usd", 0).ilike("description", `%${tok.replace(/[%_]/g, "")}%`)
@@ -694,7 +742,10 @@ async function fetchLinkCandidates(
   } catch (e) {
     console.error("Link candidate lookup failed:", e);
   }
-  return [...seen.values()].slice(0, 30);
+  const rows = [...seen.values()];
+  const named = rows.filter(r => phrases.some(p => (r.description || "").toLowerCase().includes(p)));
+  const rest = rows.filter(r => !named.includes(r));
+  return [...named, ...rest].slice(0, 30);
 }
 
 interface ProposedLink {
@@ -712,7 +763,8 @@ interface ProposedLink {
 const REVIEW_SYSTEM = `You review a forwarded personal-finance email and propose ONE ledger action for Disciplan.
 Deterministic parsers often miss fields when the email layout changes. Do not refuse just because a field is missing or a parser returned nothing — infer the transaction from the subject, body, and the user's forwarding note.
 Money leaving the user's accounts is a positive amount_usd (expense). Money coming in (reimbursement, refund, cashback, income) is a negative amount_usd.
-A reimbursement, Splitwise settlement, or "X paid you" should link to the existing expense it pays back. Match on merchant, person, or memo. Amounts often differ because a reimbursement is only one person's share of a larger bill — still link it. Prefer the original card or cash charge over a Splitwise row when both describe the same meal. Only return a link_transaction_id from the candidate list. Omit the key when nothing in the list is the same purchase.
+A reimbursement, Splitwise settlement, or "X paid you" should link to the existing expense it pays back. Match on merchant, person, or memo. Amounts often differ because a reimbursement is only one person's share of a larger bill — still link it. A matching merchant name beats an exact dollar amount. Do not link to a different merchant just because the dollars and the payment app match. Prefer the original card or cash charge over a Splitwise row when both describe the same meal. Only return a link_transaction_id from the candidate list. Omit the key when nothing in the list is the same purchase.
+A Venmo memo that is only "JX" means Jiangxi Bistro ("JX Bistro") for this user. When a candidate is that restaurant, link the reimbursement to the card charge and set link_confidence to "low" unless the email or forwarding note spells out Bistro, in which case use "medium" or "high". Still make the link. Use the restaurant category, not clothes.
 Categories: entertainment, food, groceries, restaurant, home, rent, furniture, health, personal, clothes, tech, transportation, utilities, financial, other, income.
 Reimbursements keep the parent expense's category when you link; otherwise use the forwarding note. Descriptions: "Reimbursed - {what} - {FirstName}" for money in from a person, "Venmo - {Person}" for money out, "Rakuten - {Store}" for cashback (category income, payment_type Rakuten).
 Service period only when the note or email clearly spreads the cost (a month, a year, explicit dates). Omit service_period otherwise.
@@ -732,9 +784,9 @@ async function aiReviewEmail(
 ): Promise<(AIResult & { proposed_link?: ProposedLink; kind?: string }) | null> {
   if (!ANTHROPIC_KEY) return null;
 
-  const parserAmount = parsed?.amount_usd != null ? Math.abs(parsed.amount_usd) : null;
   const hintText = [subject, forwardingNote?.raw || "", parsed?.description || "", String(parsed?.parsed_data?.counterparty || ""), String(parsed?.parsed_data?.note || "")].join(" ");
-  const candidates = await fetchLinkCandidates(supabase, { amount: parserAmount, text: hintText });
+  const counterparty = String(parsed?.parsed_data?.counterparty || "");
+  const candidates = await fetchLinkCandidates(supabase, { text: hintText, counterparty });
   const candidateBlock = candidates.length
     ? candidates.map(c => `#${c.id} | ${c.date} | ${c.description} | $${Number(c.amount_usd).toFixed(2)} | ${c.category_id} | ${c.payment_type}`).join("\n")
     : "(none)";
@@ -790,7 +842,32 @@ ${candidateBlock}`;
     if (!raw?.is_transaction) return { is_transaction: false };
 
     const linkId = Number(raw.link_transaction_id);
-    const match = candidates.find(c => c.id === linkId);
+    let match = candidates.find(c => c.id === linkId);
+    // Memo "JX" with no explicit restaurant name: still propose the Jiangxi
+    // card charge, at low confidence, when the model did not pick an id.
+    if (!match && /\bjx\b/i.test(hintText) && !/\bbistro\b/i.test(forwardingNote?.raw || "")) {
+      const card = candidates.filter(c => /jiangxi|bistro/i.test(c.description) && !/splitwise/i.test(c.payment_type || ""));
+      match = card[0];
+      if (match) {
+        raw.link_confidence = "low";
+        raw.link_reason = "Memo is only JX, inferred as Jiangxi Bistro.";
+      }
+    }
+    const phrases = merchantPhrases(hintText, counterparty);
+    const named = preferNamedCharge(candidates, phrases, (raw.date as string) || parsed?.date || null);
+    if (named) {
+      const picked = match;
+      const modelHasName = !!picked && phrases.some(p => (picked?.description || "").toLowerCase().includes(p));
+      const modelIsSplit = !!picked && /splitwise/i.test(picked?.payment_type || "");
+      const namedIsCard = !/splitwise/i.test(named.payment_type || "");
+      if (!modelHasName || (modelIsSplit && namedIsCard)) {
+        match = named;
+        raw.link_confidence = /splitwise/i.test(named.payment_type || "") ? "medium" : "high";
+        raw.link_reason = modelHasName
+          ? "Same meal. Linked the card charge rather than the Splitwise copy."
+          : "Note names this merchant. Linked that card charge. A same-dollar charge at another merchant was ignored.";
+      }
+    }
     let proposed_link: ProposedLink | undefined;
     if (match) {
       proposed_link = {
