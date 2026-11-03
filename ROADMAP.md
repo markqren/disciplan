@@ -1,6 +1,6 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Nov 2, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Nov 3, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
@@ -9,6 +9,12 @@
 ## 🚀 Releases
 
 ### v3.0 — Oct 25, 2026
+
+#### v3.0.5
+<sub>Category breakdown fills the card and follows a time range</sub>
+
+##### Features
+- **Category breakdown time range** — The Income Statement year view scopes the donut to the full year, year to date, the last 3 months, a quarter, or one month. Hovering a pulled-out subcategory shows its dollar amount and share. The legend lists full dollars with the percentage in smaller type afterward. Clicking the empty ring or outside the card returns to every category, and the donut and expense stack share one row so both fill the module. (~5,000 tokens)
 
 #### v3.0.4
 <sub>Email reimbursements link to the named bill</sub>

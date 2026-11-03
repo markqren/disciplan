@@ -45,12 +45,26 @@ function defaultISChartMonth(year){
   const now=new Date();
   return year===now.getFullYear()?now.getMonth():11;
 }
+function fitISPair(){
+  const wrap=document.getElementById("pieChart")?.parentElement;
+  const stack=document.getElementById("stackChart")?.parentElement;
+  if(!wrap||!wrap.isConnected)return;
+  const w=wrap.clientWidth;
+  if(w<40)return;
+  const legend=wrap.parentElement&&wrap.parentElement.querySelector(".is-legend");
+  const h=Math.round(Math.max(isMobile()?220:300,w,legend?legend.offsetHeight:0));
+  wrap.style.height=h+"px";
+  if(stack)stack.style.height=h+"px";
+  if(charts.pieChart)charts.pieChart.resize();
+  if(charts.stackChart)charts.stackChart.resize();
+}
 function renderISTimeChart(card,opts){
   const st=_isChartModes[opts.key]||(_isChartModes[opts.key]={mode:"monthly",month:defaultISChartMonth(state.year)});
   const token=(card._isRenderToken||0)+1;card._isRenderToken=token;card.innerHTML="";
-  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",flexWrap:"wrap",marginBottom:"8px"}});
+  if(opts.fill)card.classList.add("is-pair");
+  const hdr=h("div",opts.fill?{class:"is-pair-hd"}:{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px",flexWrap:"wrap",marginBottom:"8px"}});
   const title=h("h3",{style:{margin:0}},st.mode==="weekly"?`Weekly ${opts.title} · ${MONTH_NAMES[st.month]} ${state.year}`:`Monthly ${opts.title}`);
-  const controls=h("div",{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}});
+  const controls=h("div",opts.fill?{class:"is-pair-ctrls"}:{style:{display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}});
   const rerender=()=>renderISTimeChart(card,opts);
   const openWeekly=month=>{st.mode="weekly";st.month=month;rerender()};
   if(st.mode==="monthly"){
@@ -67,10 +81,10 @@ function renderISTimeChart(card,opts){
     controls.append(h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)"}},"Weeks before"),before,h("span",{style:{fontSize:"10px",color:"rgba(255,255,255,0.35)"}},"after"),after,h("button",{class:"pg-btn",onClick:()=>{st.mode="monthly";rerender()}},"Monthly"));
   }
   hdr.append(title,controls);card.append(hdr);
-  const chartWrap=h("div",{class:"chrt",style:{height:opts.height||"230px",position:"relative"}});
+  const chartWrap=h("div",{class:"chrt",style:opts.fill?{margin:"0"}:{height:opts.height||"230px",position:"relative"}});
   chartWrap.append(h("canvas",{id:opts.id}));card.append(chartWrap);
   if(st.mode==="monthly"){
-    setTimeout(()=>{if(card._isRenderToken!==token)return;makeChart(opts.id,opts.monthlyConfig());bindChartDoubleClick(opts.id,i=>openWeekly(i))},50);
+    setTimeout(()=>{if(card._isRenderToken!==token)return;makeChart(opts.id,opts.monthlyConfig());bindChartDoubleClick(opts.id,i=>openWeekly(i));if(opts.fill)fitISPair()},50);
     return;
   }
   chartWrap.insertAdjacentHTML("beforeend",'<div class="is-week-loading" style="position:absolute;inset:0;display:grid;place-items:center;color:rgba(255,255,255,0.35);font-size:12px">Loading weekly view...</div>');
@@ -79,6 +93,7 @@ function renderISTimeChart(card,opts){
     if(card._isRenderToken!==token||!card.isConnected)return;
     chartWrap.querySelector(".is-week-loading")?.remove();
     makeChart(opts.id,opts.weeklyConfig(data,range));
+    if(opts.fill)fitISPair();
   }).catch(err=>{
     if(card._isRenderToken!==token||!card.isConnected)return;
     chartWrap.innerHTML=`<div style="display:grid;place-items:center;height:100%;color:var(--r);font-size:12px">Weekly view failed: ${err.message}</div>`;
@@ -193,25 +208,78 @@ function renderISMonthView(body,ctx){
   isYearMonths(year-1).then(fillDeltas).catch(()=>{});
 }
 
-// Category donut. Clicking a parent with children pulls that arc out of the ring,
-// then splits it into subcategory slices that sum to the same total.
+// Category donut. The legend sits to the right so the ring can be large.
+// Clicking a group cuts that arc out of the ring and draws it just outside,
+// split into its subcategories.
 function renderCategoryDonut(card,months,mKeys,expCats){
-  let focus=null,token=0;
-  // Chart.js translates a doughnut arc by offset/4, and also insets short
-  // slices by that same amount. 48 is about 12px: enough to leave the ring
-  // without turning a thin subcategory into a detached blob.
-  const POP=48;
-  const hdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"8px",marginBottom:"16px"}});
-  const title=h("h3",{style:{margin:0}},"Category Breakdown");
+  let focus=null;
+  let picked=mKeys.slice();
+  const activeKeys=()=>picked.length?picked:mKeys;
+  card.classList.add("is-pair");
+  const hdr=h("div",{class:"is-pair-hd"});
+  const title=h("h3",{},"Category Breakdown");
+  const ctrls=h("div",{class:"is-pair-ctrls"});
   const back=h("button",{type:"button",class:"pg-btn",style:{display:"none"},onClick:()=>openPie(null)},"All categories");
-  hdr.append(title,back);
-  const wrap=h("div",{class:"chrt",style:{height:"230px",marginTop:0}});
+  const spanSel=h("select",{class:"inp","aria-label":"Time range",onChange:()=>{
+    picked=keysFor(spanSel.value);
+    if(focus&&!partsOf(focus).length)focus=null;
+    paint();
+  }});
+  const ranges=h("optgroup",{label:"Range"});
+  ranges.append(h("option",{value:"all"},"Full year"));
+  if(state.year===new Date().getFullYear())ranges.append(h("option",{value:"ytd"},"Year to date"));
+  ranges.append(h("option",{value:"l3"},"Last 3 months"));
+  const quarters=h("optgroup",{label:"Quarter"});
+  ["Q1","Q2","Q3","Q4"].forEach((q,i)=>quarters.append(h("option",{value:"q"+(i+1)},q)));
+  const monthOpts=h("optgroup",{label:"Month"});
+  ML.forEach((name,i)=>monthOpts.append(h("option",{value:"m"+i},name)));
+  spanSel.append(ranges,quarters,monthOpts);
+  ctrls.append(back,spanSel);
+  hdr.append(title,ctrls);
+  const row=h("div",{class:"is-pair-body"});
+  const wrap=h("div",{class:"chrt"});
   wrap.append(h("canvas",{id:"pieChart"}));
-  card.append(hdr,wrap);
+  const tip=h("div",{style:{position:"absolute",display:"none",pointerEvents:"none",zIndex:"4",background:"rgba(16,18,24,0.96)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:"6px",padding:"5px 8px",whiteSpace:"nowrap",boxShadow:"0 6px 18px rgba(0,0,0,0.35)"}});
+  wrap.append(tip);
+  const legend=h("div",{class:"is-legend"});
+  row.append(wrap,legend);
+  card.append(hdr,row);
+  function keysFor(mode){
+    const idx=mk=>Number(String(mk).slice(5,7))-1;
+    const end=state.year===new Date().getFullYear()?new Date().getMonth():11;
+    let keys=mKeys;
+    if(mode==="ytd")keys=mKeys.filter(k=>idx(k)<=end);
+    else if(mode==="l3")keys=mKeys.filter(k=>{const i=idx(k);return i>=end-2&&i<=end});
+    else if(mode[0]==="q"){const a=(Number(mode[1])-1)*3;keys=mKeys.filter(k=>{const i=idx(k);return i>=a&&i<a+3})}
+    else if(mode[0]==="m"){const i=Number(mode.slice(1));keys=mKeys.filter(k=>idx(k)===i)}
+    return (keys.length?keys:mKeys).slice();
+  }
 
-  const yearTotal=id=>Math.round(mKeys.reduce((s,mk)=>s+(months[mk][id]||0),0));
-  const parentTotal=id=>Math.round(mKeys.reduce((s,mk)=>s+(months[mk]["_p_"+id]??months[mk][id]??0),0));
+  const yearTotal=id=>Math.round(activeKeys().reduce((s,mk)=>s+(months[mk][id]||0),0));
+  const parentTotal=id=>Math.round(activeKeys().reduce((s,mk)=>s+(months[mk]["_p_"+id]??months[mk][id]??0),0));
   const cap=id=>id?id[0].toUpperCase()+id.slice(1):"";
+  function hexToHsl(hex){
+    const n=parseInt(hex.slice(1),16);
+    const r=((n>>16)&255)/255,g=((n>>8)&255)/255,b=(n&255)/255;
+    const max=Math.max(r,g,b),min=Math.min(r,g,b),l=(max+min)/2;
+    if(max===min)return{h:0,s:0,l:l*100};
+    const d=max-min,s=l>0.5?d/(2-max-min):d/(max+min);
+    let h=max===r?(g-b)/d+(g<b?6:0):max===g?(b-r)/d+2:(r-g)/d+4;
+    return{h:h*60,s:s*100,l:l*100};
+  }
+  function hslToHex(h,s,l){
+    s/=100;l/=100;
+    const a=s*Math.min(l,1-l);
+    const f=k=>{const x=(k+h/30)%12;const c=l-a*Math.max(Math.min(x-3,9-x,1),-1);return Math.round(255*c).toString(16).padStart(2,"0")};
+    return "#"+f(0)+f(8)+f(4);
+  }
+  // Child palette colors sit too close to their parent (rent and home are
+  // both blue). Spread hue and lightness so a 3-slice breakdown reads.
+  function drillColor(base,i){
+    const hsl=hexToHsl(base&&base[0]==="#"?base:"#888888");
+    const shift=[{h:0,l:0},{h:28,l:22},{h:-24,l:-16},{h:46,l:10}][Math.min(i,3)];
+    return hslToHex((hsl.h+shift.h+360)%360,Math.min(78,Math.max(46,hsl.s+8)),Math.min(72,Math.max(34,hsl.l+shift.l)));
+  }
 
   function partsOf(parent){
     const kids=SUB_MAP[parent];
@@ -219,87 +287,193 @@ function renderCategoryDonut(card,months,mKeys,expCats){
     const parts=[];
     for(const ch of kids){
       const val=yearTotal(ch);
-      if(val>0)parts.push({id:ch,label:ch,val,color:CC[ch]||"#666",kind:"sub",parent,offset:POP});
+      if(val>0)parts.push({id:ch,label:ch,val,kind:"sub",parent});
     }
     if(!parts.length)return parts;
     const own=yearTotal(parent);
-    if(own>0)parts.push({id:parent,label:parent+" (other)",val:own,color:CC[parent]||"#666",kind:"sub",parent,offset:POP});
+    if(own>0)parts.push({id:parent,label:parent+" (other)",val:own,kind:"sub",parent});
     parts.sort((a,b)=>b.val-a.val);
     const drift=parentTotal(parent)-parts.reduce((s,p)=>s+p.val,0);
     parts[0].val=Math.max(0,parts[0].val+drift);
-    return parts.filter(p=>p.val>0);
+    const kept=parts.filter(p=>p.val>0);
+    const base=CC[parent]||"#888888";
+    kept.forEach((p,i)=>{p.color=drillColor(base,i)});
+    return kept;
   }
-  function parentSlices(popId){
+  function parentSlices(){
     return expCats.map(id=>{
       const val=parentTotal(id);
-      return{id,label:id,val,color:CC[id]||"#666",kind:"parent",expandable:partsOf(id).length>0,offset:id===popId?POP:0};
+      return{id,label:id,val,color:CC[id]||"#666",kind:"parent",expandable:partsOf(id).length>0};
     }).filter(s=>s.val>0).sort((a,b)=>b.val-a.val);
   }
-  function splitSlices(parent){
-    const parts=partsOf(parent);
-    const slices=[];
-    for(const p of parentSlices(null)){if(p.id===parent)slices.push(...parts);else slices.push(p)}
-    return slices;
+  function moneyPct(val,total,dim){
+    const pct=total?Math.round(val/total*100):0;
+    const el=h("span",{style:{display:"inline-flex",alignItems:"baseline",gap:"4px",flexShrink:"0"}});
+    el.append(h("span",{style:{fontFamily:"var(--mono)",fontSize:"11px",color:dim?"rgba(255,255,255,0.4)":"rgba(255,255,255,0.82)"}},fmtT(val)));
+    el.append(h("span",{style:{fontFamily:"var(--mono)",fontSize:"9px",color:"rgba(255,255,255,0.38)"}},"("+pct+"%)"));
+    return el;
   }
-  function paint(slices){
+  function legendRow(slice,total,opts){
+    const pct=total?Math.round(slice.val/total*100):0;
+    const btn=h("button",{type:"button",class:"is-legend-row"+(opts.dim?" dim":"")+(opts.clickable?" click":"")});
+    btn.append(h("span",{class:"sw",style:{background:slice.color}}));
+    btn.append(h("span",{class:"nm"},slice.label));
+    btn.append(h("span",{class:"amt"},fmtT(slice.val)));
+    btn.append(h("span",{class:"pct"},"("+pct+"%)"));
+    if(opts.clickable)btn.addEventListener("click",()=>openPie(slice.id));
+    return btn;
+  }
+  function renderLegend(slices,parts){
+    legend.replaceChildren();
+    const grand=slices.reduce((s,x)=>s+x.val,0)||1;
+    if(parts&&parts.length){
+      const total=parts.reduce((s,p)=>s+p.val,0)||1;
+      parts.forEach(p=>legend.append(legendRow(p,total,{clickable:false,dim:false})));
+      legend.append(h("div",{class:"is-legend-rule"}));
+      slices.filter(s=>s.id!==focus).forEach(s=>legend.append(legendRow(s,grand,{clickable:!!s.expandable,dim:true})));
+      return;
+    }
+    slices.forEach(s=>legend.append(legendRow(s,grand,{clickable:!!s.expandable,dim:false})));
+  }
+  function paint(){
     const chart=charts.pieChart;
-    if(!chart||!card.isConnected)return;
-    const split=slices.some(s=>s.kind==="sub");
-    wrap.style.height=split?"272px":"230px";
+    const slices=parentSlices();
+    const parts=focus?partsOf(focus):null;
     title.textContent=focus?cap(focus):"Category Breakdown";
     back.style.display=focus?"":"none";
+    hideTip();
+    renderLegend(slices,parts);
+    if(!chart||!card.isConnected)return;
+    chart.$partArcs=[];
     chart.$slices=slices;
+    chart.$parts=parts;
+    chart.$focus=focus;
     chart.data.labels=slices.map(s=>s.label);
     const ds=chart.data.datasets[0];
     ds.data=slices.map(s=>s.val);
-    ds.backgroundColor=slices.map(s=>s.color);
-    ds.offset=slices.map(s=>s.offset||0);
-    ds.spacing=split?4:0;
-    ds.borderWidth=split?2:0;
-    ds.borderColor="#0a0a14";
-    ds.borderRadius=split?4:0;
-    chart.options.layout.padding=slices.some(s=>s.offset)?14:4;
+    chart.options.layout.padding=focus?42:4;
+    ds.backgroundColor=slices.map(s=>focus&&s.id===focus?"transparent":s.color);
+    ds.hoverBackgroundColor=ds.backgroundColor;
     chart.update();
   }
   function openPie(next){
-    const my=++token;
     if(next&&!partsOf(next).length)return;
-    const chart=charts.pieChart;
-    const subsOpen=chart?.$slices?.some(s=>s.kind==="sub");
-    if(!next){
-      const prev=focus;
-      if(prev&&subsOpen){
-        paint(parentSlices(prev));
-        setTimeout(()=>{if(token!==my||!card.isConnected)return;focus=null;paint(parentSlices(null))},460);
-        return;
-      }
-      focus=null;
-      paint(parentSlices(null));
-      return;
-    }
-    if(next===focus&&subsOpen)return;
+    if(next===focus)return;
     focus=next;
-    const showingParents=!chart?.$slices||chart.$slices.every(s=>s.kind==="parent");
-    if(showingParents){
-      paint(parentSlices(next));
-      setTimeout(()=>{if(token===my&&card.isConnected)paint(splitSlices(next))},460);
-      return;
-    }
-    paint(splitSlices(next));
+    hideTip();
+    paint();
   }
   function onPick(index){
     const slice=charts.pieChart?.$slices?.[index];
-    if(!slice)return;
-    if(slice.expandable)openPie(slice.id);
+    if(slice&&slice.expandable)openPie(slice.id);
+  }
+  // Draws the focused arc again, just outside the ring, split into its parts.
+  const pieCutout={id:"pieCutout",afterDraw(chart){
+    const parts=chart.$parts;
+    const focusId=chart.$focus;
+    if(!focusId||!parts||!parts.length){chart.$partArcs=[];return}
+    const slices=chart.$slices||[];
+    const idx=slices.findIndex(s=>s.id===focusId);
+    const arc=chart.getDatasetMeta(0).data[idx];
+    if(!arc||!(arc.outerRadius>4)){chart.$partArcs=[];return}
+    const span0=arc.endAngle-arc.startAngle;
+    if(span0<0.02){chart.$partArcs=[];return}
+    const lift=32;
+    const inner=arc.innerRadius+lift;
+    const outer=arc.outerRadius+lift;
+    const inset=Math.min(0.07,span0*0.08);
+    let start=arc.startAngle+inset;
+    const span=span0-inset*2;
+    const gap=parts.length>1?Math.min(0.09,span/(parts.length*4)):0;
+    const usable=span-gap*(parts.length-1);
+    const total=parts.reduce((s,p)=>s+p.val,0)||1;
+    const ctx=chart.ctx;
+    const arcs=[];
+    ctx.save();
+    parts.forEach(p=>{
+      const sweep=usable*(p.val/total);
+      const end=start+sweep;
+      ctx.beginPath();
+      ctx.arc(arc.x,arc.y,outer,start,end);
+      ctx.arc(arc.x,arc.y,inner,end,start,true);
+      ctx.closePath();
+      ctx.fillStyle=p.color;
+      ctx.fill();
+      arcs.push({part:p,start,end,inner,outer,x:arc.x,y:arc.y});
+      start=end+gap;
+    });
+    ctx.restore();
+    chart.$partArcs=arcs;
+  }};
+  function angleIn(ang,start,end){
+    let a=ang;
+    while(a<start)a+=Math.PI*2;
+    while(a>start+Math.PI*2)a-=Math.PI*2;
+    return a>=start-0.004&&a<=end+0.004;
+  }
+  function partAt(chart,evt){
+    const arcs=chart&&chart.$partArcs;
+    if(!arcs||!arcs.length||typeof Chart==="undefined")return null;
+    const pos=Chart.helpers.getRelativePosition(evt,chart);
+    for(let i=arcs.length-1;i>=0;i--){
+      const a=arcs[i];
+      const dx=pos.x-a.x,dy=pos.y-a.y,r=Math.hypot(dx,dy);
+      const pad=Math.max(0,6/Math.max(a.outer,1)-(a.end-a.start)/2);
+      if(r<a.inner-4||r>a.outer+4)continue;
+      if(angleIn(Math.atan2(dy,dx),a.start-pad,a.end+pad))return a.part;
+    }
+    return null;
+  }
+  function hideTip(){tip.style.display="none"}
+  function showPartTip(evt,part){
+    const parts=charts.pieChart&&charts.pieChart.$parts||[];
+    const live=parts.find(p=>p.id===part.id)||part;
+    const total=parts.reduce((s,p)=>s+p.val,0)||1;
+    tip.replaceChildren(h("span",{style:{marginRight:"8px"}},cap(live.label)),moneyPct(live.val,total,false));
+    const host=wrap.getBoundingClientRect();
+    tip.style.display="block";
+    const tw=tip.offsetWidth,th=tip.offsetHeight;
+    let left=evt.clientX-host.left+12,top=evt.clientY-host.top-th-8;
+    if(left+tw>host.width-4)left=Math.max(4,host.width-tw-4);
+    if(top<4)top=evt.clientY-host.top+14;
+    tip.style.left=left+"px";tip.style.top=top+"px";
   }
 
   setTimeout(()=>{
     const canvas=card.querySelector("canvas");
     if(!card.isConnected||!canvas)return;
-    const slices=parentSlices(null);
-    makeChart("pieChart",{type:"doughnut",data:{labels:slices.map(s=>s.label),datasets:[{data:slices.map(s=>s.val),backgroundColor:slices.map(s=>s.color),borderWidth:0,offset:slices.map(()=>0),spacing:0,hoverOffset:8}]},options:{responsive:true,maintainAspectRatio:false,cutout:"50%",layout:{padding:4},animation:{duration:420},onClick(e,els){if(els.length)onPick(els[0].index)},onHover(e,els){const c=e.native?.target;if(!c)return;const slice=els.length?charts.pieChart?.$slices?.[els[0].index]:null;c.style.cursor=slice&&slice.expandable?"pointer":"default"},plugins:{legend:{position:"bottom",labels:{color:"rgba(255,255,255,0.4)",font:{size:10},padding:8},onClick(e,item){onPick(item.index)},onHover(e,item){const slice=charts.pieChart?.$slices?.[item.index];e.native.target.style.cursor=slice&&slice.expandable?"pointer":"default"},onLeave(e){e.native.target.style.cursor="default"}},tooltip:{callbacks:{label(ctx){const slice=ctx.chart.$slices?.[ctx.dataIndex];const val=ctx.parsed;const all=(ctx.chart.$slices||[]).reduce((s,x)=>s+x.val,0);const pct=all?(val/all*100).toFixed(1):"0.0";if(slice?.kind==="sub"){const grp=ctx.chart.$slices.filter(s=>s.parent===slice.parent).reduce((s,x)=>s+x.val,0);const ofP=grp?Math.round(val/grp*100):0;return `${fmtT(val)} (${pct}%, ${ofP}% of ${slice.parent})`}return `${fmtT(val)} (${pct}%)`}}}}}});
-    if(charts.pieChart)charts.pieChart.$slices=slices;
+    const slices=parentSlices();
+    renderLegend(slices,null);
+    makeChart("pieChart",{type:"doughnut",plugins:[pieCutout],data:{labels:slices.map(s=>s.label),datasets:[{data:slices.map(s=>s.val),backgroundColor:slices.map(s=>s.color),hoverBackgroundColor:slices.map(s=>s.color),borderWidth:0,hoverOffset:0}]},options:{responsive:true,maintainAspectRatio:false,cutout:"52%",layout:{padding:4},animation:{duration:280},onClick(e,els){
+      const chart=charts.pieChart;
+      if(partAt(chart,e))return;
+      if(els.length){
+        const slice=chart?.$slices?.[els[0].index];
+        if(slice&&slice.id===focus){openPie(null);return}
+        onPick(els[0].index);
+        return;
+      }
+      if(focus)openPie(null);
+    },onHover(e,els){
+      const c=e.native?.target;
+      const chart=charts.pieChart;
+      const part=partAt(chart,e);
+      if(part){if(c)c.style.cursor="default";showPartTip(e.native||e,part);return}
+      hideTip();
+      if(!c)return;
+      const slice=els.length?chart?.$slices?.[els[0].index]:null;
+      c.style.cursor=slice&&slice.expandable&&slice.id!==focus?"pointer":"default";
+    },plugins:{legend:{display:false},tooltip:{filter(item){const slice=item.chart.$slices?.[item.dataIndex];return !(item.chart.$focus&&slice&&slice.id===item.chart.$focus)},callbacks:{label(ctx){const slice=ctx.chart.$slices?.[ctx.dataIndex];const val=typeof ctx.parsed==="number"?ctx.parsed:ctx.raw;const all=(ctx.chart.$slices||[]).reduce((s,x)=>s+x.val,0);const pct=all?Math.round(val/all*100):0;return `${slice?cap(slice.label)+": ":""}${fmtT(val)} (${pct}%)`}}}}}});
+    if(charts.pieChart){charts.pieChart.$slices=slices;charts.pieChart.$parts=null;charts.pieChart.$focus=null;charts.pieChart.$partArcs=[]}
+    canvas.addEventListener("mouseleave",hideTip);
+    fitISPair();
+    if(!window._isPairResize){window._isPairResize=true;window.addEventListener("resize",()=>{if(document.getElementById("pieChart"))fitISPair()})}
   },100);
+  document.addEventListener("pointerdown",function away(e){
+    if(!card.isConnected){document.removeEventListener("pointerdown",away);return}
+    if(card.contains(e.target))return;
+    if(focus)openPie(null);
+  });
 }
 
 async function renderIS(el){
@@ -379,7 +553,7 @@ async function renderIS(el){
       const stackCats=expCats.filter(c=>rows.some(m=>(m.c["_p_"+c]??m.c[c]??0)>0));
       return{type:"bar",data:{labels:rows.map(m=>weekly?weekLabel(m.start):m.month),datasets:stackCats.map(c=>({label:c,data:rows.map(m=>Math.round(m.c["_p_"+c]??m.c[c]??0)),backgroundColor:CC[c]||"#666",borderColor:rows.map(m=>m.selected?"rgba(242,204,143,0.9)":"transparent"),borderWidth:rows.map(m=>m.selected?1:0)}))},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>weekly&&items.length?`${fmtD(rows[items[0].dataIndex].start)}–${fmtD(rows[items[0].dataIndex].end)}`:items[0]?.label}}},scales:{x:{stacked:true,ticks:{color:ctx=>weekly&&rows[ctx.index]?.selected?"rgba(242,204,143,0.9)":"rgba(255,255,255,0.3)",maxTicksLimit:weekly?(window.innerWidth<=700?7:14):12},grid:{color:"rgba(255,255,255,0.04)"}},y:{stacked:true,ticks:{color:"rgba(255,255,255,0.3)",callback:v=>fmtN(v)},grid:{color:"rgba(255,255,255,0.04)"}}}}};
     };
-    renderISTimeChart(stackCard,{key:"expenses",title:"Expense Stack",id:"stackChart",height:"230px",monthlyConfig:()=>stackConfig(mData,false),weeklyData:fetchISWeekly,weeklyConfig:rows=>stackConfig(rows,true)});
+    renderISTimeChart(stackCard,{key:"expenses",title:"Expense Stack",id:"stackChart",fill:true,monthlyConfig:()=>stackConfig(mData,false),weeklyData:fetchISWeekly,weeklyConfig:rows=>stackConfig(rows,true)});
 
     // Budget vs Actual chart (single-year only)
     const bgt=state.year!=="all"?await ensureBudgetTargets(state.year):null;
