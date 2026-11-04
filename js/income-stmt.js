@@ -335,7 +335,28 @@ function renderCategoryDonut(card,months,mKeys,expCats){
     }
     slices.forEach(s=>legend.append(legendRow(s,grand,{clickable:!!s.expandable,dim:false})));
   }
-  function paint(){
+  let reveal=0;
+  let revealRaf=0;
+  let revealGen=0;
+  function mixHex(a,b,t){
+    const pa=parseInt(String(a).slice(1),16),pb=parseInt(String(b).slice(1),16);
+    if(!Number.isFinite(pa)||!Number.isFinite(pb))return b||a;
+    const ch=shift=>Math.round(((pa>>shift)&255)*(1-t)+((pb>>shift)&255)*t).toString(16).padStart(2,"0");
+    return "#"+ch(16)+ch(8)+ch(0);
+  }
+  // Redraw without Chart's own tween. reveal 0 is the intact ring, 1 is the breakout.
+  function applyFrame(){
+    const chart=charts.pieChart;
+    if(!chart||!card.isConnected)return;
+    const slices=chart.$slices||[];
+    chart.$reveal=reveal;
+    chart.options.layout.padding=4+38*reveal;
+    const ds=chart.data.datasets[0];
+    ds.backgroundColor=slices.map(s=>chart.$focus&&s.id===chart.$focus?"transparent":s.color);
+    ds.hoverBackgroundColor=ds.backgroundColor;
+    chart.update("none");
+  }
+  function syncChart(){
     const chart=charts.pieChart;
     const slices=parentSlices();
     const parts=focus?partsOf(focus):null;
@@ -349,19 +370,43 @@ function renderCategoryDonut(card,months,mKeys,expCats){
     chart.$parts=parts;
     chart.$focus=focus;
     chart.data.labels=slices.map(s=>s.label);
-    const ds=chart.data.datasets[0];
-    ds.data=slices.map(s=>s.val);
-    chart.options.layout.padding=focus?42:4;
-    ds.backgroundColor=slices.map(s=>focus&&s.id===focus?"transparent":s.color);
-    ds.hoverBackgroundColor=ds.backgroundColor;
-    chart.update();
+    chart.data.datasets[0].data=slices.map(s=>s.val);
+    applyFrame();
+  }
+  function paint(){syncChart()}
+  function revealTo(to,done){
+    const gen=++revealGen;
+    cancelAnimationFrame(revealRaf);
+    const from=reveal;
+    const dur=window.matchMedia("(prefers-reduced-motion: reduce)").matches?0:520;
+    const t0=performance.now();
+    const step=now=>{
+      if(gen!==revealGen||!card.isConnected)return;
+      const u=dur?Math.min(1,(now-t0)/dur):1;
+      const e=u<0.5?4*u*u*u:1-Math.pow(-2*u+2,3)/2;
+      reveal=from+(to-from)*e;
+      applyFrame();
+      if(u<1)revealRaf=requestAnimationFrame(step);
+      else {reveal=to;applyFrame();if(done)done()}
+    };
+    revealRaf=requestAnimationFrame(step);
   }
   function openPie(next){
     if(next&&!partsOf(next).length)return;
     if(next===focus)return;
-    focus=next;
     hideTip();
-    paint();
+    // Settle the current breakout back into the ring, then bring the next one out.
+    if(focus&&reveal>0.01){
+      revealTo(0,()=>{
+        focus=next;
+        syncChart();
+        if(next)revealTo(1);
+      });
+      return;
+    }
+    focus=next;
+    syncChart();
+    if(next)revealTo(1);
   }
   function onPick(index){
     const slice=charts.pieChart?.$slices?.[index];
@@ -371,6 +416,7 @@ function renderCategoryDonut(card,months,mKeys,expCats){
   const pieCutout={id:"pieCutout",afterDraw(chart){
     const parts=chart.$parts;
     const focusId=chart.$focus;
+    const t=Math.max(0,Math.min(1,chart.$reveal||0));
     if(!focusId||!parts||!parts.length){chart.$partArcs=[];return}
     const slices=chart.$slices||[];
     const idx=slices.findIndex(s=>s.id===focusId);
@@ -378,17 +424,21 @@ function renderCategoryDonut(card,months,mKeys,expCats){
     if(!arc||!(arc.outerRadius>4)){chart.$partArcs=[];return}
     const span0=arc.endAngle-arc.startAngle;
     if(span0<0.02){chart.$partArcs=[];return}
-    const lift=32;
+    const lift=32*t;
     const inner=arc.innerRadius+lift;
     const outer=arc.outerRadius+lift;
-    const inset=Math.min(0.07,span0*0.08);
+    const insetFull=Math.min(0.07,span0*0.08);
+    const spanFull=span0-insetFull*2;
+    const gapFull=parts.length>1?Math.min(0.09,spanFull/(parts.length*4)):0;
+    const inset=insetFull*t;
+    const gap=gapFull*t;
     let start=arc.startAngle+inset;
     const span=span0-inset*2;
-    const gap=parts.length>1?Math.min(0.09,span/(parts.length*4)):0;
-    const usable=span-gap*(parts.length-1);
+    const usable=Math.max(0,span-gap*(parts.length-1));
     const total=parts.reduce((s,p)=>s+p.val,0)||1;
     const ctx=chart.ctx;
     const arcs=[];
+    const parentHex=(slices[idx]&&slices[idx].color)||"#888888";
     ctx.save();
     parts.forEach(p=>{
       const sweep=usable*(p.val/total);
@@ -397,7 +447,7 @@ function renderCategoryDonut(card,months,mKeys,expCats){
       ctx.arc(arc.x,arc.y,outer,start,end);
       ctx.arc(arc.x,arc.y,inner,end,start,true);
       ctx.closePath();
-      ctx.fillStyle=p.color;
+      ctx.fillStyle=mixHex(parentHex,p.color,t);
       ctx.fill();
       arcs.push({part:p,start,end,inner,outer,x:arc.x,y:arc.y});
       start=end+gap;

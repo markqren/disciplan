@@ -11,6 +11,12 @@
 
 ### v3.0 — Oct 25, 2026
 
+#### v3.0.6
+<sub>Category breakout eases out of the ring</sub>
+
+##### Features
+- **Category breakout eases out** — Clicking a group on the year-view donut splits that wedge and slides it outward over about half a second, shifting from the parent color to the subcategory colors while the rest of the ring eases back to make room. Closing it, or choosing another category, eases the piece back in before the next one comes out. (~2,000 tokens)
+
 #### v3.0.5
 <sub>Category breakdown fills the card and follows a time range</sub>
 
