@@ -10,6 +10,12 @@
 
 ### v3.1 — Nov 22, 2026
 
+#### v3.1.1
+<sub>Picking Splitwise on an import transfer opens the split form</sub>
+
+##### Features
+- **Splitwise as a transfer's To Account opens Reimburse** — In the CSV import edit modal or the review table's transfer picker, choosing Splitwise opens the Reimburse form at 100% with the person filled in from a "Zelle to …" name. Set Split stages a reimbursement instead of the transfer: the same +charge and −Splitwise ledger rows, plus the person and an optional Splitwise expense confirmed at Save Approved. Cancel keeps the plain ledger-only transfer. Incoming money stays a transfer. (~3,000 tokens)
+
 #### v3.1.0
 <sub>Claude reads payslips and CSVs the parsers don't recognize; Chase checking import</sub>
 

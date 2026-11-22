@@ -244,6 +244,12 @@ function renderReviewTable(container,candidates){
       // Transfer rows pick a counter-account (not a category — they stay financial).
       const xferSel=h("select",{style:{...selStyle,border:c._transferTo?selStyle.border:"1px solid var(--y)"},onChange:e=>{
         c._transferTo=e.target.value;
+        if(c._transferTo==="Splitwise")openTransferSplitwise(c,c,spec=>{
+          c._isTransfer=false;delete c._transferTo;
+          c.service_start=c.service_end=c.date;normalizeCandidateServicePeriod(c);
+          c._reimburse=spec;c._status="approved";
+          renderReviewTable(container,candidates);
+        });
         xferSel.style.border=c._transferTo?selStyle.border:"1px solid var(--y)";
         if(xferPairHint){
           xferPairHint.textContent=c._transferTo?(" \u2192 "+c._transferTo):" \u2192 pick account";
@@ -342,7 +348,17 @@ function openImportEditModal(candidates,idx,reviewContainer){
 
   // Same transfer controls as the Entry tab: a financial row can pair to a
   // counter-account (ATM -> Cash, Zelle -> Splitwise, etc.).
-  const mTo=h("select",{class:"inp",onChange:syncXfer});
+  const mTo=h("select",{class:"inp",onChange:()=>{
+    syncXfer();
+    if(mTo.value!=="Splitwise")return;
+    openTransferSplitwise(c,{description:mDesc.value,amount_usd:parseFloat(mAmt.value),date:mDate.value,category_id:mCat.value,tag:mTag.value},spec=>{
+      xferChk.checked=false;
+      if(!applyForm())return;
+      c._reimburse=spec;c._status="approved";
+      bg.remove();
+      renderReviewTable(reviewContainer,candidates);
+    });
+  }});
   function fillTo(){
     const cur=mTo.value||c._transferTo||"";
     fillPtSelect(mTo,{selected:cur||null,keep:["Transfer"]});
@@ -547,6 +563,20 @@ function openImportReimburse(c,onDone){
       if(c._status!=="skipped"&&c._status!=="committed")c._status="approved";
       if(typeof onDone==="function")onDone();
     }
+  });
+}
+
+// Picking Splitwise as a transfer's counter-account opens the split form at 100%.
+// Set Split stages a reimbursement instead of a transfer: the same +charge and
+// -Splitwise rows, plus the person and an optional push to Splitwise.
+// Cancel leaves the plain ledger transfer.
+function openTransferSplitwise(c,txn,onSet){
+  if(!(txn.amount_usd>0))return;
+  const zelleTo=(txn.description||"").match(/^Zelle to (.+)$/i);
+  openReimburseForm(Object.assign({},txn,{service_start:txn.date,service_end:txn.date}),{
+    collectOnly:true,defaultRatio:1,submitLabel:"Set Split",
+    defaultPerson:(c._reimburse&&c._reimburse.person)||(zelleTo&&zelleTo[1])||defaultSplitPerson(),
+    onCollect:onSet
   });
 }
 

@@ -67,7 +67,7 @@ function fillReimburseForm(modal,txn,opts){
   const bg=opts.bg;
   function mRow(...ch){const d=h("div",{style:{display:"grid",gridTemplateColumns:ch.length===3?"1fr 1fr 1fr":ch.length===2?"1fr 1fr":"1fr",gap:"12px",marginBottom:"14px"}});ch.forEach(x=>d.append(x));return d}
   function mField(lbl,inp){const d=h("div");d.append(h("label",{class:"lbl"},lbl));d.append(inp);return d}
-  let selectedPerson=opts.defaultPerson||"",selectedRatio=0.5,manualMode=false,manualAmt=0;
+  let selectedPerson=opts.defaultPerson||"",selectedRatio=opts.defaultRatio||0.5,manualMode=false,manualAmt=0;
 
   const rHdr=h("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"20px"}});
   const rHdrLeft=h("div");
@@ -271,7 +271,7 @@ function fillReimburseForm(modal,txn,opts){
       else{manualMode=false;customWrap.classList.remove("hidden");manualWrap.classList.add("hidden");customInp.focus()}
       updateRPreview();
     }},sp.label);
-    if(sp.value===0.5){b.style.background="rgba(74,111,165,0.3)";b.style.borderColor="var(--b)"}
+    if(sp.value===selectedRatio){b.style.background="rgba(74,111,165,0.3)";b.style.borderColor="var(--b)"}
     splitBtns.append(b);
   });
   splitWrap.append(splitBtns,customWrap,manualWrap);
