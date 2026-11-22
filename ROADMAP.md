@@ -10,6 +10,12 @@
 
 ### v3.1 — Nov 22, 2026
 
+#### v3.1.4
+<sub>A financial import row can name the account the money moves to</sub>
+
+##### Fixes
+- **Output account on financial import rows** — An ATM withdrawal is a transfer to Cash, and the review row shows the cash leaving the bank ("Out $200.00 → Cash"). Any other row categorized as Financial gets a "to account" dropdown, so a transfer, wire, or withdrawal can name where the money goes. Leaving it blank keeps a one-sided financial entry such as a fee. In the edit modal, a Financial row always shows To Account. (~3,000 tokens)
+
 #### v3.1.3
 <sub>Shilpa's ATM withdrawals can go to her own Cash account</sub>
 

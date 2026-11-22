@@ -104,6 +104,40 @@ function scheduleReviewRerender(container,candidates){
   setTimeout(()=>{container._reviewRerender=false;renderReviewTable(container,candidates)},0);
 }
 
+// Output account for a financial row that is not already shown as a transfer.
+// Picking one makes it a transfer, so saving posts the other side of the movement.
+function flowAccountSelect(c,container,candidates,selStyle){
+  const sel=h("select",{style:{...selStyle,marginTop:"4px",border:c._transferTo?selStyle.border:"1px solid var(--y)",display:"block"},onChange:e=>{
+    const account=e.target.value;
+    if(account==="Splitwise"){
+      sel.value=c._transferTo||"";
+      openTransferSplitwise(c,c,spec=>{
+        c._isTransfer=false;delete c._transferTo;delete c._transferRaw;
+        c.service_start=c.service_end=c.date;normalizeCandidateServicePeriod(c);
+        c._reimburse=spec;c._status="approved";
+        renderReviewTable(container,candidates);
+      });
+      return;
+    }
+    if(account){
+      c.category_id="financial";
+      c._isTransfer=true;
+      c._transferTo=account;
+      c._transferRaw=-(parseFloat(c.amount_usd)||0);
+      c.service_start=c.service_end=c.date;
+      normalizeCandidateServicePeriod(c);
+      delete c._reimburse;
+    }else{
+      c._isTransfer=false;delete c._transferTo;delete c._transferRaw;
+    }
+    renderReviewTable(container,candidates);
+  }});
+  fillPtSelect(sel,{selected:c._transferTo||null,keep:["Cash","Venmo","Splitwise"]});
+  sel.insertBefore(h("option",{value:""},"\u2014 to account \u2014"),sel.firstChild);
+  sel.value=c._transferTo||"";
+  return sel;
+}
+
 function renderReviewTable(container,candidates){
   container.innerHTML="";
   // Load the active view's account labels for payment/transfer pickers; re-render
@@ -223,6 +257,11 @@ function renderReviewTable(container,candidates){
       descTd.append(h("div",{style:{fontSize:"10px",color:"var(--g)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
         `Pairs with ${z.who.split(" ")[0]}'s Zelle \u00b7 ${fmtD(z.date)}${c._hhSharedTxn?" \u00b7 adds your Splitwise share":z.share?" \u00b7 Splitwise share already in":""}`));
     }
+    if(c._isTransfer){
+      const outAmt=Math.abs(parseFloat(c.amount_usd)||0);
+      descTd.append(h("div",{style:{fontSize:"10px",color:c._transferTo?"var(--g)":"var(--y)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+        c._transferTo?`Out ${fmtF(outAmt)} \u2192 ${c._transferTo}`:`Out ${fmtF(outAmt)} \u2192 pick account`));
+    }
     tr.append(descTd);
 
     tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
@@ -270,8 +309,13 @@ function renderReviewTable(container,candidates){
     catTd.append(h("span",{style:{display:"inline-block",width:"6px",height:"6px",borderRadius:"50%",marginRight:"4px",background:c.ai_confidence==="high"?"var(--g)":c.ai_confidence==="medium"?"var(--y)":"var(--r)"}}));
     const catSel2=h("select",{style:selStyle,onChange:e=>{
       c.category_id=e.target.value;
-      c.service_start=getDefStart(c.category_id,c.date)||c.date;
-      c.service_end=getDefEnd(c.category_id,c.service_start)||c.service_start;
+      if(c.category_id==="financial"&&!c._isTransfer){
+        const to=flowDestination((c._rawDescription||"")+" "+(c.description||""));
+        if(to){c._isTransfer=true;c._transferTo=to;c._transferRaw=-(parseFloat(c.amount_usd)||0);c.service_start=c.service_end=c.date}
+      }
+      if(c.category_id!=="financial"){c._isTransfer=false;delete c._transferTo;delete c._transferRaw}
+      c.service_start=c._isTransfer?c.date:getDefStart(c.category_id,c.date)||c.date;
+      c.service_end=c._isTransfer?c.date:getDefEnd(c.category_id,c.service_start)||c.service_start;
       c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
       propagateEdits(candidates,idx);
@@ -279,6 +323,7 @@ function renderReviewTable(container,candidates){
     }});
     CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;catSel2.append(o)});
     catTd.append(catSel2);
+    if(c.category_id==="financial")catTd.append(flowAccountSelect(c,container,candidates,selStyle));
     tr.append(catTd);
     }
 
@@ -354,6 +399,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
   // Same transfer controls as the Entry tab: a financial row can pair to a
   // counter-account (ATM -> Cash, Zelle -> Splitwise, etc.).
   const mTo=h("select",{class:"inp",onChange:()=>{
+    xferChk.checked=!!mTo.value;
     syncXfer();
     if(mTo.value!=="Splitwise")return;
     openTransferSplitwise(c,{description:mDesc.value,amount_usd:parseFloat(mAmt.value),date:mDate.value,category_id:mCat.value,tag:mTag.value},spec=>{
@@ -385,7 +431,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
     if(!fin)xferChk.checked=false;
     const on=xferChk.checked;
     ptField.firstChild.textContent=on?"From Account":"Payment Account";
-    toGrid.style.display=on?"":"none";
+    toGrid.style.display="";
     mTo.style.borderColor=on&&!mTo.value?"var(--y)":"";
     syncReimb();
   }

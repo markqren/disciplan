@@ -306,6 +306,36 @@ async function findCCImportMatches(candidates){
 }
 
 function fallbackCatMap(bankCat){return AMEX_CAT_MAP[bankCat]||CHASE_CAT_MAP[bankCat]||"other"}
+
+// Where cash is going for a bank row that is money moving, not a purchase.
+// "Cash" for an ATM withdrawal. Null when the row is not that kind of movement.
+function flowDestination(text){
+  const d=(text||"").toUpperCase();
+  if(!d||/FEE|INTEREST/.test(d))return null;
+  if(/ATM/.test(d)&&/WITHDRAW|CASH/.test(d))return "Cash";
+  if(/CASH\s*(WITHDRAW|ADVANCE)/.test(d))return "Cash";
+  return null;
+}
+
+// Catch ATM cash that a profile or the categorizer filed as an ordinary expense,
+// so the review offers an output account (Cash) instead of only a category.
+function promoteMoneyFlows(candidates){
+  for(const c of candidates){
+    if(c._status==="skipped"||c._isTransfer||c._isCCPayment||c._isBillPay||c._isPayroll||c._isRent||c._reimburse)continue;
+    const to=flowDestination((c._rawDescription||"")+" "+(c.description||""));
+    if(!to)continue;
+    c._isTransfer=true;
+    c._transferTo=to;
+    c._transferRaw=-(parseFloat(c.amount_usd)||0);
+    c.category_id="financial";
+    c.ai_confidence="high";
+    c.description=c.description&&!/ATM/i.test(c._rawDescription||"")?c.description:"ATM Withdrawal";
+    c.service_start=c.service_end=c.date;
+    c.service_days=1;
+    c.daily_cost=c.amount_usd;
+  }
+}
+
 function applyAIResults(candidates,aiResults,detectedSubs){
   if(!aiResults){
     for(const c of candidates){
@@ -318,6 +348,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
       c.service_days=daysInclusive(c.service_start,c.service_end);
       c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
     }
+    promoteMoneyFlows(candidates);
     return;
   }
   const byIdx={};for(const r of aiResults)byIdx[r.i]=r;
@@ -350,6 +381,7 @@ function applyAIResults(candidates,aiResults,detectedSubs){
       }
     }
   }
+  promoteMoneyFlows(candidates);
 }
 
 function propagateEdits(candidates,editedIndex){
