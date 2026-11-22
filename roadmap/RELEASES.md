@@ -9,6 +9,22 @@
 
 ## 🚀 Releases
 
+### v3.1 — Nov 22, 2026
+
+#### v3.1.0
+<sub>Claude reads payslips and CSVs the parsers don't recognize; Chase checking import</sub>
+
+##### Features
+- **AI fallback for payslip import** — When no payslip parser matches a PDF or XLSX, or a parsed stub fails the net-pay check (gross minus taxes minus deductions equals net pay), Claude reads the stub text and returns the current-period numbers. The existing transaction builder still decides accounts and rows. Claude's stubs pass the same net-pay check, carry an AI-parsed badge in review, and are left out of Approve All when they do not reconcile. A stub from an employer with no `PAYSLIP_PROFILES` entry blocks the import and shows what Claude read. Stubs the parsers handle never call Claude. (~5,000 tokens)
+- **AI fallback for CSV import** — When no bank layout matches a CSV's headers, or the headers match but most dates or amounts do not parse, Claude maps the columns: date, description, a signed amount or separate debit/credit columns, the date format, which sign is a charge, and the account. A renamed version of a known export keeps that bank's payment, transfer and payroll rules. Invented column names and non-USD files are rejected, and the status line shows the mapping to check before approving. (~4,500 tokens)
+- **Mark's Chase checking CSV import** — Paychecks are skipped because payslips import them, and card bill payments are skipped and flagged when the card-side row is not in the ledger yet. ATM withdrawals post as a transfer to Cash, Venmo and Splitwise rows pair to those accounts, and Zelle, check deposits, PayPal and Wise transfers wait for you to pick the other account. Zelle descriptions keep the person's name and drop the confirmation code. (~6,000 tokens)
+- **Transfers and Splitwise in the import edit modal** — The CSV import edit modal has the Entry tab's Balance transfer / withdrawal checkbox with a To Account picker, so an ATM withdrawal can go to any account and a Zelle can be paired. Changing a row to a spending category turns the transfer off and shows Reimburse, so Zelle payments from Chase checking can be split on Splitwise the same way Wells Fargo rows can. Editing one row no longer copies its category onto same-merchant rows that are still transfers. (~4,000 tokens)
+
+##### Fixes
+- **Internet credits attach to Astound** — Home internet moved from AT&T to Astound in Nov 2026. The payslip Connectivity Reimbursement Fund now links to that month's Astound bill (matched on the ledger or bank description) instead of the AT&T mobile bill, in both import orders, and spreads over the bill's month. Links stay within the importing person's books. (~2,500 tokens)
+- **Shilpa's TAV Employer stubs import again** — Rippling stubs that print `TAV Employer, LP` in mixed case, with single-digit days such as `10/1/2026`, are recognized as Pronto again. (~2,000 tokens)
+- **Payslip net-pay check works for Pinterest stubs** — The review header's net-pay check always showed ✓ for Pinterest stubs because it subtracted a GTL value the parser no longer returns. It now checks the stub's own gross pay. (~500 tokens)
+
 ### v3.0 — Oct 25, 2026
 
 #### v3.0.6

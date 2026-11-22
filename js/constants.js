@@ -88,7 +88,45 @@ async function fetchLiveFX(){
   }catch(e){/* silent fallback to defaults */}
 }
 const ACCRUAL_D={groceries:7,clothes:365,tech:730,furniture:730,rent:"month",utilities:"month"};
-const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},chase_checking:{detect:hd=>hd.includes("Posting Date")&&hd.includes("Details")&&hd.includes("Balance"),columns:{date:"Posting Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"Type"},transformAmount:a=>Math.abs(a),skipTypes:[],currency:"USD",isCheckingAccount:true,detectBillPay:row=>{const d=row.Description||"",t=row.Type||"";if(t==="LOAN_PMT")return"Chase Card Payment";if(/CHASE CREDIT CRD AUTOPAY/i.test(d))return"Chase Card Autopay";if(/AMERICAN EXPRESS ACH PMT/i.test(d))return"AMEX Payment";if(/APPLECARD GSBANK/i.test(d))return"Apple Card Payment";if(/WF Credit Card.*AUTO PAY/i.test(d))return"Capital One Payment";if(/WELLS FARGO CARD B(ILT|PP)/i.test(d))return"Bilt Card Payment";return null},detectPayroll:row=>/PINTEREST.*PAYROLL|ORIG CO NAME:PINTEREST/i.test(row.Description||"")},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&(hd.includes("Category")||hd.includes("Extended Details")),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")},bilt:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Posted Date")&&!hd.includes("Memo")&&!hd.includes("Post Date"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/payment/i.test(row.Description||"")&&parseFloat(row.Amount)<0,detectRent:row=>/housing/i.test(row.Description||"")&&parseFloat(row.Amount)>0},bilt_legacy:{detect:hd=>hd.some(h=>/^\d{2}\/\d{2}\/\d{4}$/.test(h))&&hd.includes("*"),reparse:text=>parseCSV("Date,Amount,Flag,Empty,Description\n"+text),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>-a,skipTypes:[],currency:"USD",detectPayment:row=>/AUTOMATIC PAYMENT/i.test(row.Description||"")},
+const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Post Date")&&hd.includes("Memo"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"Type"},transformAmount:a=>-a,skipTypes:[],currency:"USD"},chase_checking:{detect:hd=>hd.includes("Posting Date")&&hd.includes("Details")&&hd.includes("Balance"),columns:{date:"Posting Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"Type"},transformAmount:a=>Math.abs(a),skipTypes:[],currency:"USD",isCheckingAccount:true,
+  // Mark's Chase checking activity export. Paychecks are imported from paystubs.
+  // Card bill pays belong to the card import and are flagged when that side is
+  // missing. ATM withdrawals and cash moving between accounts are transfers.
+  classifyRow:(row,rawAmt)=>{
+    const d=row.Description||"";
+    const u=d.toUpperCase();
+    const t=(row.Type||"").toUpperCase();
+    const zelle=d.match(/Zelle payment (to|from)\s+(.+)$/i);
+    let bill=null;
+    if(t==="LOAN_PMT"||/PAYMENT TO CHASE CARD ENDING/.test(u)||/CHASE CREDIT CRD\s+(AUTOPAY|EPAY|RETRY PYMT)/.test(u))bill="Chase Card Payment";
+    else if(/AMERICAN EXPRESS ACH PMT/.test(u))bill="AMEX Payment";
+    else if(/APPLECARD GSBANK/.test(u))bill="Apple Card Payment";
+    else if(/WF CREDIT CARD\s+AUTO PAY/.test(u))bill="Wells Fargo Card Payment";
+    else if(/WELLS FARGO CARD|BILT CARD|ORIG CO NAME:BILT/.test(u))bill="Bilt Payment";
+    if(bill)return{_skip:"CC payment (logged via card import)",_desc:bill};
+    if(/PAYROLL/.test(u)&&/PINTEREST|GOOGLE/.test(u))return{_payrollSkip:true};
+    let to=null,desc=null;
+    if(t==="ATM"||/ATM WITHDRAW/.test(u)){to="Cash";desc="ATM Withdrawal"}
+    else if(/VENMO\s+CASHOUT/.test(u)){to="Venmo";desc="Venmo Cashout"}
+    else if(/VENMO\s+PAYMENT/.test(u)){to="Venmo";desc="Venmo Payment"}
+    else if(/SPLITWISE/.test(u)){to="Splitwise";desc="Splitwise"}
+    else if(zelle||t==="CHASE_TO_PARTNERFI"||t==="PARTNERFI_TO_CHASE"||t==="QUICKPAY_DEBIT"||t==="QUICKPAY_CREDIT"){
+      to="";
+      if(zelle){
+        const words=zelle[2].trim().split(/\s+/);
+        const name=[];
+        for(const w of words){if(/\d/.test(w)||(w.length>=8&&/[A-Z]{2,}[a-z]/.test(w)))break;name.push(w)}
+        const titled=name.join(" ").toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase());
+        desc=(zelle[1].toLowerCase()==="to"?"Zelle to ":"Zelle from ")+(titled||"Zelle");
+      }else desc="Zelle";
+    }
+    else if(t==="CHECK_DEPOSIT"||/REMOTE ONLINE DEPOSIT/.test(u)){to="";desc="Check Deposit"}
+    else if(/PAYPAL\s+TRANSFER/.test(u)){to="";desc="PayPal Transfer"}
+    else if(/WISE INC/.test(u)||(/REAL TIME TRANSFER/.test(u)&&/WISE/.test(u))){to="";desc="Wise Transfer"}
+    if(to!==null)return{_transfer:true,_transferTo:to,_desc:desc};
+    if(rawAmt>0)return{_income:true};
+    return null;
+  }},amex:{detect:hd=>hd.includes("Date")&&hd.includes("Description")&&hd.includes("Amount")&&(hd.includes("Category")||hd.includes("Extended Details")),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"Category",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/^AUTOPAY|^ONLINE PAYMENT/i.test(row.Description||""),detectCredit:row=>/AMEX.*Credit/i.test(row.Description||"")},bilt:{detect:hd=>hd.includes("Transaction Date")&&hd.includes("Posted Date")&&!hd.includes("Memo")&&!hd.includes("Post Date"),columns:{date:"Transaction Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>a,skipTypes:[],currency:"USD",detectPayment:row=>/payment/i.test(row.Description||"")&&parseFloat(row.Amount)<0,detectRent:row=>/housing/i.test(row.Description||"")&&parseFloat(row.Amount)>0},bilt_legacy:{detect:hd=>hd.some(h=>/^\d{2}\/\d{2}\/\d{4}$/.test(h))&&hd.includes("*"),reparse:text=>parseCSV("Date,Amount,Flag,Empty,Description\n"+text),columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:"_none_",type:"_none_"},transformAmount:a=>-a,skipTypes:[],currency:"USD",detectPayment:row=>/AUTOMATIC PAYMENT/i.test(row.Description||"")},
 wells_fargo:{detect:hd=>hd.includes("DESCRIPTION")&&hd.includes("AMOUNT")&&hd.includes("CHECK #")&&hd.includes("STATUS"),columns:{date:"DATE",description:"DESCRIPTION",amount:"AMOUNT",bankCategory:"_none_",type:"_none_"},transformAmount:a=>Math.abs(a),skipTypes:[],currency:"USD",isCheckingAccount:true,
   // Returns a classification intent for a WF Checking/Savings row, or null to fall
   // through to the default AI-categorized expense path. See transformCSVRow.
@@ -118,10 +156,12 @@ wells_fargo:{detect:hd=>hd.includes("DESCRIPTION")&&hd.includes("AMOUNT")&&hd.in
     if(rawAmt>0)return{_income:true};
     return null;
   }}};
-const PAYSLIP_PROFILES={pinterest:{detect:t=>t.includes("Pinterest, Inc.")&&t.includes("Pay Period Begin"),company:"Pinterest",incomeItems:["Regular Salary Pay","Connectivity Reimbursement","GTL","Wellness Reimbursement","Home Office Setup Stipend","Sign on Bonus"],rsuIndicators:["RSU Gain"],postTaxExclude:["401(k) After-tax Deferral","RSU Gain Offset"],benefitEarnings:["GTL"]},
+// employerMatch maps the employer name Claude reads off an unrecognized stub to a
+// profile; an employer that matches none is blocked until a profile is added here.
+const PAYSLIP_PROFILES={pinterest:{detect:t=>t.includes("Pinterest, Inc.")&&t.includes("Pay Period Begin"),employerMatch:/pinterest/i,company:"Pinterest",incomeItems:["Regular Salary Pay","Connectivity Reimbursement","GTL","Wellness Reimbursement","Home Office Setup Stipend","Sign on Bonus"],rsuIndicators:["RSU Gain"],postTaxExclude:["401(k) After-tax Deferral","RSU Gain Offset"],benefitEarnings:["GTL"]},
   // Rippling-generated stubs for Shilpa. PRONTO.AI is the employer; TAV EMPLOYER, LP is
   // its PEO/employer-of-record — both are the same income source, labeled "Pronto".
-  pronto:{detect:t=>t.includes("rippling.com")&&(t.includes("PRONTO.AI")||t.includes("TAV EMPLOYER")),company:"Pronto",bank:"Wells Fargo Checking",k401Account:"Fidelity"}};
+  pronto:{detect:t=>/rippling\.com/i.test(t)&&/PRONTO\.AI|TAV EMPLOYER/i.test(t),employerMatch:/pronto|tav employer/i,company:"Pronto",bank:"Wells Fargo Checking",k401Account:"Fidelity"}};
 const CC_PAY_NAMES={"Chase Sapphire":["Bill Paid: Chase Sapphire","Chase Sapphire Bill Payment"],"Chase United":["Bill Paid: Chase United","Chase United Bill Payment"],"Chase Freedom":["Bill Paid: Chase Freedom","Chase Freedom Bill Payment"],"Chase Aeroplan":["Bill Paid: Chase Aeroplan","Chase Aeroplan Bill Payment"],"AMEX Rose Gold":["Bill Paid: AMEX Rose Gold","Amex Rose Gold Bill Payment"],"Bilt":["Bill Paid: Bilt","Bilt Card Payment"],"Apple":["Bill Paid: Apple","Apple Bill Payment"],"Venmo Credit":["Bill Paid: Venmo","Venmo Bill Payment"],"Capital One":["Bill Paid: Capital One","Capital One Bill Payment"],"Uber":["Bill Paid: Uber","Uber Bill Payment"]};
 const CHASE_CAT_MAP={"Food & Drink":"restaurant","Groceries":"groceries","Travel":"transportation","Entertainment":"entertainment","Shopping":"personal","Bills & Utilities":"utilities","Health & Wellness":"health","Home":"home","Gas":"transportation","Personal":"personal"};
 const AMEX_CAT_MAP={"Restaurant-Restaurant":"restaurant","Restaurant-Bar & Café":"restaurant","Merchandise & Supplies-Groceries":"groceries","Merchandise & Supplies-Department Stores":"personal","Merchandise & Supplies-Mail Order":"personal","Merchandise & Supplies-Internet Purchase":"personal","Transportation-Fuel":"transportation","Transportation-Taxis & Coach":"transportation","Transportation-Transit":"transportation","Transportation-Parking":"transportation","Transportation-Other":"transportation","Entertainment-General Attractions":"entertainment","Entertainment-Ticketing":"entertainment","Travel-Airline":"transportation","Travel-Lodging":"accommodation","Travel-Other":"transportation","Business Services-Health Care":"health","Fees & Adjustments-Fees & Adjustments":"financial","Communications-Cable & Internet":"utilities","Communications-Telephone":"utilities"};

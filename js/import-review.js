@@ -317,7 +317,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
 
   const mCat=h("select",{class:"inp",onChange:()=>{
     if(!seManual){mSs.value=getDefStart(mCat.value,c.date)||mSs.value;mSe.value=getDefEnd(mCat.value,mSs.value)||mSs.value;updateHint()}
-    updatePreview();
+    updatePreview();syncXfer();
   }});
   CATS_LIST.forEach(cat=>{const o=h("option",{value:cat.id},cat.l);if(cat.id===c.category_id)o.selected=true;mCat.append(o)});
 
@@ -337,7 +337,37 @@ function openImportEditModal(candidates,idx,reviewContainer){
   const mPt=h("select",{class:"inp"});
   fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]});
   acctLabelsReady().then(()=>fillPtSelect(mPt,{selected:c.payment_type,keep:["Transfer"]}));
+  const ptField=mField("Payment Account",mPt);
   const mTag=attachTagSuggestions(h("input",{class:"inp",type:"text",value:c.tag||""}));
+
+  // Same transfer controls as the Entry tab: a financial row can pair to a
+  // counter-account (ATM -> Cash, Zelle -> Splitwise, etc.).
+  const mTo=h("select",{class:"inp",onChange:syncXfer});
+  function fillTo(){
+    const cur=mTo.value||c._transferTo||"";
+    fillPtSelect(mTo,{selected:cur||null,keep:["Transfer"]});
+    mTo.insertBefore(h("option",{value:""},"\u2014 pick account \u2014"),mTo.firstChild);
+    mTo.value=cur;
+  }
+  fillTo();
+  acctLabelsReady().then(fillTo);
+  const xferChk=h("input",{type:"checkbox",style:{accentColor:"var(--b)",cursor:"pointer"},onChange:syncXfer});
+  xferChk.checked=!!c._isTransfer;
+  const xferLabel=h("label",{style:{display:"flex",alignItems:"center",gap:"6px",fontSize:"12px",color:"rgba(255,255,255,0.6)",cursor:"pointer",marginBottom:"8px"}});
+  xferLabel.append(xferChk,document.createTextNode("Balance transfer / withdrawal"));
+  const toGrid=formGrid(2,uiField("To Account",mTo));
+  const xferBlock=h("div",{style:{marginBottom:"14px"}});
+  xferBlock.append(xferLabel,toGrid);
+  function syncXfer(){
+    const fin=mCat.value==="financial"&&!c._isCCPayment;
+    xferBlock.style.display=fin?"":"none";
+    if(!fin)xferChk.checked=false;
+    const on=xferChk.checked;
+    ptField.firstChild.textContent=on?"From Account":"Payment Account";
+    toGrid.style.display=on?"":"none";
+    mTo.style.borderColor=on&&!mTo.value?"var(--y)":"";
+    syncReimb();
+  }
 
   // Accrual preview
   const previewEl=h("div",{class:"preview hidden"});
@@ -441,16 +471,29 @@ function openImportEditModal(candidates,idx,reviewContainer){
   linkSection.append(linkBody);
 
   // Action buttons
-  const canReimb=isReimbursableTxn(c)&&!c._isTransfer&&!c._isCCPayment;
-  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:canReimb?"1fr auto auto auto":"1fr auto auto",gap:"8px",marginTop:"4px"}});
-  const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+  const btnRow=h("div",{style:{display:"grid",gridTemplateColumns:"1fr auto auto",gap:"8px",marginTop:"4px"}});
+  // Returns false when the transfer is missing a valid counter-account.
+  function applyForm(){
+    const xfer=xferChk.checked;
+    if(xfer&&!mTo.value){alert("Pick the account this transfer pairs to first.");return false}
+    if(xfer&&mTo.value===mPt.value){alert("Pick two different accounts for a transfer.");return false}
     c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
     c.original_amount=c.amount_usd;c.category_id=mCat.value;
     c.service_start=mSs.value;c.service_end=mSe.value;
     c.payment_type=mPt.value;c.tag=mTag.value;
-    c._isCashback=cbField.read();
+    c._isTransfer=xfer;
+    if(xfer){
+      c.service_start=c.service_end=c.date;
+      c._transferTo=mTo.value;c._transferRaw=-c.amount_usd;
+      delete c._reimburse;
+    }else delete c._transferTo;
     c.service_days=daysInclusive(c.service_start,c.service_end);
     c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+    return true;
+  }
+  const mSave=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)"},onClick:()=>{
+    if(!applyForm())return;
+    c._isCashback=cbField.read();
     c._status="approved";
     propagateEdits(candidates,idx);
     bg.remove();
@@ -460,25 +503,29 @@ function openImportEditModal(candidates,idx,reviewContainer){
     c._status="skipped";bg.remove();renderReviewTable(reviewContainer,candidates);
   }},"Skip");
   const mCancel=h("button",{class:"btn",style:{background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",width:"auto",padding:"12px 20px"},onClick:()=>bg.remove()},"Cancel");
-  const mReimb=canReimb?h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",width:"auto",padding:"12px 20px"},onClick:()=>{
-    c.date=mDate.value;c.description=mDesc.value;c.amount_usd=parseFloat(mAmt.value);
-    c.original_amount=c.amount_usd;c.category_id=mCat.value;
-    c.service_start=mSs.value;c.service_end=mSe.value;
-    c.payment_type=mPt.value;c.tag=mTag.value;
-    c.service_days=daysInclusive(c.service_start,c.service_end);
-    c.daily_cost=Math.round(c.amount_usd/c.service_days*1e6)/1e6;
+  const mReimb=c._isCCPayment?null:h("button",{class:"btn",style:{background:"rgba(74,111,165,0.2)",color:"var(--b)",width:"auto",padding:"12px 20px"},onClick:()=>{
+    if(!applyForm())return;
     bg.remove();
     openImportReimburse(c,()=>renderReviewTable(reviewContainer,candidates));
-  }},c._reimburse?"Edit Split":"\uD83D\uDCB8 Reimburse"):null;
+  }},c._reimburse?"Edit Split":"\uD83D\uDCB8 Reimburse");
   btnRow.append(mSave,mSkip);
   if(mReimb)btnRow.append(mReimb);
   btnRow.append(mCancel);
+  function syncReimb(){
+    if(!mReimb)return;
+    const show=!xferChk.checked&&isReimbursableTxn({amount_usd:parseFloat(mAmt.value),category_id:mCat.value});
+    mReimb.style.display=show?"":"none";
+    btnRow.style.gridTemplateColumns=show?"1fr auto auto auto":"1fr auto auto";
+  }
+  mAmt.addEventListener("input",syncReimb);
+  syncXfer();
 
   modal.append(mRow(mField("Date",mDate),descField));
   modal.append(mRow(mField("Category",mCat),mField("Amount (USD)",mAmt)));
   modal.append(mRow(mField("Service Start",mSs),seField));
   const cbField=importCashbackField(c,mAmt);
-  modal.append(mRow(mField("Payment Account",mPt),mField("Tag",mTag),cbField));
+  modal.append(mRow(ptField,mField("Tag",mTag),cbField));
+  modal.append(xferBlock);
   modal.append(previewEl);
   modal.append(linkSection);
   modal.append(btnRow);
@@ -676,6 +723,15 @@ function showSplitwiseImportResult(summary){
   });
 }
 
+// Internet-credit links stay inside the books the import writes to, so one
+// member's Connectivity credit never groups with another member's bill.
+function internetCreditOwnerQS(){
+  const o=typeof writeOwner==="function"?writeOwner():currentOwner;
+  let qs=currentHousehold!=null?`&household_id=eq.${currentHousehold}`:"";
+  if(o!=null)qs+=`&owner=eq.${encodeURIComponent(o)}`;
+  return qs;
+}
+
 async function commitImport(candidates){
   const approved=candidates.filter(c=>c._status==="approved");
   if(!approved.length)throw new Error("No approved transactions to save.");
@@ -829,21 +885,27 @@ async function commitImport(candidates){
       }
     }
   }
-  // Auto-link AT&T internet charges to existing Connectivity Reimbursement Fund in same month
-  const attCharges=valid.filter(c=>c.description&&/AT&T/i.test(c.description)&&c.category_id==="utilities"&&c.amount_usd>0&&c.service_start&&c.service_end);
-  for(const att of attCharges){
-    const attIdx=valid.indexOf(att);
-    if(!inserted[attIdx])continue;
+  // Auto-link Astound internet charges to an existing Connectivity Reimbursement Fund in the same month.
+  // Home internet moved from AT&T to Astound in Nov 2026. AT&T rows are the mobile bill.
+  const internetCharges=valid.filter(c=>/astound/i.test((c.description||"")+" "+(c._rawDescription||""))&&c.category_id==="utilities"&&c.amount_usd>0&&c.service_start&&c.service_end);
+  const connQS=internetCreditOwnerQS();
+  for(const bill of internetCharges){
+    const billIdx=valid.indexOf(bill);
+    if(!inserted[billIdx])continue;
     try{
-      const [attFresh,reimbMatches]=await Promise.all([
-        sb(`transactions?id=eq.${inserted[attIdx].id}&select=id,transaction_group_id&limit=1`),
-        sb(`transactions?description=ilike.*Connectivity+Reimbursement*&service_start=gte.${att.service_start.slice(0,8)}01&service_start=lte.${att.service_end}&amount_usd=lt.0&select=id,transaction_group_id,description&limit=1`)
+      const [billFresh,reimbMatches]=await Promise.all([
+        sb(`transactions?id=eq.${inserted[billIdx].id}&select=id,transaction_group_id&limit=1`),
+        sb(`transactions?description=ilike.*Connectivity+Reimbursement*&service_start=gte.${bill.service_start.slice(0,8)}01&service_start=lte.${bill.service_end}&amount_usd=lt.0&select=id,transaction_group_id,description,amount_usd&order=date.asc&limit=1${connQS}`)
       ]);
-      if(attFresh.length&&reimbMatches.length){
-        await linkToGroup(attFresh[0],reimbMatches[0]);
-        console.log(`AT&T: auto-linked to "${reimbMatches[0].description}" (${att.service_start}–${att.service_end})`);
+      if(billFresh.length&&reimbMatches.length){
+        // Spread the credit over the bill's service period, as the payslip-side link does.
+        const credit=reimbMatches[0];
+        const sd=daysInclusive(bill.service_start,bill.service_end);
+        await sb(`transactions?id=eq.${credit.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({service_start:bill.service_start,service_end:bill.service_end,service_days:sd,daily_cost:Math.round(parseFloat(credit.amount_usd)/sd*10000)/10000})});
+        await linkToGroup(billFresh[0],credit);
+        console.log(`Astound: auto-linked to "${credit.description}" (${bill.service_start}–${bill.service_end})`);
       }
-    }catch(e){console.error("AT&T connectivity auto-link:",e)}
+    }catch(e){console.error("Astound connectivity auto-link:",e)}
   }
   await commitElectedCashback(valid,inserted);
   valid.forEach(c=>c._status="committed");
@@ -1028,7 +1090,7 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
 
   const bulkBar=h("div",{style:{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"12px"}});
   bulkBar.append(h("button",{class:"pg-btn",style:"color:var(--g);border-color:rgba(129,178,154,0.3)",onClick:()=>{
-    candidates.forEach(c=>{if(c._status==="pending")c._status="approved"});
+    candidates.forEach(c=>{if(c._status==="pending"&&!c._pageData?._needsReview)c._status="approved"});
     renderPayslipReviewTable(container,candidates,skippedPages);
   }},"\u2713 Approve All"));
 
@@ -1086,12 +1148,12 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
     hdrTd.setAttribute("colspan","6");
     hdrTd.textContent="\u2500\u2500 "+grp+" ";
     if(pd&&!pd.isRSU&&!pd.isSkip){
-      const expectedNet=Math.round((pd.earningsTotal-pd.gtl-pd.employeeTaxTotal-pd.preTaxTotal-pd.postTaxTotal)*100)/100;
-      const diff=Math.abs(expectedNet-pd.netPay);
-      const chk=h("span",{style:{fontSize:"10px",fontWeight:"400",color:diff>0.02?"var(--r)":"rgba(255,255,255,0.3)"}},
-        ` \u00b7 Net Pay: ${fmtF(pd.netPay)}`+(diff>0.02?` \u26a0 (expected ${fmtF(expectedNet)})`:" \u2713"));
+      const gap=payslipNetGap(pd),off=Math.abs(gap)>0.02;
+      const chk=h("span",{style:{fontSize:"10px",fontWeight:"400",color:off?"var(--r)":"rgba(255,255,255,0.3)"}},
+        ` \u00b7 Net Pay: ${fmtF(pd.netPay)}`+(off?` \u26a0 (expected ${fmtF(pd.netPay+gap)}; not included in Approve All)`:" \u2713"));
       hdrTd.append(chk);
     }
+    if(pd?._aiParsed)hdrTd.append(h("span",{style:{fontSize:"10px",fontWeight:"600",color:"var(--y)",marginLeft:"6px"}},"AI-parsed"));
     hdrTr.append(hdrTd);
     tbody.append(hdrTr);
 
@@ -1529,8 +1591,9 @@ async function commitPayslipImport(candidates){
   document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
   await commitElectedCashback(valid,created);
   valid.forEach(c=>c._status="committed");
-  // Auto-link Connectivity Reimbursement Fund to AT&T internet charge in same calendar month
+  // Auto-link Connectivity Reimbursement Fund to the Astound internet charge in the same calendar month.
   const connIndices=valid.map((c,i)=>c._source==="connectivity_reimb"?i:-1).filter(i=>i>=0);
+  const connQS=internetCreditOwnerQS();
   for(const ci of connIndices){
     if(!created[ci])continue;
     const ss=valid[ci].service_start;
@@ -1538,19 +1601,19 @@ async function commitPayslipImport(candidates){
     const lastDay=new Date(new Date(monthStart+"T12:00:00Z").setMonth(new Date(monthStart+"T12:00:00Z").getMonth()+1,0));
     const monthEnd=lastDay.toISOString().slice(0,10);
     try{
-      const [attMatches,connFresh]=await Promise.all([
-        sb(`transactions?description=ilike.*AT%26T*&service_start=eq.${monthStart}&service_end=eq.${monthEnd}&category_id=eq.utilities&amount_usd=gt.0&select=id,transaction_group_id,description&limit=1`),
+      const [internetMatches,connFresh]=await Promise.all([
+        sb(`transactions?or=(description.ilike.*Astound*,bank_description.ilike.*Astound*)&service_start=eq.${monthStart}&service_end=eq.${monthEnd}&category_id=eq.utilities&amount_usd=gt.0&select=id,transaction_group_id,description&limit=1${connQS}`),
         sb(`transactions?id=eq.${created[ci].id}&select=id,transaction_group_id&limit=1`)
       ]);
-      if(attMatches.length&&connFresh.length){
-        // Stretch service period to match AT&T's full month, then link
+      if(internetMatches.length&&connFresh.length){
+        // Stretch service period to match the internet bill's full month, then link
         const connAmt=valid[ci].amount_usd;
         const sd=daysInclusive(monthStart,monthEnd);
         await sb(`transactions?id=eq.${connFresh[0].id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({service_start:monthStart,service_end:monthEnd,service_days:sd,daily_cost:Math.round(connAmt/sd*10000)/10000})});
-        await linkToGroup(connFresh[0],attMatches[0]);
-        console.log(`Connectivity: auto-linked to "${attMatches[0].description}" (${monthStart}–${monthEnd})`);
+        await linkToGroup(connFresh[0],internetMatches[0]);
+        console.log(`Connectivity: auto-linked to "${internetMatches[0].description}" (${monthStart}–${monthEnd})`);
       }else{
-        console.log(`Connectivity: no AT&T charge found for ${monthStart}–${monthEnd}, left unlinked`);
+        console.log(`Connectivity: no Astound charge found for ${monthStart}–${monthEnd}, left unlinked`);
       }
     }catch(e){console.error("Connectivity auto-link:",e)}
   }

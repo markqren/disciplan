@@ -268,3 +268,18 @@ async function callClaude(body){
   const token=currentSession?.access_token||SB_KEY;
   return fetch(`${SB_URL}/functions/v1/ai-categorize`,{method:"POST",headers:{"Authorization":`Bearer ${token}`,"apikey":SB_KEY,"Content-Type":"application/json"},body:JSON.stringify(body)});
 }
+
+// callClaude + parse the first JSON object in the reply. Throws on HTTP or parse
+// failure so callers can surface the reason. Returns {json, usage}.
+async function callClaudeJSON(body){
+  const r=await callClaude(body);
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok){
+    const msg=typeof data.error==="string"?data.error:data.error?.message;
+    throw new Error(msg||`Claude request failed (${r.status})`);
+  }
+  const m=(data.content?.[0]?.text||"").match(/\{[\s\S]*\}/);
+  if(!m)throw new Error("Claude did not return JSON");
+  return{json:JSON.parse(m[0]),usage:data.usage||{}};
+}
+function claudeTokens(usage){return(usage?.input_tokens||0)+(usage?.output_tokens||0)}

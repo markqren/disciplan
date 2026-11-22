@@ -143,10 +143,10 @@ function detectPayslipProfile(fullText){
 // items are matched against fullText (PDF reading order) with line fallbacks.
 function parseRipplingPayslipPage(lines,fullText){
   // Pay period (the only "MM/DD/YYYY - MM/DD/YYYY" range on the stub) + pay date.
-  const pm=fullText.match(/(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/);
+  const pm=fullText.match(/(\d{1,2}\/\d{1,2}\/\d{4})\s*-\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
   if(!pm)return null;
   const ppb=convertMMDDYYYY(pm[1]),ppe=convertMMDDYYYY(pm[2]);
-  const dm=fullText.match(/PAY DATE:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const dm=fullText.match(/PAY DATE:\s*(\d{1,2}\/\d{1,2}\/\d{4})/i);
   const cd=dm?convertMMDDYYYY(dm[1]):ppe;
 
   // SUMMARY totals — single-line rows: "<Label> $current $ytd". Take current (first).
@@ -187,11 +187,12 @@ function parseRipplingPayslipPage(lines,fullText){
 async function parsePayslipPDF(file){
   const buf=await file.arrayBuffer();
   const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  const pages=[];
+  const pages=[],texts=[];
   for(let i=1;i<=pdf.numPages;i++){
     const pg=await pdf.getPage(i);
     const tc=await pg.getTextContent();
     const lines=extractLinesFromPage(tc);
+    texts.push(lines.join("\n"));
     const fullText=tc.items.map(it=>it.str).join(" ");
     const profile=detectPayslipProfile(fullText);
     const parsed=profile==="pronto"
@@ -199,7 +200,7 @@ async function parsePayslipPDF(file){
       :parsePayslipPage(lines,fullText);
     if(parsed)pages.push(parsed);
   }
-  return pages;
+  return{pages,texts};
 }
 
 async function parsePayslipXLSX(file){
@@ -208,6 +209,7 @@ async function parsePayslipXLSX(file){
   const wb=XLSX.read(buf,{type:"array"});
   const ws=wb.Sheets[wb.SheetNames[0]];
   const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
+  const texts=wb.SheetNames.map(n=>XLSX.utils.sheet_to_csv(wb.Sheets[n]));
 
   let ppb=null,ppe=null,cd=null;
   let grossPay=0,earningsTotal=0,preTaxTotal=0,employeeTaxTotal=0,postTaxTotal=0,netPay=0;
@@ -272,10 +274,89 @@ async function parsePayslipXLSX(file){
     }
   }
 
-  if(!ppb||!ppe||!cd||grossPay===0)return[];
-  return[{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,
+  if(!ppb||!ppe||!cd||grossPay===0)return{pages:[],texts};
+  return{pages:[{payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,
     grossPay,netPay,earningsTotal,employeeTaxTotal,preTaxTotal,postTaxTotal,
-    preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false}];
+    preTax401k,deferral401k,fsa,match401k,rsuOffset,connectivityReimb,isRSU,isSkip:false}],texts};
+}
+
+// Gross - taxes - deductions should equal net pay to the cent. Uses the stub's own
+// gross (not earningsTotal) so imputed income can't skew the check. RSU and zero
+// stubs are exempt.
+function payslipNetGap(p){
+  return Math.round((p.grossPay-p.employeeTaxTotal-p.preTaxTotal-p.postTaxTotal-p.netPay)*100)/100;
+}
+function payslipReconciles(p){return p.isSkip||p.isRSU||Math.abs(payslipNetGap(p))<=0.02}
+
+function payslipProfileForEmployer(name){
+  for(const[key,prof] of Object.entries(PAYSLIP_PROFILES)){
+    if(prof.employerMatch&&prof.employerMatch.test(name||""))return key;
+  }
+  return null;
+}
+
+const PAYSLIP_AI_PROMPT=`You read employee pay stubs and return the CURRENT-PERIOD numbers as JSON. Ignore YTD columns. Employer-paid contributions (company-paid insurance, etc.) are not employee deductions; the only employer amount you report is the 401(k) match.
+
+Return ONLY a JSON object: {"payslips":[{...}]} with one entry per pay stub. A stub can span pages; skip pages that are not pay stubs.
+
+Fields (plain numbers without $ or commas, 0 when absent; dates as YYYY-MM-DD):
+- employer: employer name as printed. If both a PEO / employer of record and a client company appear, include both, e.g. "Pronto.ai / TAV Employer, LP".
+- pay_period_begin, pay_period_end, pay_date
+- gross_pay: current gross pay as printed on the stub
+- employee_taxes: total employee taxes withheld
+- pre_tax_deductions: total employee pre-tax deductions (pre-tax 401(k), FSA, medical, dental, vision...)
+- post_tax_deductions: total employee post-tax deductions (Roth / after-tax 401(k), RSU gain offset...). If the stub does not split pre- vs post-tax, put all employee deductions in pre_tax_deductions and 0 here.
+- net_pay
+- pre_tax_401k: employee pre-tax 401(k) deferral
+- roth_401k: employee Roth or after-tax 401(k) deferral
+- employer_401k_match: employer / company 401(k) contribution
+- fsa: employee health FSA contribution
+- rsu_gain_offset
+- connectivity_reimbursement: internet / phone stipend earnings line
+- is_rsu_vest: true only for an RSU / stock vesting stub
+
+gross_pay - employee_taxes - pre_tax_deductions - post_tax_deductions should equal net_pay. If your numbers do not, re-read the stub; never adjust a number just to force the total.`;
+
+function aiPayslipToPage(s,profileKey){
+  const n=v=>Math.round((parseFloat(v)||0)*100)/100;
+  const iso=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||"")?v:null;
+  const ppb=iso(s.pay_period_begin),ppe=iso(s.pay_period_end),cd=iso(s.pay_date)||ppe;
+  if(!ppb||!ppe||ppb>ppe)return null;
+  const pre=n(s.pre_tax_deductions),post=n(s.post_tax_deductions);
+  const base={payPeriodBegin:ppb,payPeriodEnd:ppe,checkDate:cd,grossPay:n(s.gross_pay),netPay:n(s.net_pay),
+    earningsTotal:n(s.gross_pay),employeeTaxTotal:n(s.employee_taxes),gtl:0,
+    preTax401k:n(s.pre_tax_401k),deferral401k:n(s.roth_401k),match401k:n(s.employer_401k_match),_aiParsed:true};
+  // Pronto's transaction builder expects every employee deduction in preTaxTotal.
+  if(profileKey==="pronto")return{...base,preTaxTotal:n(pre+post),postTaxTotal:0,fsa:0,rsuOffset:0,
+    connectivityReimb:0,isRSU:false,isSkip:false,company:"Pronto"};
+  return{...base,preTaxTotal:pre,postTaxTotal:post,fsa:n(s.fsa),rsuOffset:n(s.rsu_gain_offset),
+    connectivityReimb:n(s.connectivity_reimbursement),isRSU:!!s.is_rsu_vest,
+    isSkip:!base.grossPay&&!base.employeeTaxTotal&&!pre&&!post};
+}
+
+// Claude reads the stub text only when the rule parsers find nothing or a page
+// fails the net-pay check. Rule pages that reconcile are kept; Claude's reading
+// replaces the rest. Stubs from employers without a PAYSLIP_PROFILES entry come
+// back in `unknown` so the caller can block the import.
+async function payslipAIFallback(rulePages,texts){
+  const doc=texts.map((t,i)=>`--- Page ${i+1} ---\n${t}`).join("\n\n");
+  if(doc.length>60000)throw new Error("Payslip file is too long for AI reading. Split it into smaller files.");
+  const{json,usage}=await callClaudeJSON({model:getAIModel(),max_tokens:Math.min(8000,800+500*texts.length),
+    system:PAYSLIP_AI_PROMPT,messages:[{role:"user",content:doc}]});
+  const aiPages=[],unknown=[];
+  for(const s of json.payslips||[]){
+    const key=payslipProfileForEmployer(s.employer);
+    if(!key){unknown.push(s);continue}
+    const p=aiPayslipToPage(s,key);
+    if(p)aiPages.push(p);
+  }
+  const period=p=>`${p.payPeriodBegin}|${p.payPeriodEnd}|${p.checkDate}`;
+  const good=rulePages.filter(payslipReconciles);
+  const goodKeys=new Set(good.map(p=>period(p)+"|"+p.netPay.toFixed(2)));
+  const added=aiPages.filter(p=>!goodKeys.has(period(p)+"|"+p.netPay.toFixed(2)));
+  const aiPeriods=new Set(added.map(period));
+  const stillBad=rulePages.filter(p=>!payslipReconciles(p)&&!aiPeriods.has(period(p)));
+  return{pages:[...good,...added,...stillBad],aiCount:added.length,unknown,usage};
 }
 
 function generatePayslipTransactions(pages,enteredDate){
@@ -394,7 +475,7 @@ function generatePayslipTransactions(pages,enteredDate){
           _group:grp,_source:"401k_match",_pageData:p});
       }
       if(p.connectivityReimb>0){
-        // Standalone group — will be linked to AT&T bill alone (not merged into payroll group)
+        // Standalone group — linked to the Astound internet bill, not merged into the payroll group
         txns.push({date:enteredDate,service_start:ss,service_end:se,
           description:"Connectivity Reimbursement Fund",category_id:"utilities",
           amount_usd:-p.connectivityReimb,payment_type:"Chase Chequing",

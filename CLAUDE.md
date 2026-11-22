@@ -144,6 +144,7 @@ All Disciplan tables live in the **`disciplan`** Postgres schema (Nocturnal live
 - **Cross-year view**: The "All" year tab aggregates by year. Must exclude `investment` and `financial` from expense totals to match single-year views.
 - **Tag accruals**: Tags use `daily_cost × overlap_days` not raw `amount_usd`. Overlap = intersection of [service_start, service_end] with [tag_start, tag_end].
 - **Service days**: `service_days = service_end - service_start + 1` (inclusive).
+- **Internet credits attach to Astound**: As of Nov 2026 the home internet bill is Astound, not AT&T. Payslip Connectivity Reimbursement Fund credits link to the Astound utilities charge for that month (`commitPayslipImport` and the import-side link in `js/import-review.js`). AT&T rows are the mobile bill and must not receive those credits.
 - **Group/parent labels with dates use the service period, not the posted date**: When the AI (or `generateGroupLabel`) names a linked parent and appends a date, that date is `service_start`–`service_end` (e.g. Pronto pay period Jun 16-30), never the bank posting date. Posted Oct 28 for a June paycheck must not become "Oct 16-31". See `applyServicePeriodLabel` / `fmtServiceSpan` in `js/helpers.js`.
 - **Number formatting**: Tables show full digits (right-justified, mono font). Charts use K/M abbreviations.
 - **Subcategories**: Collapsed by default with toggle arrows.

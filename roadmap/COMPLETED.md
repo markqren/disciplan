@@ -2,13 +2,14 @@
   ✅ SOURCE OF TRUTH — edit this file directly.
   After editing: run `bash scripts/build-roadmap.sh` to regenerate ROADMAP.md.
   ROADMAP.md is a generated artifact — never edit it directly.
-  Usage: grep FEA-NNN roadmap/COMPLETED.md   (134 items total)
+  Usage: grep FEA-NNN roadmap/COMPLETED.md   (135 items total)
 -->
 
 # Completed Items
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-128 | **AI fallback for payslip and CSV import** — Rule-based parsers run first. Claude is called only when they find nothing or a payslip fails the net-pay check (payslips), or when no bank layout matches or most rows do not parse (CSVs). For payslips Claude extracts the current-period numbers, which feed the existing `generatePayslipTransactions`. For CSVs it maps columns, date format and charge sign, and rows are rewritten into a known profile or a generic one. Claude output is validated (net-pay reconciliation, column existence, readable dates, USD only); unknown employers are blocked until a `PAYSLIP_PROFILES` entry with `employerMatch` exists. AI-parsed stubs are badged, and ones that do not reconcile are excluded from Approve All. | Feature → Done | Nov 22 |
 | FEA-127 | **Wells Fargo statement PDF import** — Everyday Checking (and Way2Save) PDFs parse through the existing `wells_fargo` CSV pipeline. Card bill pays are skipped and flagged when the matching `Bill Paid:` row is not in the ledger yet; checking→savings online transfers post as a linked net-$0 pair. Running-balance solver distinguishes deposits from withdrawals. | Feature → Done | Oct 20 |
 | FEA-126 | **Budget targets shared backend** — `disciplan.budget_targets` stores household-scoped `% of income` targets (seeded 2019–2026 from `BUDGET_TARGETS`). The Income Statement loads/saves via PostgREST upsert (localStorage diffs migrate once). The `daily-insight` edge function reads the same rows, derives monthly dollar ceilings from trailing-12 income rounded to `$50` for pace archetypes, adds a `BUDGET TARGETS` block to every writer prompt, and registers `insight_ro.budget_targets` for `run_finance_query`. | Feature → Done | Sep 18 |
 | FEA-125 | **Elect a ledger or import credit as cashback** — Negative-amount rows carry a **🏆 Cashback** checkbox beside Subscription (ledger) or Tag (CSV/email/payslip import edit). Ticking it writes a `cashback_redemptions` row inferred from the transaction (date, description, payment account, `\|amount\|` as Dollar Value) so the credit shows on the Cashback tab with no second income transaction; unticking (ledger) or import undo removes it. Tagged rows show a trophy. The Cashback *button* keeps its original FEA-14 meaning — mint a new cashback credit linked to a purchase — and is hidden on credits. Rakuten email cashback stays auto-elected and can be unchecked. Points/rate stay editable from the Cashback tab. | Feature → Done | Sep 1 |

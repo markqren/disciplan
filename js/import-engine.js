@@ -14,10 +14,12 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
   const baseFields={date,description:row[cols.description]||"",amount_usd:amt,currency:profile.currency||"USD",fx_rate:1,original_amount:amt,service_start:date,service_end:date,payment_type:paymentType,tag:bulkTag||"",credit:"",_rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",_rowIndex:index};
   if(profile.isCheckingAccount&&!badDate){
     if(profile.classifyRow){
-      // Profile-driven classification (Wells Fargo). Inflows use NEGATIVE amount_usd
-      // (income/credit) and outflows POSITIVE (debit), matching balance = -sum(amount_usd).
+      // Profile-driven classification (Wells Fargo, Chase checking). Inflows use
+      // NEGATIVE amount_usd (income/credit) and outflows POSITIVE (debit), matching
+      // balance = -sum(amount_usd).
       const cl=profile.classifyRow(row,rawAmt);
       if(cl){
+        if(cl._desc)baseFields.description=cl._desc;
         if(cl._skip)return{...baseFields,amount_usd:amt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:amt,_status:"skipped",_isDuplicate:false,_skipReason:cl._skip,_isBillPay:true};
         if(cl._payrollSkip){const inc=Math.round(-Math.abs(rawAmt)*100)/100;return{...baseFields,amount_usd:inc,category_id:"income",ai_confidence:"high",service_days:1,daily_cost:inc,_status:"skipped",_isDuplicate:false,_skipReason:"Payroll (payslip imported)",_isPayroll:true,_payrollAmount:Math.abs(rawAmt)};}
         if(cl._transfer){const impAmt=Math.round(-rawAmt*100)/100;return{...baseFields,amount_usd:impAmt,category_id:"financial",ai_confidence:"high",service_days:1,daily_cost:impAmt,_status:"pending",_isDuplicate:false,_skipReason:null,_isTransfer:true,_transferTo:cl._transferTo||"",_transferRaw:rawAmt};}
@@ -62,6 +64,104 @@ function transformCSVRow(row,profile,paymentType,bulkTag,index){
     _rawDescription:row[cols.description]||"",_bankCategory:row[cols.bankCategory]||"",
     _rowIndex:index,_skipReason:badDate?"Invalid date":isSkip?"CC Payment":null
   };
+}
+
+// A detected profile whose date/amount columns mostly don't parse (e.g. the bank
+// kept its headers but changed the date format) is treated as unrecognized.
+function csvMostlyUnreadable(csv,profile){
+  const c=profile.columns;
+  const ok=csv.rows.filter(r=>/^\d{1,2}\/\d{1,2}\/\d{4}$|^\d{4}-\d{2}-\d{2}$/.test((r[c.date]||"").trim())&&!isNaN(parseFloat(r[c.amount]))).length;
+  return ok<csv.rows.length/2;
+}
+
+const CSV_AI_PROMPT=`You identify the column layout of a bank or credit card CSV export so it can be imported. You get the file name, its first lines, the known layouts, and the user's account names.
+
+Return ONLY a JSON object:
+{"has_header":true,"base_profile":"generic","account_kind":"credit_card","columns":{"date":"","description":"","amount":"","debit":null,"credit":null,"type":null,"category":null},"date_format":"MDY","charges_are":"positive","currency":"USD","institution":"","account":null}
+
+Rules:
+- columns values are header names exactly as written in the first line, or null. If has_header is false, refer to columns by position as col1, col2, ...
+- date: the transaction date (prefer it over a posted date).
+- amount: a single signed amount column. If the file has separate debit/withdrawal and credit/deposit columns instead, set amount to null and fill debit and credit.
+- charges_are: the sign of purchases / withdrawals in the amount column, "positive" or "negative". Decide from the rows: refunds, card payments and deposits have the opposite sign.
+- account_kind: "credit_card" or "checking" (checking also covers savings).
+- base_profile: a known layout key only when the file is clearly the same institution and account kind with renamed or reordered columns; otherwise "generic".
+- date_format: MDY, DMY or YMD as used in the date column.
+- account: the best match from the user's account names, or null if none clearly fits.`;
+
+function csvNum(s){
+  let t=String(s??"").trim();
+  if(!t)return NaN;
+  const neg=/^\(.*\)$/.test(t)||/^-/.test(t.replace(/[$\s]/g,""))||/-$/.test(t);
+  const v=parseFloat(t.replace(/[^0-9.]/g,""));
+  return isNaN(v)?NaN:neg?-v:v;
+}
+function csvDateISO(s,fmt){
+  const t=String(s||"").trim();
+  const m=t.match(/^(\d{1,4})[\/.-](\d{1,2})[\/.-](\d{1,4})/);
+  if(m){
+    let[y,mo,d]=fmt==="YMD"?[m[1],m[2],m[3]]:fmt==="DMY"?[m[3],m[2],m[1]]:[m[3],m[1],m[2]];
+    if(y.length===2)y="20"+y;
+    if(+mo>=1&&+mo<=12&&+d>=1&&+d<=31)return`${y}-${mo.padStart(2,"0")}-${d.padStart(2,"0")}`;
+    return"";
+  }
+  const dt=new Date(t);
+  return t&&!isNaN(dt)?`${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,"0")}-${String(dt.getDate()).padStart(2,"0")}`:"";
+}
+
+// Claude maps an unrecognized CSV's columns; rows are then rewritten into a known
+// profile's column names and sign convention (so its classifyRow / payment rules
+// still apply) or into a generic profile. Claude never sees or decides amounts.
+async function aiMapCSV(text,fileName,accountNames){
+  const lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length)throw new Error("No data rows found in CSV.");
+  const known=Object.entries(BANK_PROFILES).map(([k,p])=>`${k} (${p.isCheckingAccount?"checking":"credit_card"}): ${Object.values(p.columns).filter(c=>c!=="_none_").join(", ")}`).join("\n");
+  const{json:f,usage}=await callClaudeJSON({model:getAIModel(),max_tokens:600,system:CSV_AI_PROMPT,messages:[{role:"user",content:
+    `File name: ${fileName}\n\nKnown layouts:\n${known}\n\nUser's account names: ${accountNames.join(", ")}\n\nFirst lines:\n${lines.slice(0,12).join("\n")}`}]});
+  if(f.currency&&f.currency!=="USD")throw new Error(`Claude says this CSV is in ${f.currency}; only USD imports are supported.`);
+
+  let csv=parseCSV(text);
+  if(!f.has_header){
+    const n=csv.headers.length;
+    csv=parseCSV(Array.from({length:n},(_,i)=>"col"+(i+1)).join(",")+"\n"+text);
+  }
+  const col=f.columns||{};
+  const has=k=>col[k]&&csv.headers.includes(col[k]);
+  if(!has("date")||!has("description")||!(has("amount")||has("debit")||has("credit")))
+    throw new Error("Claude could not map this CSV's date, description and amount columns.");
+
+  const base=BANK_PROFILES[f.base_profile];
+  const checking=base?!!base.isCheckingAccount:f.account_kind==="checking";
+  const profile=base?{name:f.base_profile,...base}:{name:"ai_generic",
+    columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:has("category")?"Category":"_none_",type:"_none_"},
+    transformAmount:checking?a=>Math.abs(a):a=>a,skipTypes:[],currency:"USD",isCheckingAccount:checking,
+    ...(checking?{classifyRow:(row,rawAmt)=>rawAmt>0?{_income:true}:null}
+      :{detectPayment:row=>parseFloat(row.Amount)<0&&/payment|autopay/i.test(row.Description||"")})};
+  delete profile.reparse;
+  // Raw sign of a charge in the target profile: checking rows are outflow-negative;
+  // card profiles store charges positive, so transformAmount(1)>0 means charges are raw-positive.
+  const chargeSign=checking?-1:profile.transformAmount(1)>0?1:-1;
+  const pc=profile.columns;
+  const rows=[];
+  for(const r of csv.rows){
+    let v;
+    if(has("amount"))v=csvNum(r[col.amount])*(f.charges_are==="positive"?-1:1);
+    else v=Math.abs(csvNum(r[col.credit])||0)-Math.abs(csvNum(r[col.debit])||0);
+    const date=csvDateISO(r[col.date],f.date_format);
+    if(isNaN(v)&&!date)continue;
+    const out={...r,[pc.date]:date,[pc.description]:r[col.description]||"",[pc.amount]:String(isNaN(v)?0:Math.round(v*chargeSign*-100)/100)};
+    if(pc.type!=="_none_")out[pc.type]=has("type")?r[col.type]:"";
+    if(pc.bankCategory!=="_none_")out[pc.bankCategory]=has("category")?r[col.category]:"";
+    rows.push(out);
+  }
+  if(!rows.length)throw new Error("No data rows found in CSV.");
+  const readable=rows.filter(r=>r[pc.date]).length;
+  if(readable<rows.length*0.8)throw new Error("Claude's column mapping left most dates unreadable; this CSV needs a dedicated profile.");
+
+  const label=base?`${f.base_profile} layout`:`${f.institution||"generic"} ${checking?"checking":"card"}`;
+  const signNote=has("amount")?`charges ${f.charges_are}`:"separate debit/credit columns";
+  return{csv:{headers:csv.headers,rows},profile,account:f.account||"",
+    note:`Unrecognized format \u2014 Claude mapped it as ${label} (date: ${col.date}, amount: ${has("amount")?col.amount:col.debit+"/"+col.credit}, ${signNote}, ${claudeTokens(usage).toLocaleString()} tokens). Check amounts and signs before approving.`};
 }
 
 async function findDuplicates(candidates,paymentType){
@@ -186,6 +286,7 @@ function propagateEdits(candidates,editedIndex){
     if(i===editedIndex)continue;
     const c=candidates[i];
     if(c._status!=="pending")continue;
+    if(!!c._isTransfer!==!!edited._isTransfer)continue;
     if(normalizeMerchant(c._rawDescription)===key){
       c.description=edited.description;
       c.category_id=edited.category_id;

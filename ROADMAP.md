@@ -1,12 +1,28 @@
 # Disciplan — Roadmap & Feedback Tracker
 
-**Last updated:** Nov 3, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
+**Last updated:** Nov 22, 2026 | [disciplan.netlify.app](https://disciplan.netlify.app) | Stack: index.html + js/*.js modules + Chart.js + Supabase
 
 ---
 
 
 
 ## 🚀 Releases
+
+### v3.1 — Nov 22, 2026
+
+#### v3.1.0
+<sub>Claude reads payslips and CSVs the parsers don't recognize; Chase checking import</sub>
+
+##### Features
+- **AI fallback for payslip import** — When no payslip parser matches a PDF or XLSX, or a parsed stub fails the net-pay check (gross minus taxes minus deductions equals net pay), Claude reads the stub text and returns the current-period numbers. The existing transaction builder still decides accounts and rows. Claude's stubs pass the same net-pay check, carry an AI-parsed badge in review, and are left out of Approve All when they do not reconcile. A stub from an employer with no `PAYSLIP_PROFILES` entry blocks the import and shows what Claude read. Stubs the parsers handle never call Claude. (~5,000 tokens)
+- **AI fallback for CSV import** — When no bank layout matches a CSV's headers, or the headers match but most dates or amounts do not parse, Claude maps the columns: date, description, a signed amount or separate debit/credit columns, the date format, which sign is a charge, and the account. A renamed version of a known export keeps that bank's payment, transfer and payroll rules. Invented column names and non-USD files are rejected, and the status line shows the mapping to check before approving. (~4,500 tokens)
+- **Mark's Chase checking CSV import** — Paychecks are skipped because payslips import them, and card bill payments are skipped and flagged when the card-side row is not in the ledger yet. ATM withdrawals post as a transfer to Cash, Venmo and Splitwise rows pair to those accounts, and Zelle, check deposits, PayPal and Wise transfers wait for you to pick the other account. Zelle descriptions keep the person's name and drop the confirmation code. (~6,000 tokens)
+- **Transfers and Splitwise in the import edit modal** — The CSV import edit modal has the Entry tab's Balance transfer / withdrawal checkbox with a To Account picker, so an ATM withdrawal can go to any account and a Zelle can be paired. Changing a row to a spending category turns the transfer off and shows Reimburse, so Zelle payments from Chase checking can be split on Splitwise the same way Wells Fargo rows can. Editing one row no longer copies its category onto same-merchant rows that are still transfers. (~4,000 tokens)
+
+##### Fixes
+- **Internet credits attach to Astound** — Home internet moved from AT&T to Astound in Nov 2026. The payslip Connectivity Reimbursement Fund now links to that month's Astound bill (matched on the ledger or bank description) instead of the AT&T mobile bill, in both import orders, and spreads over the bill's month. Links stay within the importing person's books. (~2,500 tokens)
+- **Shilpa's TAV Employer stubs import again** — Rippling stubs that print `TAV Employer, LP` in mixed case, with single-digit days such as `10/1/2026`, are recognized as Pronto again. (~2,000 tokens)
+- **Payslip net-pay check works for Pinterest stubs** — The review header's net-pay check always showed ✓ for Pinterest stubs because it subtracted a GTL value the parser no longer returns. It now checks the stub's own gross pay. (~500 tokens)
 
 ### v3.0 — Oct 25, 2026
 
@@ -941,12 +957,13 @@
 ---
 
 <details>
-<summary><strong>✅ Completed</strong> (171 items)</summary>
+<summary><strong>✅ Completed</strong> (172 items)</summary>
 
 
 
 | ID | Item | Type | Completed |
 |----|------|------|-----------|
+| FEA-128 | **AI fallback for payslip and CSV import** — Rule-based parsers run first. Claude is called only when they find nothing or a payslip fails the net-pay check (payslips), or when no bank layout matches or most rows do not parse (CSVs). For payslips Claude extracts the current-period numbers, which feed the existing `generatePayslipTransactions`. For CSVs it maps columns, date format and charge sign, and rows are rewritten into a known profile or a generic one. Claude output is validated (net-pay reconciliation, column existence, readable dates, USD only); unknown employers are blocked until a `PAYSLIP_PROFILES` entry with `employerMatch` exists. AI-parsed stubs are badged, and ones that do not reconcile are excluded from Approve All. | Feature → Done | Nov 22 |
 | FEA-127 | **Wells Fargo statement PDF import** — Everyday Checking (and Way2Save) PDFs parse through the existing `wells_fargo` CSV pipeline. Card bill pays are skipped and flagged when the matching `Bill Paid:` row is not in the ledger yet; checking→savings online transfers post as a linked net-$0 pair. Running-balance solver distinguishes deposits from withdrawals. | Feature → Done | Oct 20 |
 | FEA-126 | **Budget targets shared backend** — `disciplan.budget_targets` stores household-scoped `% of income` targets (seeded 2019–2026 from `BUDGET_TARGETS`). The Income Statement loads/saves via PostgREST upsert (localStorage diffs migrate once). The `daily-insight` edge function reads the same rows, derives monthly dollar ceilings from trailing-12 income rounded to `$50` for pace archetypes, adds a `BUDGET TARGETS` block to every writer prompt, and registers `insight_ro.budget_targets` for `run_finance_query`. | Feature → Done | Sep 18 |
 | FEA-125 | **Elect a ledger or import credit as cashback** — Negative-amount rows carry a **🏆 Cashback** checkbox beside Subscription (ledger) or Tag (CSV/email/payslip import edit). Ticking it writes a `cashback_redemptions` row inferred from the transaction (date, description, payment account, `\|amount\|` as Dollar Value) so the credit shows on the Cashback tab with no second income transaction; unticking (ledger) or import undo removes it. Tagged rows show a trophy. The Cashback *button* keeps its original FEA-14 meaning — mint a new cashback credit linked to a purchase — and is hidden on credits. Rakuten email cashback stays auto-elected and can be unchecked. Points/rate stay editable from the Cashback tab. | Feature → Done | Sep 1 |

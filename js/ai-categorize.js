@@ -170,24 +170,17 @@ Rules:
 - confidence: high = historical match or obvious merchant, medium = reasonable guess from bank category + description, low = ambiguous
 ${isCheckingAccount?`
 CHECKING ACCOUNT CONTEXT:
-These are from a Chase checking account (mixed debits/credits). No bank category available — categorize entirely from description.
-- Zelle payments TO someone: "personal" (person-to-person transfer). Desc: "Zelle to [Name]"
-- Zelle payments FROM someone: "income". Desc: "Zelle from [Name]"
-- Venmo payments/cashouts: "personal". Desc: "Venmo Payment" or "Venmo Cashout"
-- ATM withdrawals: "financial". Desc: "ATM Withdrawal"
+These are purchases and other credits left after paychecks, card bill payments, ATM cash, Zelle, Venmo, Splitwise, PayPal transfers, and Wise were classified separately. No bank category is available — categorize from the description.
 - PGANDE / PG&E: "utilities". Desc: "PG&E"
 - IRS USATAXPYMT: "financial". Desc: "IRS Tax Payment"
 - CA DMV: "financial". Desc: "CA DMV"
-- Wise transfers: "financial". Desc: "Wise Transfer"
-- SPLITWISE PAYMENT: "personal". Desc: "Splitwise Payment"
-- PayPal TRANSFER: "income". Desc: "PayPal Transfer"
-- Google/Pinterest PAYROLL: "income". Desc: "Google Payroll" or "Pinterest Payroll"
 - FRANCHISE TAX BD CASTTAXRFD: "income". Desc: "CA State Tax Refund"
 - HEALTHEQUITY: "income". Desc: "HSA Reimbursement"
 - COSTCO debit card purchases: "groceries". Desc: "Groceries - Costco"
-- BILLPAY to specific vendors: categorize by vendor (e.g. Ashley Bond -> personal)
-- Credit returns (MISC_CREDIT): categorize by what the credit is for
-- Debit card purchases: categorize by merchant name`:""}
+- BILLPAY to a vendor: categorize by the vendor (Ashley Bond -> personal)
+- Credit returns: categorize by what the credit is for
+- Debit card purchases: categorize by merchant name
+- A PayPal payment to a person is an expense, not a transfer`:""}
 ${profileName==="bilt"||profileName==="bilt_legacy"?`
 BILT CREDIT CARD CONTEXT:
 These are from a Bilt credit card. Descriptions may be ALL CAPS (legacy format). Key merchant mappings based on user's history:
@@ -212,7 +205,8 @@ Return ONLY the JSON array, no other text.`;
   // downloads at ~1000 rows and an onboard can span several files; ~1,500 rows
   // can never fit in one response, which silently truncated the JSON and failed
   // the whole import. 40 rows/call, 4 calls in parallel, results merged by index.
-  const all=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}));
+  const all=candidates.map((c,i)=>({index:i,description:c._rawDescription,amount:c.amount_usd,bankCategory:c._bankCategory}))
+    .filter(item=>{const c=candidates[item.index];return c._status!=="skipped"&&!c._isTransfer&&!c._isCCPayment&&!c._isBillPay&&!c._isPayroll&&!c._isRent});
   const BATCH=40,CONC=4;
   const batches=[];for(let i=0;i<all.length;i+=BATCH)batches.push(all.slice(i,i+BATCH));
   const out=[];let anyOk=false,authFail=false,done=0;

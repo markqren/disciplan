@@ -294,7 +294,7 @@ function renderEntry(el,opts){
     const isPdf=/\.pdf$/i.test(file.name)||file.type==="application/pdf";
     impStatus.textContent=isPdf?"Parsing PDF...":"Parsing CSV...";
     try{
-      let csv,profile,acctGuess="";
+      let csv,profile,acctGuess="",aiAcct="",csvAINote="";
       if(isPdf){
         const parsed=await parseWellsFargoStatementPDF(file);
         csv={headers:["DATE","DESCRIPTION","AMOUNT","CHECK #","STATUS"],rows:parsed.rows};
@@ -303,15 +303,22 @@ function renderEntry(el,opts){
       }else{
         const text=await file.text();
         csv=parseCSV(text);
-        if(!csv.rows.length)throw new Error("No data rows found in CSV.");
         profile=detectBankProfile(csv.headers);
-        if(!profile)throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo");
-        if(profile.reparse)csv=profile.reparse(text);
+        if(profile?.reparse)csv=profile.reparse(text);
+        if(profile&&csv.rows.length&&csvMostlyUnreadable(csv,profile))profile=null;
+        if(!profile){
+          if(!aiAvailable())throw new Error("Unrecognized bank format. Supported: Chase CC, Chase Chequing, AMEX, Bilt, Wells Fargo. Sign in or add an API key so AI can map other formats.");
+          impStatus.textContent="Unrecognized format \u2014 asking Claude to map the columns...";
+          const mapped=await aiMapCSV(text,file.name,[...impPtSel.options].map(o=>o.value).filter(Boolean));
+          csv=mapped.csv;profile=mapped.profile;aiAcct=mapped.account;csvAINote=mapped.note;
+        }
+        if(!csv.rows.length)throw new Error("No data rows found in CSV.");
         if(profile.name==="chase_checking")acctGuess="Chase Chequing";
         else if(profile.name==="chase")acctGuess="Chase Sapphire";
         else if(profile.name==="amex")acctGuess="AMEX Rose Gold";
         else if(profile.name==="bilt"||profile.name==="bilt_legacy")acctGuess="Bilt";
         else if(profile.name==="wells_fargo")acctGuess=/sav/i.test(file.name)?"Wells Fargo Savings":"Wells Fargo Checking";
+        if(aiAcct)acctGuess=aiAcct;
       }
 
       // Auto-detect payment type from filename / PDF account (only if user hasn't
@@ -342,6 +349,7 @@ function renderEntry(el,opts){
       const pending=candidates.filter(c=>c._status==="pending").length;
       if(!pending)impStatus.textContent="All transactions are duplicates or skipped.";
       else impStatus.textContent=aiResults?"AI categorization complete.":"Using default categories (no AI key).";
+      if(csvAINote){impStatus.textContent+=" \u00b7 "+csvAINote;impStatus.style.color="var(--y)"}
       await acctLabelsReady();
       renderReviewTable(impReview,candidates);
       impCandidates=candidates;
@@ -473,19 +481,37 @@ function renderEntry(el,opts){
     psStatus.style.color="rgba(255,255,255,0.4)";
     psStatus.textContent=ext==="xlsx"?"Parsing XLSX...":"Parsing PDF...";
     try{
-      let pages;
+      let parsed;
       if(ext==="xlsx"){
-        pages=await parsePayslipXLSX(file);
+        parsed=await parsePayslipXLSX(file);
       }else{
         if(!window.pdfjsLib)throw new Error("PDF parser not available. Reload the page.");
-        pages=await parsePayslipPDF(file);
+        parsed=await parsePayslipPDF(file);
       }
-      if(!pages.length)throw new Error("No payslip data found. Is this a supported payslip (Pinterest or Pronto/Rippling)?");
+      let pages=parsed.pages,aiNote="";
+      if((!pages.length||!pages.every(payslipReconciles))&&aiAvailable()){
+        psStatus.textContent="Format not recognized \u2014 asking Claude to read the payslip...";
+        try{
+          const fb=await payslipAIFallback(pages,parsed.texts);
+          if(fb.unknown.length){
+            const seen=fb.unknown.map(s=>`${s.employer||"Unknown employer"} ${s.pay_period_begin||"?"} to ${s.pay_period_end||"?"} (gross ${fmtF(parseFloat(s.gross_pay)||0)}, net ${fmtF(parseFloat(s.net_pay)||0)})`);
+            throw new Error(`Claude read ${seen.join("; ")}, but there is no account mapping for this employer yet. Add it to PAYSLIP_PROFILES before importing.`);
+          }
+          pages=fb.pages;
+          if(fb.aiCount)aiNote=` \u00b7 ${fb.aiCount} read by AI (${claudeTokens(fb.usage).toLocaleString()} tokens)`;
+        }catch(e){
+          if(!pages.length||/PAYSLIP_PROFILES/.test(e.message))throw e;
+          console.warn("Payslip AI fallback failed:",e);
+          aiNote=` \u00b7 AI fallback failed: ${e.message}`;
+        }
+      }
+      if(!pages.length)throw new Error("No payslip data found. Is this a supported payslip (Pinterest or Pronto/Rippling)?"+(aiAvailable()?"":" Sign in or add an API key so AI can read other formats."));
+      pages.forEach(p=>{p._needsReview=!payslipReconciles(p)});
 
       const active=pages.filter(p=>!p.isSkip);
       psSkippedPages=pages.filter(p=>p.isSkip);
 
-      psStatus.textContent=`Found ${pages.length} payslip pages (${active.length} active, ${psSkippedPages.length} skipped)...`;
+      psStatus.textContent=`Found ${pages.length} payslip pages (${active.length} active, ${psSkippedPages.length} skipped)${aiNote}...`;
 
       const enteredDate=psDateInp.value||today();
       const txns=generatePayslipTransactions(pages,enteredDate);
@@ -508,7 +534,7 @@ function renderEntry(el,opts){
       for(const[pt,group] of Object.entries(ptGroups)){await findDuplicates(group,pt)}
 
       const dupes=txns.filter(c=>c._isDuplicate).length;
-      psStatus.textContent=`${txns.length} transactions generated \u00b7 ${dupes} duplicates`;
+      psStatus.textContent=`${txns.length} transactions generated \u00b7 ${dupes} duplicates${aiNote}`;
 
       renderPayslipReviewTable(psReview,txns,psSkippedPages);
       psCandidates=txns;
