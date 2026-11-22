@@ -261,7 +261,7 @@ function renderReviewTable(container,candidates){
           xferPairHint.style.color=c._transferTo?"rgba(255,255,255,0.3)":"var(--y)";
         }
       }});
-      fillPtSelect(xferSel,{selected:c._transferTo||null});
+      fillPtSelect(xferSel,{selected:c._transferTo||null,keep:["Cash","Venmo","Splitwise"]});
       if(!c._transferTo){xferSel.insertBefore(h("option",{value:"",selected:true},"\u2014 pick account \u2014"),xferSel.firstChild);xferSel.value=""}
       catTd.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)",marginRight:"4px"}},"\u2194"));
       catTd.append(xferSel);
@@ -366,7 +366,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
   }});
   function fillTo(){
     const cur=mTo.value||c._transferTo||"";
-    fillPtSelect(mTo,{selected:cur||null,keep:["Transfer"]});
+    fillPtSelect(mTo,{selected:cur||null,keep:["Cash","Venmo","Splitwise","Transfer"]});
     mTo.insertBefore(h("option",{value:""},"\u2014 pick account \u2014"),mTo.firstChild);
     mTo.value=cur;
   }

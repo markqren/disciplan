@@ -11,6 +11,12 @@
 
 ### v3.1 — Nov 22, 2026
 
+#### v3.1.3
+<sub>Shilpa's ATM withdrawals can go to her own Cash account</sub>
+
+##### Fixes
+- **Shilpa has Cash and Venmo accounts** — Her account list had Splitwise but not Cash or Venmo, so a Wells Fargo ATM withdrawal's transfer picker could not offer Cash. She now has her own Cash and Venmo accounts, and the import transfer picker keeps Cash, Venmo, and Splitwise even before those accounts load. An ATM withdrawal in a CSV Claude has to map is a transfer to Cash, and an ATM fee stays an expense. (~2,500 tokens)
+
 #### v3.1.2
 <sub>Zelles between household members link themselves on import</sub>
 

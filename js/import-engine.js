@@ -135,7 +135,11 @@ async function aiMapCSV(text,fileName,accountNames){
   const profile=base?{name:f.base_profile,...base}:{name:"ai_generic",
     columns:{date:"Date",description:"Description",amount:"Amount",bankCategory:has("category")?"Category":"_none_",type:"_none_"},
     transformAmount:checking?a=>Math.abs(a):a=>a,skipTypes:[],currency:"USD",isCheckingAccount:checking,
-    ...(checking?{classifyRow:(row,rawAmt)=>rawAmt>0?{_income:true}:null}
+    ...(checking?{classifyRow:(row,rawAmt)=>{
+      const d=(row.Description||"").toUpperCase();
+      if(/ATM WITHDRAW/.test(d)&&!/FEE/.test(d))return{_transfer:true,_transferTo:"Cash",_desc:"ATM Withdrawal"};
+      return rawAmt>0?{_income:true}:null;
+    }}
       :{detectPayment:row=>parseFloat(row.Amount)<0&&/payment|autopay/i.test(row.Description||"")})};
   delete profile.reparse;
   // Raw sign of a charge in the target profile: checking rows are outflow-negative;
