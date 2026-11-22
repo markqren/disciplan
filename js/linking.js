@@ -649,6 +649,28 @@ async function linkAcceptedSharedToSource(sourceTxnId,newTxn){
   }catch(e){console.warn("Shared txn parent link failed:",e)}
 }
 
+// Approve a pending household share: claim it (so the inbox and an import can't
+// both add it), insert it into my ledger, and join it to the source's group.
+// Returns the new transaction id, or null if it was already resolved.
+async function approveSharedTxn(r){
+  const claimed=await sb(`pending_shared_txns?id=eq.${r.id}&status=eq.pending`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({status:"approved",resolved_at:new Date().toISOString()})});
+  if(!claimed||!claimed.length)return null;
+  let newId=null;
+  try{
+    const ins=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(r.proposed_txn||{})});
+    newId=ins&&ins[0]&&ins[0].id;
+  }catch(e){
+    await sb(`pending_shared_txns?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({status:"pending",resolved_at:null})}).catch(()=>{});
+    throw e;
+  }
+  if(newId)await linkAcceptedSharedToSource(r.source_txn_id,{id:newId,transaction_group_id:null});
+  // If this share was also pushed to Splitwise, pre-register the shared expense
+  // as imported so my own Splitwise sync won't re-import it.
+  if(r.sw_expense_id){try{await swRegisterImported(r.sw_expense_id,newId||null)}catch(e){console.warn("Splitwise dedup register failed:",e)}}
+  dcInvalidateTxns();state.txnCount++;
+  return newId;
+}
+
 // Inbox: surface pending shared transactions addressed to the signed-in user.
 async function checkPendingSharedTxns(){
   if(currentOwner==null)return;
@@ -698,14 +720,8 @@ function showSharedTxnApprovalModal(rows){
       const approve=h("button",{class:"btn",style:{background:"rgba(129,178,154,0.2)",color:"var(--g)",padding:"8px 16px",width:"auto"},onClick:async()=>{
         approve.disabled=true;approve.textContent="Adding...";
         try{
-          const ins=await sb("transactions",{method:"POST",headers:{"Prefer":"return=representation"},body:JSON.stringify(p)});
-          const newId=ins&&ins[0]&&ins[0].id;
-          if(newId)await linkAcceptedSharedToSource(r.source_txn_id,{id:newId,transaction_group_id:null});
-          await sb(`pending_shared_txns?id=eq.${r.id}`,{method:"PATCH",headers:{"Prefer":"return=minimal"},body:JSON.stringify({status:"approved",resolved_at:new Date().toISOString()})});
-          // If this reimbursement was also pushed to Splitwise, pre-register the
-          // shared expense as imported so my own Splitwise sync won't re-import it.
-          if(r.sw_expense_id){try{await swRegisterImported(r.sw_expense_id,newId||null)}catch(e){console.warn("Splitwise dedup register failed:",e)}}
-          r.status="approved";dcInvalidateTxns();state.txnCount++;
+          await approveSharedTxn(r);
+          r.status="approved";
           document.getElementById("dbStatus").textContent=`\u25CF ${state.txnCount.toLocaleString()} txns`;
           renderRows();
         }catch(e){err.textContent="Failed: "+e.message;approve.disabled=false;approve.textContent="Approve"}

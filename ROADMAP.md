@@ -10,6 +10,15 @@
 
 ### v3.1 — Nov 22, 2026
 
+#### v3.1.2
+<sub>Zelles between household members link themselves on import</sub>
+
+##### Features
+- **Household Zelles link on import** — A Zelle that names the other household member matches their opposite Zelle (same amount, within 4 days) and joins its group, so the bank row, the Splitwise reimbursement and the other person's share are one movement. If that share is still waiting in the shared-transactions banner, saving the import approves it. If neither side split it, the row becomes a transfer against Splitwise. A Zelle whose bank row is already in the group is skipped, and Zelles to other people are left alone. Review rows say who they pair with. (~4,500 tokens)
+
+##### Fixes
+- **Import links merge whole groups** — A link set in the import edit modal now joins both groups, so a transfer's other half follows the imported row instead of staying in its own group. (~500 tokens)
+
 #### v3.1.1
 <sub>Picking Splitwise on an import transfer opens the split form</sub>
 

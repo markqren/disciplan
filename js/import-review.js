@@ -218,6 +218,11 @@ function renderReviewTable(container,candidates){
       const hint=h("div",{style:{fontSize:"10px",color:"var(--g)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},reimburseHint(c._reimburse));
       descTd.append(hint);
     }
+    if(c._hhZelle&&c._linkToTransactionId){
+      const z=c._hhZelle;
+      descTd.append(h("div",{style:{fontSize:"10px",color:"var(--g)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+        `Pairs with ${z.who.split(" ")[0]}'s Zelle \u00b7 ${fmtD(z.date)}${c._hhSharedTxn?" \u00b7 adds your Splitwise share":z.share?" \u00b7 Splitwise share already in":""}`));
+    }
     tr.append(descTd);
 
     tr.append(h("td",{class:"r m",style:{color:c.amount_usd<0?"var(--g)":"rgba(255,255,255,0.75)"}},fmtF(c.amount_usd)));
@@ -853,12 +858,18 @@ async function commitImport(candidates){
     const c=valid[i];
     if(!c._linkToTransactionId)continue;
     const ins=inserted[i];if(!ins||!ins.id)continue;
-    const targetGroup=c._linkToGroupId||Math.min(ins.id,c._linkToTransactionId);
-    await sb(`transactions?id=eq.${ins.id}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
-    if(!c._linkToGroupId){
-      await sb(`transactions?id=eq.${c._linkToTransactionId}`,{method:"PATCH",headers:{"Prefer":"return=representation"},body:JSON.stringify({transaction_group_id:targetGroup})});
-    }
+    // linkToGroup merges groups, so a transfer's counter leg follows its row.
+    await linkToGroup(ins,{id:c._linkToTransactionId,transaction_group_id:c._linkToGroupId||null});
   }
+  // A household Zelle whose Splitwise leg is a pending share: approve it now.
+  let sharesApproved=0;
+  for(let i=0;i<valid.length;i++){
+    const c=valid[i];
+    if(!c._hhSharedTxn||!c._linkToTransactionId||!inserted[i]?.id)continue;
+    try{if(await approveSharedTxn(c._hhSharedTxn))sharesApproved++}
+    catch(e){console.error("Household share approve failed:",e)}
+  }
+  if(sharesApproved&&typeof checkPendingSharedTxns==="function")checkPendingSharedTxns();
   // Apply staged-to-staged links
   const stagedLinked=new Set();
   for(let i=0;i<valid.length;i++){

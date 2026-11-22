@@ -343,6 +343,7 @@ function renderEntry(el,opts){
       // Duplicate detection
       impStatus.textContent="Checking for duplicates...";
       await findDuplicates(candidates,pt);
+      await findHouseholdZelleMatches(candidates);
       await findTransferPairs(candidates);
       await findCCImportMatches(candidates);
 

@@ -202,6 +202,75 @@ async function findTransferPairs(candidates){
   }
 }
 
+// A Zelle between household members is one movement seen from both ledgers.
+// Each imported Zelle naming another member is matched to that member's
+// opposite-signed Zelle (same amount, within 4 days) and joins its linked group.
+// If the group already holds a share addressed to the importer (approved, or
+// pending in the shared-transactions inbox), that share is the Splitwise leg:
+// the import posts only the cash leg and approves a pending share at commit.
+// Otherwise the row is a transfer against Splitwise when the other side used
+// Splitwise, or waits for an account pick.
+async function findHouseholdZelleMatches(candidates){
+  if(currentHousehold==null||!householdMembers||householdMembers.length<2)return;
+  const me=typeof writeOwner==="function"?writeOwner():currentOwner;
+  const others=householdMembers.filter(m=>m.owner!==me);
+  if(me==null||!others.length)return;
+  const zelles=candidates.filter(c=>c._status==="pending"&&!c._isDuplicate&&c.amount_usd&&/zelle/i.test(c._rawDescription||""));
+  if(!zelles.length)return;
+  const toD=s=>new Date(s+"T00:00:00");
+  const shift=(s,n)=>{const d=toD(s);d.setDate(d.getDate()+n);return d.toISOString().slice(0,10)};
+  const dayDiff=(a,b)=>Math.abs((toD(a)-toD(b))/864e5);
+  const names=c=>((c._rawDescription||"")+" "+(c.description||"")).toLowerCase();
+  const memberNamed=(c,owner)=>{
+    const m=others.find(x=>x.owner===owner);if(!m)return false;
+    const first=(m.display_name||"").split(/\s+/)[0].toLowerCase();
+    const t=names(c);
+    return (first&&t.includes(first))||t.includes(m.owner.toLowerCase());
+  };
+  const dates=zelles.map(c=>c.date).sort();
+  let theirs=[];
+  try{
+    theirs=await sb(`transactions?household_id=eq.${currentHousehold}&owner=in.(${others.map(m=>encodeURIComponent(m.owner)).join(",")})&date=gte.${shift(dates[0],-4)}&date=lte.${shift(dates[dates.length-1],4)}&payment_type=neq.Splitwise&or=(description.ilike.*zelle*,bank_description.ilike.*zelle*)&select=id,owner,date,description,amount_usd,payment_type,transaction_group_id`);
+  }catch(e){return}
+  const used=new Set(),matches=[];
+  for(const c of zelles){
+    const hits=theirs.filter(t=>!used.has(t.id)&&Math.abs(parseFloat(t.amount_usd)+c.amount_usd)<0.02&&dayDiff(t.date,c.date)<=4&&memberNamed(c,t.owner));
+    if(!hits.length)continue;
+    hits.sort((a,b)=>dayDiff(a.date,c.date)-dayDiff(b.date,c.date));
+    used.add(hits[0].id);matches.push({c,hit:hits[0]});
+  }
+  if(!matches.length)return;
+  const gids=[...new Set(matches.map(x=>x.hit.transaction_group_id).filter(Boolean))];
+  let members=[],pending=[];
+  if(gids.length){try{members=await sb(`transactions?transaction_group_id=in.(${gids.join(",")})&select=id,owner,payment_type,amount_usd,transaction_group_id`)}catch(e){}}
+  const srcIds=[...new Set([...members.map(r=>r.id),...matches.map(x=>x.hit.id)])];
+  try{pending=await sb(`pending_shared_txns?to_owner=eq.${encodeURIComponent(me)}&status=eq.pending&source_txn_id=in.(${srcIds.join(",")})`)}catch(e){}
+  for(const{c,hit}of matches){
+    const g=hit.transaction_group_id;
+    const group=g?members.filter(r=>r.transaction_group_id===g):[];
+    const who=(others.find(m=>m.owner===hit.owner)||{}).display_name||hit.owner;
+    if(group.some(r=>r.owner===me&&r.payment_type===c.payment_type&&Math.abs(Math.abs(parseFloat(r.amount_usd))-Math.abs(c.amount_usd))<0.02)){
+      c._isDuplicate=true;c._status="skipped";c._skipReason=`Zelle already linked to ${who}'s side`;continue;
+    }
+    const ids=new Set([hit.id,...group.map(r=>r.id)]);
+    const share=group.find(r=>r.owner===me&&r.payment_type==="Splitwise");
+    const pend=pending.find(p=>ids.has(p.source_txn_id));
+    c.category_id="financial";c.ai_confidence="high";
+    c.service_start=c.service_end=c.date;c.service_days=1;c.daily_cost=c.amount_usd;
+    c._linkToTransactionId=hit.id;c._linkToGroupId=g||null;
+    c._linkDisplay={description:hit.description,date:hit.date,amount_usd:parseFloat(hit.amount_usd),category_id:"financial",payment_type:hit.payment_type};
+    c._hhZelle={who,date:hit.date,share:!!(share||pend)};
+    if(share||pend){
+      c._isTransfer=false;delete c._transferTo;
+      if(pend)c._hhSharedTxn=pend;
+    }else{
+      c._isTransfer=true;c._transferRaw=-c.amount_usd;
+      if(group.some(r=>r.owner!==me&&r.payment_type==="Splitwise"))c._transferTo="Splitwise";
+      else if(!c._transferTo)c._transferTo="";
+    }
+  }
+}
+
 // Checking-account CC bill pays are skipped (the card import owns them). If a
 // matching "Bill Paid: <card>" (or checking-side "… Bill Payment") is not in the
 // ledger yet, flag the skipped row so the reviewer knows to import the card.
