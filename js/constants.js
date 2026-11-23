@@ -121,6 +121,7 @@ const BANK_PROFILES={chase:{detect:hd=>hd.includes("Transaction Date")&&hd.inclu
       }else desc="Zelle";
     }
     else if(t==="CHECK_DEPOSIT"||/REMOTE ONLINE DEPOSIT/.test(u)){to="";desc="Check Deposit"}
+    else if(/PAYPAL/.test(u)&&(/RAKUTEN/.test(u)||(/TRANSFER|INST XFER/.test(u)&&!/PURCHASE/.test(u)&&rawAmt>0))){to="Rakuten";desc="Rakuten Payout"}
     else if(/PAYPAL\s+TRANSFER/.test(u)){to="";desc="PayPal Transfer"}
     else if(/WISE INC/.test(u)||(/REAL TIME TRANSFER/.test(u)&&/WISE/.test(u))){to="";desc="Wise Transfer"}
     if(to!==null)return{_transfer:true,_transferTo:to,_desc:desc};
@@ -145,9 +146,10 @@ wells_fargo:{detect:hd=>hd.includes("DESCRIPTION")&&hd.includes("AMOUNT")&&hd.in
     else if(/SCHWAB BROKERAGE/.test(d))to="Charles Schwab";
     else if(/VENMO\s+(PAYMENT|CASHOUT)/.test(d))to="Venmo";
     else if(/SPLITWISE/.test(d))to="Splitwise";
+    else if(/PAYPAL/.test(d)&&!/PURCHASE/.test(d)&&(/RAKUTEN/.test(d)||(/TRANSFER|INST XFER/.test(d)&&rawAmt>0)))to="Rakuten";
     else if(/MORGAN STANLEY/.test(d))to=""; // unknown investment account — user picks
     else if(/WIRE TRANS|^WT \d/.test(d))to=""; // user picks counter-account
-    if(to!==null)return{_transfer:true,_transferTo:to};
+    if(to!==null)return{_transfer:true,_transferTo:to,_desc:to==="Rakuten"?"Rakuten Payout":null};
     // Income deposits (Google payroll, interest, IRS tax refund).
     if(/GOOGLE LLC\s+PAYROLL|INTEREST PAYMENT|IRS\s+TREAS.*TAX REF/.test(d))return{_income:true};
     // Zelle (either direction) — parked in "other" until per-payment context is added.

@@ -132,7 +132,7 @@ function flowAccountSelect(c,container,candidates,selStyle){
     }
     renderReviewTable(container,candidates);
   }});
-  fillPtSelect(sel,{selected:c._transferTo||null,keep:["Cash","Venmo","Splitwise"]});
+  fillPtSelect(sel,{selected:c._transferTo||null,keep:["Cash","Venmo","Splitwise","Rakuten"]});
   sel.insertBefore(h("option",{value:""},"\u2014 to account \u2014"),sel.firstChild);
   sel.value=c._transferTo||"";
   return sel;
@@ -173,6 +173,7 @@ function renderReviewTable(container,candidates){
       return alert("Pick the checking account used for each approved credit-card payment.");
     }
     saving=true;saveBtn.disabled=true;
+    if(!await confirmRebalanceBackdating(candidates)){saving=false;saveBtn.disabled=false;return}
     const proceed=await confirmRentSplits(candidates);
     if(!proceed){saving=false;saveBtn.disabled=false;saveBtn.textContent="Save Approved";return}
     const swProceed=await confirmSplitwisePushes(candidates);
@@ -258,9 +259,11 @@ function renderReviewTable(container,candidates){
         `Pairs with ${z.who.split(" ")[0]}'s Zelle \u00b7 ${fmtD(z.date)}${c._hhSharedTxn?" \u00b7 adds your Splitwise share":z.share?" \u00b7 Splitwise share already in":""}`));
     }
     if(c._isTransfer){
-      const outAmt=Math.abs(parseFloat(c.amount_usd)||0);
-      descTd.append(h("div",{style:{fontSize:"10px",color:c._transferTo?"var(--g)":"var(--y)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
-        c._transferTo?`Out ${fmtF(outAmt)} \u2192 ${c._transferTo}`:`Out ${fmtF(outAmt)} \u2192 pick account`));
+      const flowAmt=parseFloat(c.amount_usd)||0;
+      const mag=fmtF(Math.abs(flowAmt));
+      const dest=c._transferTo;
+      descTd.append(h("div",{style:{fontSize:"10px",color:dest?"var(--g)":"var(--y)",marginTop:"1px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},
+        flowAmt<0?(dest?`In ${mag} \u2190 ${dest}`:`In ${mag} \u2190 pick account`):(dest?`Out ${mag} \u2192 ${dest}`:`Out ${mag} \u2192 pick account`)));
     }
     tr.append(descTd);
 
@@ -300,7 +303,7 @@ function renderReviewTable(container,candidates){
           xferPairHint.style.color=c._transferTo?"rgba(255,255,255,0.3)":"var(--y)";
         }
       }});
-      fillPtSelect(xferSel,{selected:c._transferTo||null,keep:["Cash","Venmo","Splitwise"]});
+      fillPtSelect(xferSel,{selected:c._transferTo||null,keep:["Cash","Venmo","Splitwise","Rakuten"]});
       if(!c._transferTo){xferSel.insertBefore(h("option",{value:"",selected:true},"\u2014 pick account \u2014"),xferSel.firstChild);xferSel.value=""}
       catTd.append(h("span",{style:{fontSize:"11px",color:"rgba(255,255,255,0.35)",marginRight:"4px"}},"\u2194"));
       catTd.append(xferSel);
@@ -310,7 +313,7 @@ function renderReviewTable(container,candidates){
     const catSel2=h("select",{style:selStyle,onChange:e=>{
       c.category_id=e.target.value;
       if(c.category_id==="financial"&&!c._isTransfer){
-        const to=flowDestination((c._rawDescription||"")+" "+(c.description||""));
+        const to=flowDestination((c._rawDescription||"")+" "+(c.description||""),c.amount_usd);
         if(to){c._isTransfer=true;c._transferTo=to;c._transferRaw=-(parseFloat(c.amount_usd)||0);c.service_start=c.service_end=c.date}
       }
       if(c.category_id!=="financial"){c._isTransfer=false;delete c._transferTo;delete c._transferRaw}
@@ -412,7 +415,7 @@ function openImportEditModal(candidates,idx,reviewContainer){
   }});
   function fillTo(){
     const cur=mTo.value||c._transferTo||"";
-    fillPtSelect(mTo,{selected:cur||null,keep:["Cash","Venmo","Splitwise","Transfer"]});
+    fillPtSelect(mTo,{selected:cur||null,keep:["Cash","Venmo","Splitwise","Rakuten","Transfer"]});
     mTo.insertBefore(h("option",{value:""},"\u2014 pick account \u2014"),mTo.firstChild);
     mTo.value=cur;
   }
@@ -806,11 +809,34 @@ function showSplitwiseImportResult(summary){
 
 // Internet-credit links stay inside the books the import writes to, so one
 // member's Connectivity credit never groups with another member's bill.
-function internetCreditOwnerQS(){
-  const o=typeof writeOwner==="function"?writeOwner():currentOwner;
-  let qs=currentHousehold!=null?`&household_id=eq.${currentHousehold}`:"";
-  if(o!=null)qs+=`&owner=eq.${encodeURIComponent(o)}`;
-  return qs;
+function internetCreditOwnerQS(){return writeOwnerQS()}
+
+// A balance adjustment trues an account up to its statement as of the adjustment
+// date, so a row dated on or before it is already inside that balance. Saving one
+// moves the account off the statement; confirm first. Resolves true to save.
+async function confirmRebalanceBackdating(candidates){
+  const rows=[];
+  for(const c of candidates){
+    if(c._status!=="approved"||!c.date)continue;
+    if(c.payment_type)rows.push({pt:c.payment_type,date:c.date,amt:+c.amount_usd||0});
+    if(c._isTransfer&&c._transferTo)rows.push({pt:c._transferTo,date:c.date,amt:-(+c.amount_usd||0)});
+  }
+  if(!rows.length)return true;
+  const accts=[...new Set(rows.map(r=>r.pt))];
+  let adjs;
+  try{adjs=await sb(`transactions?category_id=eq.adjustment&payment_type=in.(${accts.map(a=>encodeURIComponent(`"${a}"`)).join(",")})&select=payment_type,date&order=date.desc${writeOwnerQS()}`)}
+  catch(e){console.warn("Rebalance check skipped:",e);return true}
+  const last={};for(const a of adjs)if(!last[a.payment_type])last[a.payment_type]=a.date;
+  const lines=[];
+  for(const a of accts){
+    if(!last[a])continue;
+    const back=rows.filter(r=>r.pt===a&&r.date<=last[a]);
+    if(!back.length)continue;
+    const move=-back.reduce((s,r)=>s+r.amt,0);
+    lines.push(`${a}: ${back.length} row${back.length>1?"s":""} dated on or before its ${fmtD(last[a])} balance adjustment (balance moves ${move<0?"-":"+"}${fmtF(Math.abs(move))})`);
+  }
+  if(!lines.length)return true;
+  return confirm(`Some rows are already included in a rebalanced account balance:\n\n${lines.join("\n")}\n\nSaving them counts that money twice unless you rebalance again afterward. Save anyway?`);
 }
 
 async function commitImport(candidates){
@@ -1054,7 +1080,9 @@ function renderEmailReviewTable(container,candidates){
     if(saving)return;
     const appr=candidates.filter(c=>c._status==="approved");
     if(!appr.length)return alert("No approved transactions to save.");
-    saving=true;saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    saving=true;saveBtn.disabled=true;
+    if(!await confirmRebalanceBackdating(candidates)){saving=false;saveBtn.disabled=false;return}
+    saveBtn.textContent="Saving...";
     try{
       const summary=await commitEmailImports(candidates);
       renderEmailReviewTable(container,candidates);
@@ -1186,7 +1214,9 @@ function renderPayslipReviewTable(container,candidates,skippedPages){
     if(saving)return;
     const appr=candidates.filter(c=>c._status==="approved");
     if(!appr.length)return alert("No approved transactions to save.");
-    saving=true;saveBtn.disabled=true;saveBtn.textContent="Saving...";
+    saving=true;saveBtn.disabled=true;
+    if(!await confirmRebalanceBackdating(candidates)){saving=false;saveBtn.disabled=false;return}
+    saveBtn.textContent="Saving...";
     try{
       const summary=await commitPayslipImport(candidates);
       renderPayslipReviewTable(container,candidates,skippedPages);

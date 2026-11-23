@@ -182,6 +182,21 @@ async function findDuplicates(candidates,paymentType){
   }
 }
 
+// Payslip rows used to be dated by import day, so a re-imported stub is matched on
+// account, description, pay period and amount rather than the posting date.
+async function findPayslipDuplicates(candidates){
+  const live=candidates.filter(c=>c._status!=="skipped");
+  if(!live.length)return;
+  const starts=live.map(c=>c.service_start).sort();
+  const pts=[...new Set(live.map(c=>c.payment_type))];
+  const existing=await sb(`transactions?payment_type=in.(${pts.map(p=>encodeURIComponent(`"${p}"`)).join(",")})&service_start=gte.${starts[0]}&service_start=lte.${starts[starts.length-1]}&select=description,amount_usd,payment_type,service_start,service_end${writeOwnerQS()}`);
+  for(const c of live){
+    c._isDuplicate=existing.some(e=>e.payment_type===c.payment_type&&e.description===c.description
+      &&e.service_start===c.service_start&&e.service_end===c.service_end&&Math.abs(e.amount_usd-c.amount_usd)<0.02);
+    if(c._isDuplicate){c._status="skipped";c._skipReason="Duplicate"}
+  }
+}
+
 // Flags transfer rows whose paired leg is already in the ledger (e.g. the other
 // side of an internal Wells Fargo Checking<->Savings move imported earlier, or a
 // withdrawal already logged on the counter-account). The counter-leg posts
@@ -309,8 +324,9 @@ function fallbackCatMap(bankCat){return AMEX_CAT_MAP[bankCat]||CHASE_CAT_MAP[ban
 
 // Where cash is going for a bank row that is money moving, not a purchase.
 // "Cash" for an ATM withdrawal. Null when the row is not that kind of movement.
-function flowDestination(text){
+function flowDestination(text,amount){
   const d=(text||"").toUpperCase();
+  if(/PAYPAL/.test(d)&&!/PURCHASE/.test(d)&&(/RAKUTEN/.test(d)||(/TRANSFER|INST XFER/.test(d)&&(parseFloat(amount)||0)<0)))return "Rakuten";
   if(!d||/FEE|INTEREST/.test(d))return null;
   if(/ATM/.test(d)&&/WITHDRAW|CASH/.test(d))return "Cash";
   if(/CASH\s*(WITHDRAW|ADVANCE)/.test(d))return "Cash";
@@ -322,14 +338,14 @@ function flowDestination(text){
 function promoteMoneyFlows(candidates){
   for(const c of candidates){
     if(c._status==="skipped"||c._isTransfer||c._isCCPayment||c._isBillPay||c._isPayroll||c._isRent||c._reimburse)continue;
-    const to=flowDestination((c._rawDescription||"")+" "+(c.description||""));
+    const to=flowDestination((c._rawDescription||"")+" "+(c.description||""),c.amount_usd);
     if(!to)continue;
     c._isTransfer=true;
     c._transferTo=to;
     c._transferRaw=-(parseFloat(c.amount_usd)||0);
     c.category_id="financial";
     c.ai_confidence="high";
-    c.description=c.description&&!/ATM/i.test(c._rawDescription||"")?c.description:"ATM Withdrawal";
+    c.description=to==="Rakuten"?"Rakuten Payout":(c.description&&!/ATM/i.test(c._rawDescription||"")?c.description:"ATM Withdrawal");
     c.service_start=c.service_end=c.date;
     c.service_days=1;
     c.daily_cost=c.amount_usd;
